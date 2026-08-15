@@ -28,6 +28,7 @@ recorded in [`00-architecture-decisions.md`](00-architecture-decisions.md) — r
 | 12 | [Test plan](12-testing.md) | Test matrix mapped to every MUST/SHOULD requirement |
 | 13 | [Delivery plan](13-delivery-plan.md) | Workstreams, task breakdown, sequencing, week-1 probes, release gate |
 | 14 | [Open questions](14-open-questions.md) | Q-1…Q-16 with owners and deadlines |
+| 15 | [Implementation task plan](15-implementation-tasks.md) | **Live build status** — what is done, what remains, critical path, remaining probes |
 | A | [Meta Cloud API surface](appendix-a-meta-api.md) | Exact requests, payloads and webhook shapes used |
 | B | [Error catalog](appendix-b-error-catalog.md) | Meta error codes → system behaviour → user-facing copy |
 | C | [UUID registry](appendix-c-uuid-registry.md) | Every hand-assigned universal identifier |

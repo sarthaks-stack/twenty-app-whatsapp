@@ -76,23 +76,43 @@ describe('the Meta seam', () => {
   });
 
   /**
-   * `application-config.ts` declares the variables and is their only other
-   * legitimate mention — declaring a secret is not reading one.
+   * Two exceptions, both narrow and both necessary:
+   *
+   *  - `application-config.ts` *declares* the variables. Declaring a secret is
+   *    not reading one.
+   *  - `logger.ts` reads their values to redact them. To replace a secret in a
+   *    log line you must know what it looks like, so the redactor is the one
+   *    module that has to see all of them — which is exactly why it is also the
+   *    only module allowed to write to the console.
    */
-  it('keeps the access token out of every module but the provider', () => {
-    const candidates = productionOutsideProvider.filter(
-      (file) => !file.endsWith('application-config.ts'),
-    );
+  const SECRET_READERS = ['application-config.ts', 'server/logger.ts'];
 
-    expect(offenders(/META_ACCESS_TOKEN/, candidates)).toEqual([]);
+  const withoutSecretReaders = productionOutsideProvider.filter(
+    (file) => !SECRET_READERS.some((allowed) => file.endsWith(allowed)),
+  );
+
+  it('keeps the access token out of every module but the provider', () => {
+    expect(offenders(/META_ACCESS_TOKEN/, withoutSecretReaders)).toEqual([]);
   });
 
   it('keeps the app secret to the provider and the config declaration', () => {
-    const candidates = productionOutsideProvider.filter(
-      (file) => !file.endsWith('application-config.ts'),
+    expect(offenders(/META_APP_SECRET/, withoutSecretReaders)).toEqual([]);
+  });
+
+  /**
+   * The corollary rule. The redactor's licence to read secrets is only safe
+   * while it is the sole writer to the console — anything else logging directly
+   * would bypass it entirely.
+   */
+  it('keeps console output to the logger', () => {
+    const candidates = files.filter(
+      (file) =>
+        !file.endsWith('.test.ts') &&
+        !file.includes('__tests__') &&
+        !file.endsWith('server/logger.ts'),
     );
 
-    expect(offenders(/META_APP_SECRET/, candidates)).toEqual([]);
+    expect(offenders(/\bconsole\.(log|warn|error|info|debug)\s*\(/, candidates)).toEqual([]);
   });
 });
 

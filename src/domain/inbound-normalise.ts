@@ -29,7 +29,12 @@ export type MediaMeta = {
 export type NormalisedInbound = {
   messageType: MessageType;
   body: string | null;
-  payload: unknown | null;
+  /**
+   * Always an object or null, never a bare array: Twenty types every RAW_JSON
+   * column as `Record<string, unknown>`, so a contact card list is stored as
+   * `{ contacts: [...] }`.
+   */
+  payload: Record<string, unknown> | null;
   mediaMeta: MediaMeta | null;
   contextWamid: string | null;
   reactionTargetWamid: string | null;
@@ -214,7 +219,7 @@ export const normaliseInboundMessage = (message: MetaMessage): NormalisedInbound
     ...base,
     messageType: MESSAGE_TYPE.UNSUPPORTED,
     body: reason,
-    payload: message,
+    payload: message as Record<string, unknown>,
     preview: truncatePreview(`${MEDIA_PREVIEW_LABELS.unsupported} · ${reason}`),
   });
 
@@ -274,7 +279,7 @@ export const normaliseInboundMessage = (message: MetaMessage): NormalisedInbound
         ...base,
         messageType,
         body: caption,
-        payload: media ?? null,
+        payload: (media ?? null) as Record<string, unknown> | null,
         mediaMeta: meta,
         isMedia: MEDIA_TYPES.has(type),
         preview: mediaPreview(meta, messageType, trimToNull(media?.caption)),
@@ -292,7 +297,7 @@ export const normaliseInboundMessage = (message: MetaMessage): NormalisedInbound
         ...base,
         messageType: MESSAGE_TYPE.LOCATION,
         body: label,
-        payload: location,
+        payload: location as Record<string, unknown>,
         preview: truncatePreview(`${MEDIA_PREVIEW_LABELS.location} · ${label}`),
       };
     }
@@ -304,7 +309,7 @@ export const normaliseInboundMessage = (message: MetaMessage): NormalisedInbound
         ...base,
         messageType: MESSAGE_TYPE.CONTACTS,
         body: name,
-        payload: message.contacts ?? [],
+        payload: { contacts: message.contacts ?? [] },
         preview: truncatePreview(
           name === null
             ? MEDIA_PREVIEW_LABELS.contacts
@@ -369,7 +374,7 @@ export const normaliseInboundMessage = (message: MetaMessage): NormalisedInbound
         ...base,
         messageType: MESSAGE_TYPE.INTERACTIVE,
         body,
-        payload: interactive,
+        payload: interactive as Record<string, unknown>,
         preview: truncatePreview(body),
       };
     }
@@ -396,7 +401,7 @@ export const normaliseInboundMessage = (message: MetaMessage): NormalisedInbound
         ...base,
         messageType: MESSAGE_TYPE.SYSTEM,
         body,
-        payload: message.system ?? null,
+        payload: (message.system ?? null) as Record<string, unknown> | null,
         preview: truncatePreview(body),
       };
     }

@@ -204,6 +204,10 @@ describe('contacts', () => {
     expect(result.messageType).toBe(MESSAGE_TYPE.CONTACTS);
     expect(result.body).toBe('Ana Silva');
     expect(result.preview).toBe('👤 Contacto · Ana Silva');
+    // Wrapped, not bare: Twenty types RAW_JSON as an object.
+    expect(result.payload).toEqual({
+      contacts: [{ name: { formatted_name: 'Ana Silva', first_name: 'Ana' } }],
+    });
   });
 
   it('survives a card with no name', () => {
@@ -331,5 +335,33 @@ describe('truncatePreview', () => {
     const long = truncatePreview('a'.repeat(200));
     expect(long).toHaveLength(120);
     expect(long.endsWith('…')).toBe(true);
+  });
+});
+
+describe('payload shape', () => {
+  /**
+   * Twenty types every RAW_JSON column as `Record<string, unknown>`, so a bare
+   * array would be rejected at write time — after the message had already been
+   * accepted from Meta.
+   */
+  it('is never a bare array', () => {
+    const cases: MetaMessage[] = [
+      message({ type: 'text', text: { body: 'x' } }),
+      message({ type: 'image', image: { id: '1' } }),
+      message({ type: 'contacts', contacts: [{}] }),
+      message({ type: 'location', location: { latitude: 1, longitude: 2 } }),
+      message({ type: 'reaction', reaction: { emoji: '👍', message_id: 'w' } }),
+      message({ type: 'interactive', interactive: { type: 'nfm_reply' } }),
+      message({ type: 'button', button: { text: 'x' } }),
+      message({ type: 'system', system: { body: 'x' } }),
+      message({ type: 'order' }),
+    ];
+
+    for (const input of cases) {
+      const { payload } = normaliseInboundMessage(input);
+
+      expect(Array.isArray(payload), input.type).toBe(false);
+      expect(payload === null || typeof payload === 'object', input.type).toBe(true);
+    }
   });
 });

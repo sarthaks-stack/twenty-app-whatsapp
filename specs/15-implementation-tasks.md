@@ -134,29 +134,45 @@ Phase 3 is **complete**, with 107 tests. Two deviations worth recording:
 
 ---
 
-## Phase 4 — Server helpers ⬜
+## Phase 4 — Server helpers ✅
 
 Shared infrastructure every logic function depends on. Building these first avoids 28 handlers
 inventing their own conventions.
 
 | # | Module | Status | Requirements |
 |---|---|---|---|
-| 4.1 | `server/clients.ts` — memoised Core/Metadata clients | ⬜ | — |
-| 4.2 | `server/logger.ts` — structured, correlation id, secret redaction | ⬜ | NFR-O1, SEC-1 |
-| 4.3 | `server/metrics.ts` — kv counters | ⬜ | NFR-O2 |
-| 4.4 | `server/batching.ts` — ≤60-record chunks, adaptive backoff | ⬜ | NFR-R2, C-1 |
-| 4.5 | `server/config.ts` — account field → app variable → default | ⬜ | NFR-M1 |
-| 4.6 | `server/auth.ts` — `requireCaller`, `requireRole` | ⬜ | SEC-5 |
-| 4.7 | `server/repositories/*` — typed CRUD per object | ⬜ | — |
-| 4.8 | `server/matching.ts` — person matching, auto-create, needs-review | ⬜ | FR-CID-3, FR-CID-5 |
-| 4.9 | `server/threads.ts` — `upsertThread`, lifecycle, assignment | ⬜ | FR-THR-1…4 |
-| 4.10 | `server/consent.ts` — `setConsent` writing field + event atomically | ⬜ | FR-CON-1 |
-| 4.11 | `server/timeline.ts` — activity writer with `WA_TIMELINE_MODE` | ⬜ | FR-TL-1, D-9 |
-| 4.12 | `server/schedule.ts` — cursor read, slot assignment, `enqueueJob` | ⬜ | D-5 |
-| 4.13 | `server/audit.ts` | ⬜ | SEC-10, SEC-12 |
+| 4.1 | `server/clients.ts` — memoised Core/Metadata clients | ✅ | — |
+| 4.2 | `server/logger.ts` — structured, correlation id, secret redaction | ✅ | NFR-O1, SEC-1 |
+| 4.3 | `server/metrics.ts` — kv counters | ✅ | NFR-O2 |
+| 4.4 | `server/batching.ts` — ≤60-record chunks, adaptive backoff | ✅ | NFR-R2, C-1 |
+| 4.5 | `server/config.ts` — account field → app variable → default | ✅ | NFR-M1 |
+| 4.6 | `server/auth.ts` — `requireCaller`, `requireRole` | 🚫 | SEC-5 |
+| 4.7 | `server/repositories/*` — typed CRUD per object | ✅ | — |
+| 4.8 | `server/matching.ts` — person matching, auto-create, needs-review | ✅ | FR-CID-3, FR-CID-5 |
+| 4.9 | `server/threads.ts` — `upsertThread`, lifecycle, assignment | ✅ | FR-THR-1…4 |
+| 4.10 | `server/consent.ts` — `setConsent` writing field + event atomically | ✅ | FR-CON-1 |
+| 4.11 | `server/timeline.ts` — activity writer with `WA_TIMELINE_MODE` | ✅ | FR-TL-1, D-9 |
+| 4.12 | `server/schedule.ts` — cursor read, slot assignment, `enqueueJob` | 🔨 | D-5 |
+| 4.13 | `server/audit.ts` | ✅ | SEC-10, SEC-12 |
 
-**~5 days.** 4.8 depends on probe **P-5** (can the Core API filter inside `additionalPhones`?);
-the fallback is a derived indexed array field maintained by a database-event function.
+**Probe P-5 is answered: yes.** The generated schema exposes
+`PhonesFilterInput.additionalPhones` as a `RawJsonFilter` with a `like` operator, so the
+two-pass matcher is built as specified and the derived indexed-array fallback is **not needed**.
+The `like` pass is a substring scan over serialised JSON, so it runs only when the indexed
+primary-phone pass finds nothing.
+
+Two items are not in this phase's commit:
+
+- **4.6 `auth.ts`** moves to the route phase. Every function built so far is a queue worker or a
+  webhook target with no `userWorkspaceId` to check; writing `requireRole` before there is a
+  caller to check would be guessing at its shape.
+- **4.12 `schedule.ts`** is partly built. `jobs.ts` covers enqueueing with a retry policy and a
+  loud failure; lane cursors and slot assignment belong with the outbound sender that reads them.
+
+Along the way this phase added a check nobody asked for and everybody needed:
+`schema-enums.test.ts` compares all 19 SELECT enums in `domain/constants.ts` against the enums
+the *server* generated. A renamed option or an un-applied edit typechecks perfectly and fails at
+runtime on a real customer message; now it fails at `yarn test`.
 
 ---
 

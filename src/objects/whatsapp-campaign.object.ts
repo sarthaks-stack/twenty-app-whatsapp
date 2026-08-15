@@ -1,0 +1,250 @@
+import { defineObject, FieldType } from 'twenty-sdk/define';
+
+import { CAMPAIGN_NAME, fieldId } from 'src/constants/field-identifiers';
+import { OBJ_CAMPAIGN } from 'src/constants/universal-identifiers';
+
+const f = (name: string) => fieldId(OBJ_CAMPAIGN, name);
+
+/**
+ * A bulk template send (FR-CAM-1…14).
+ *
+ * Two statuses go beyond the TRD's list. `snapshotting` covers the minutes a
+ * 100 000-person audience takes to materialise — without it the UI cannot tell
+ * "still building" from "empty". `ready` is a snapshot reviewed in pre-flight
+ * but not yet confirmed, which makes FR-CAM-6's explicit confirmation a state
+ * transition rather than a UI gesture.
+ *
+ * The owner relation is named `owner`, not `createdBy`: every object already has
+ * a platform `createdBy` ACTOR field and the names would collide on sync.
+ */
+export default defineObject({
+  universalIdentifier: OBJ_CAMPAIGN,
+  nameSingular: 'whatsappCampaign',
+  namePlural: 'whatsappCampaigns',
+  labelSingular: 'WhatsApp campaign',
+  labelPlural: 'WhatsApp campaigns',
+  description: 'A bulk WhatsApp template send to a snapshotted audience',
+  icon: 'IconSpeakerphone',
+  labelIdentifierFieldMetadataUniversalIdentifier: CAMPAIGN_NAME,
+  fields: [
+    {
+      universalIdentifier: CAMPAIGN_NAME,
+      name: 'name',
+      label: 'Name',
+      icon: 'IconSpeakerphone',
+      type: FieldType.TEXT,
+      defaultValue: "''",
+    },
+    {
+      universalIdentifier: f('status'),
+      name: 'status',
+      label: 'Status',
+      icon: 'IconProgress',
+      type: FieldType.SELECT,
+      defaultValue: "'DRAFT'",
+      options: [
+        { value: 'DRAFT', label: 'Draft', position: 0, color: 'gray' },
+        { value: 'SNAPSHOTTING', label: 'Building audience', position: 1, color: 'sky' },
+        { value: 'READY', label: 'Ready', position: 2, color: 'blue' },
+        { value: 'SCHEDULED', label: 'Scheduled', position: 3, color: 'iris' },
+        { value: 'RUNNING', label: 'Running', position: 4, color: 'green' },
+        { value: 'PAUSED', label: 'Paused', position: 5, color: 'orange' },
+        { value: 'TIER_WAITING', label: 'Waiting for tier', position: 6, color: 'amber' },
+        { value: 'COMPLETED', label: 'Completed', position: 7, color: 'turquoise' },
+        { value: 'CANCELLED', label: 'Cancelled', position: 8, color: 'gray' },
+        { value: 'FAILED', label: 'Failed', position: 9, color: 'red' },
+      ],
+    },
+    {
+      universalIdentifier: f('statusReason'),
+      name: 'statusReason',
+      label: 'Status reason',
+      description: 'circuit_breaker, quality_red, tier_exhausted, template_unavailable, account_error',
+      icon: 'IconInfoCircle',
+      type: FieldType.TEXT,
+      isNullable: true,
+    },
+    {
+      universalIdentifier: f('scheduledAt'),
+      name: 'scheduledAt',
+      label: 'Scheduled for',
+      description: 'Entered in Africa/Luanda by the UI, stored UTC',
+      icon: 'IconCalendarClock',
+      type: FieldType.DATE_TIME,
+      isNullable: true,
+    },
+    {
+      universalIdentifier: f('startedAt'),
+      name: 'startedAt',
+      label: 'Started at',
+      icon: 'IconPlayerPlay',
+      type: FieldType.DATE_TIME,
+      isNullable: true,
+    },
+    {
+      universalIdentifier: f('completedAt'),
+      name: 'completedAt',
+      label: 'Completed at',
+      icon: 'IconFlagCheck',
+      type: FieldType.DATE_TIME,
+      isNullable: true,
+    },
+    {
+      universalIdentifier: f('audienceDefinition'),
+      name: 'audienceDefinition',
+      label: 'Audience definition',
+      description: '{ kind: view | messageList | manual, viewId?, messageListId?, personIds?, capturedAt }',
+      icon: 'IconUsers',
+      type: FieldType.RAW_JSON,
+      isNullable: true,
+    },
+    {
+      universalIdentifier: f('variableMapping'),
+      name: 'variableMapping',
+      label: 'Variable mapping',
+      description: 'Placeholder → field path, static value or fallback (FR-CAM-4)',
+      icon: 'IconVariable',
+      type: FieldType.RAW_JSON,
+      isNullable: true,
+    },
+    {
+      universalIdentifier: f('recipientCount'),
+      name: 'recipientCount',
+      label: 'Recipients',
+      description: 'Post-exclusion: what will actually be sent',
+      icon: 'IconUsers',
+      type: FieldType.NUMBER,
+      defaultValue: 0,
+    },
+    {
+      universalIdentifier: f('excludedCount'),
+      name: 'excludedCount',
+      label: 'Excluded',
+      icon: 'IconUserOff',
+      type: FieldType.NUMBER,
+      defaultValue: 0,
+    },
+    {
+      universalIdentifier: f('exclusionBreakdown'),
+      name: 'exclusionBreakdown',
+      label: 'Exclusion breakdown',
+      description: 'Counts by reason, shown in pre-flight (FR-CAM-6)',
+      icon: 'IconChartPie',
+      type: FieldType.RAW_JSON,
+      isNullable: true,
+    },
+    {
+      universalIdentifier: f('queuedCount'),
+      name: 'queuedCount',
+      label: 'Queued',
+      icon: 'IconClock',
+      type: FieldType.NUMBER,
+      defaultValue: 0,
+    },
+    {
+      universalIdentifier: f('sentCount'),
+      name: 'sentCount',
+      label: 'Sent',
+      icon: 'IconSend',
+      type: FieldType.NUMBER,
+      defaultValue: 0,
+    },
+    {
+      universalIdentifier: f('deliveredCount'),
+      name: 'deliveredCount',
+      label: 'Delivered',
+      icon: 'IconChecks',
+      type: FieldType.NUMBER,
+      defaultValue: 0,
+    },
+    {
+      universalIdentifier: f('readCount'),
+      name: 'readCount',
+      label: 'Read',
+      description:
+        'Under-reports: contacts may disable read receipts, in which case read never arrives. Present the rate as "of contacts with read receipts enabled" (specs/03 §5.0)',
+      icon: 'IconEyeCheck',
+      type: FieldType.NUMBER,
+      defaultValue: 0,
+    },
+    {
+      universalIdentifier: f('failedCount'),
+      name: 'failedCount',
+      label: 'Failed',
+      icon: 'IconAlertTriangle',
+      type: FieldType.NUMBER,
+      defaultValue: 0,
+    },
+    {
+      universalIdentifier: f('skippedCount'),
+      name: 'skippedCount',
+      label: 'Skipped',
+      description: 'Non-retryable per-user caps such as Meta error 131049',
+      icon: 'IconPlayerSkipForward',
+      type: FieldType.NUMBER,
+      defaultValue: 0,
+    },
+    {
+      universalIdentifier: f('respondedCount'),
+      name: 'respondedCount',
+      label: 'Responded',
+      icon: 'IconMessageReply',
+      type: FieldType.NUMBER,
+      defaultValue: 0,
+    },
+    {
+      universalIdentifier: f('estimatedCostUsd'),
+      name: 'estimatedCostUsd',
+      label: 'Estimated cost (USD)',
+      icon: 'IconCurrencyDollar',
+      type: FieldType.NUMBER,
+      isNullable: true,
+    },
+    {
+      universalIdentifier: f('actualCostUsd'),
+      name: 'actualCostUsd',
+      label: 'Actual cost (USD)',
+      description: 'Accumulates on delivered only — matching how Meta bills',
+      icon: 'IconCurrencyDollar',
+      type: FieldType.NUMBER,
+      isNullable: true,
+    },
+    {
+      universalIdentifier: f('maxFailureRatePct'),
+      name: 'maxFailureRatePct',
+      label: 'Max failure rate (%)',
+      description: 'Circuit-breaker threshold (AR-22)',
+      icon: 'IconAlertOctagon',
+      type: FieldType.NUMBER,
+      defaultValue: 10,
+    },
+    {
+      universalIdentifier: f('pacingObserved'),
+      name: 'pacingObserved',
+      label: 'Meta pacing observed',
+      description:
+        'Meta intentionally slows large marketing batches to gather early engagement signals. Surfaced as a state, not an error (FR-CAM-11)',
+      icon: 'IconHourglassLow',
+      type: FieldType.BOOLEAN,
+      defaultValue: false,
+    },
+    {
+      universalIdentifier: f('lastRunTickAt'),
+      name: 'lastRunTickAt',
+      label: 'Last runner tick',
+      icon: 'IconHeartbeat',
+      type: FieldType.DATE_TIME,
+      isNullable: true,
+    },
+    {
+      universalIdentifier: f('testRecipientPhones'),
+      name: 'testRecipientPhones',
+      label: 'Test recipients',
+      description: 'Internal numbers for a pre-launch test send (FR-CAM-12)',
+      icon: 'IconFlask',
+      type: FieldType.ARRAY,
+      isNullable: true,
+      universalSettings: { maxNumberOfValues: 10 },
+    },
+  ],
+});

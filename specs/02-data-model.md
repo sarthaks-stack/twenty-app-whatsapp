@@ -101,7 +101,7 @@ ever written by the app (a hand-edited message record would desynchronise from M
 |---|---|---|---|---|
 | `wamid` | TEXT | Y | — | `isUnique: true`. Null between `queued` and `accepted` for outbound. |
 | `direction` | SELECT | N | — | `inbound` / `outbound`. |
-| `type` | SELECT | N | `"'text'"` | `text`, `image`, `audio`, `video`, `document`, `sticker`, `location`, `contacts`, `reaction`, `interactive`, `button_reply`, `list_reply`, `template`, `system`, `unsupported`. |
+| `messageType` | SELECT | N | `"'TEXT'"` | `text`, `image`, `audio`, `video`, `document`, `sticker`, `location`, `contacts`, `reaction`, `interactive`, `button_reply`, `list_reply`, `template`, `system`, `unsupported`. |
 | `body` | TEXT | Y | — | Text or caption; for `unsupported`, the placeholder string (FR-IN-1). |
 | `payload` | RAW_JSON | Y | — | Full typed payload: coordinates, contact cards, interactive structures, reaction emoji. |
 | `status` | SELECT | N | `"'queued'"` | `queued` / `accepted` / `sent` / `delivered` / `read` / `played` / `failed`. Monotonic (AR-9). Inbound messages are created directly at `delivered`. |
@@ -281,7 +281,7 @@ Raw log, replay surface and debug record (AR-7, §12.4). `isUIEditable: false`.
 | Field | Type | Null | Default | Notes |
 |---|---|---|---|---|
 | `dedupKey` | TEXT | N | — | `isUnique: true`. See §8.1. |
-| `field` | TEXT | N | — | `messages`, `message_template_status_update`, … |
+| `webhookField` | TEXT | N | — | `messages`, `message_template_status_update`, … (`field` is reserved) |
 | `payload` | RAW_JSON | N | — | The single `changes[]` element, plus `{ _entryId, _receivedAt }`. |
 | `processingStatus` | SELECT | N | `"'received'"` | `received` / `processed` / `failed` / `skipped_duplicate` / `unclaimed`. |
 | `error` | TEXT | Y | — | Processor failure detail for replay. |
@@ -396,3 +396,32 @@ At the 50 000 messages/day design point:
 
 The webhook event table is the real growth risk and the reason `WA_RETENTION_WEBHOOK_EVENT_DAYS`
 is a first-class setting with a hard floor of 7 days.
+
+
+---
+
+## 13. Platform constraints discovered on apply
+
+Verified against a live Twenty v2.31.0 on 2026-08-15. `yarn twenty dev:build` and
+`tsgo` accept all of the following; only `yarn twenty plan` against a running server rejects
+them. **A green typecheck is not evidence that a manifest is valid** — the first apply of this
+model produced 90 errors that no local check surfaced.
+
+| Constraint | Symptom | Resolution |
+|---|---|---|
+| SELECT option `value` must be `UPPER_SNAKE_CASE` | `INVALID_FIELD_INPUT: Value must be in UPPER_CASE and follow snake_case` | every option value and its `defaultValue` uppercased. The tables above show the semantic value; the stored value is its upper-snake form (`open` → `OPEN`, `needs_review` → `NEEDS_REVIEW`) |
+| `field` and `type` are reserved field names | `INVALID_FIELD_INPUT: This name is reserved… the system will add "Custom" suffix` | renamed to `webhookField` and `messageType`. Silently accepting the suffix would have produced `typeCustom` in the API |
+| A unique column cannot carry a non-null default | `INDEX_FIELD_INVALID_DEFAULT_VALUE: Unique index cannot be created for field … of type TEXT` | `phoneNumberId` and `dedupKey` are `isNullable: true, defaultValue: null` with `isUnique: true`. Every row defaulting to `''` would collide on the second insert |
+| `ARRAY` **and** `FILES` require `universalSettings.maxNumberOfValues` (1–60) | `maxNumberOfValues must be defined in settings` | `assignmentMemberIds` 60, `testRecipientPhones` 10, `mediaFile` 1 |
+| The label identifier must be TEXT-compatible | `INVALID_OBJECT_INPUT: labelIdentifierFieldMetadataUniversalIdentifier validation failed: field type not compatible` | a SELECT cannot label a record; `whatsappCampaignRecipient` uses `resolvedPhone`, `whatsappConsentEvent` uses `wordingShown` |
+| Entities are discovered by **default export**, one per file | `indexes: 0` in the built manifest, no error anywhere | one file per index under `src/indexes/`. Several `defineIndex` calls sharing a module are silently dropped |
+
+The last one is the most dangerous: it fails silently in both the build and the typecheck, and the
+only signal is a count in `.twenty/output/manifest.json`. Inspecting the built manifest is
+therefore part of the definition of done for any metadata change, not an optional check.
+
+### Consequence for application code
+
+Stored SELECT values are upper-snake. Server-side code compares against constants
+(`THREAD_STATUS.OPEN`), never string literals, and the front end maps them to localised copy —
+so the wire format is stated once and the pt/en labels stay a UI concern (specs/01 §7).

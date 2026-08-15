@@ -422,8 +422,15 @@ renders a "Retry download" affordance that calls the worker with `force: true` �
 > **Real deliveries inline the media URL.** Confirmed by capture on 2026-08-15: an inbound
 > voice note arrived with `audio.url` already populated —
 > `https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=…&ext=…&hash=…` — carrying its
-> own expiry (`ext`, ~10 minutes observed). Meta's documentation describes only the
+> own expiry in `ext`, decimal epoch seconds. Meta's documentation describes only the
 > `GET /{media_id}` resolution step, so the spec originally assumed a mandatory round-trip.
+>
+> **The URL lives 5 minutes, not 10.** Measured on that capture: message timestamp `1786809498`,
+> `ext` `1786809799` — 301 seconds. A queue backlog of six minutes is therefore enough to make
+> every inline URL dead on arrival, which is why the `GET /{media_id}` fallback is mandatory
+> rather than an optimisation and why `parseInlineUrlExpiry` refuses an implausibly distant value:
+> an over-long expiry is the dangerous direction, since it would make the worker trust a dead URL
+> and skip the fallback entirely.
 >
 > The worker therefore uses the inlined URL when it is present and the job is running promptly,
 > and falls back to `GET /{media_id}` otherwise. The fallback is not optional: the inline URL

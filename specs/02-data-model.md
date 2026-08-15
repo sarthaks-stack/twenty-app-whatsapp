@@ -301,12 +301,33 @@ reprocess history — retention below 7 days must be rejected by validation.
 |---|---|
 | inbound message | `msg:{wamid}` |
 | status event | `st:{wamid}:{status}` (a `failed` status also folds in the error code: `st:{wamid}:failed:{code}`) |
-| template status/quality | `tpl:{message_template_id}:{event}:{timestamp}` |
-| account / phone quality | `acct:{waba_id or phone_number_id}:{field}:{sha256(value)[0..16]}` |
-| anything else | `raw:{sha256(field + JSON.stringify(value))}` |
+| account error block | `acct-err:{phone_number_id or waba_id}:{code}:{entry.time}` |
+| template status | `tpl:{message_template_id}:status:{event}:{entry.time}` |
+| template quality | `tpl:{message_template_id}:quality:{new_quality_score}:{entry.time}` |
+| template components | `tpl:{message_template_id}:components:{entry.time}:{sha256(value)[0..8]}` |
+| account / phone quality | `acct:{phone_number_id or waba_id}:{field}:{sha256(entry.time + value)[0..16]}` |
+| anything else | `raw:{sha256(field + entry.time + value)[0..32]}` |
+| a change holding **more than one** item | `multi:{sha256(item keys, in order)[0..32]}` |
 
 Status keys deliberately include the status, so the legitimate `sent → delivered → read`
 sequence produces three rows while a genuine duplicate produces one (AR-8).
+
+Two rules that the first draft of this table got wrong, both corrected during implementation:
+
+- **A change can hold many items.** [03 §3](03-webhook-ingestion.md#3-wa-webhook-ingest--raw-log-and-fan-out)
+  writes one row per `changes[]` element, but Meta batches statuses freely, so the per-item keys
+  above only describe the single-item case. Multi-item changes get a digest over their ordered
+  item keys; per-item idempotency is not lost, it is enforced downstream where it belongs
+  (`wa-inbound-processor` checks `messageExists(wamid)`, `advanceStatus` is monotonic).
+- **Template and account keys must include `entry.time`.** Those payloads carry no timestamp of
+  their own — `account_review_update` is the single field `{ decision: 'APPROVED' }` and nothing
+  else, confirmed against Meta's own dashboard samples. Hashing only the value collapses a phone
+  number oscillating GREEN → YELLOW → GREEN → YELLOW into two rows and silently discards the
+  rest. Meta replays retries byte-for-byte, `entry.time` included, so including it costs no
+  duplicate suppression.
+
+Canonicalisation sorts object keys before hashing, so a key stable by observation becomes a key
+stable by construction.
 
 ---
 

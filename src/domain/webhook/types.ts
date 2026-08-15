@@ -56,6 +56,8 @@ export type MetaMessage = {
   context?: { id?: string; from?: string; forwarded?: boolean };
   referral?: MetaReferral;
   errors?: MetaError[];
+  order?: unknown;
+  system?: { body?: string; type?: string };
 };
 
 export type MetaMediaPayload = {
@@ -63,6 +65,15 @@ export type MetaMediaPayload = {
   mime_type?: string;
   sha256?: string;
   caption?: string;
+  /**
+   * Real deliveries inline a short-lived download URL that Meta's docs do not
+   * mention (specs/03 §8). Observed 2026-08-15 on a voice note: a
+   * `lookaside.fbsbx.com` link whose `ext` query parameter expired 301 s after
+   * the message timestamp. It carries a `hash` access token, which is why the
+   * capture harness strips it before a fixture is committed.
+   */
+  url?: string;
+  file_size?: number | string;
 };
 
 export type MetaStatusValue =

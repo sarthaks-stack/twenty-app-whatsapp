@@ -75,7 +75,7 @@ API — 8 objects active, 260 fields, 5 Person and 4 workspaceMember extensions.
 
 ---
 
-## Phase 2 — Domain logic ✅ 🔨 (pure, no SDK)
+## Phase 2 — Domain logic ✅ (pure, no SDK)
 
 | # | Module | Status | Requirements |
 |---|---|---|---|
@@ -89,14 +89,18 @@ API — 8 objects active, 260 fields, 5 Person and 4 workspaceMember extensions.
 | 2.8 | `campaign/tier-budget.ts` | ✅ | AR-21 |
 | 2.9 | `campaign/guardrails.ts` — breaker, cost, pacing detection | ✅ | AR-22, FR-CAM-11 |
 | 2.10 | `webhook/types.ts`, `classify-change.ts`, `redact.ts`, `sample-delivery.ts` | ✅ | D-2, specs/12 §4 |
-| 2.11 | `dedup-key.ts` | ⬜ | AR-8, specs/02 §8.1 |
-| 2.12 | `inbound-normalise.ts` — Meta message → stored shape | ⬜ | FR-IN-1, specs/03 §4.1 |
-| 2.13 | `template-spec.ts` — `deriveVariableSpec`, `assessSupport` | ⬜ | FR-TPL-3, FR-TPL-4 |
-| 2.14 | `template-render.ts` — `{{n}}` binding, parameter sanitisation | ⬜ | FR-TPL-3, FR-CAM-4 |
-| 2.15 | `campaign/variable-resolution.ts` — allow-listed field paths | ⬜ | FR-CAM-4, specs/06 §5 |
+| 2.11 | `dedup-key.ts` | ✅ | AR-8, specs/02 §8.1 |
+| 2.12 | `inbound-normalise.ts` — Meta message → stored shape | ✅ | FR-IN-1, specs/03 §4.1 |
+| 2.13 | `template-spec.ts` — `deriveVariableSpec`, `assessSupport` | ✅ | FR-TPL-3, FR-TPL-4 |
+| 2.14 | `template-render.ts` — `{{n}}` binding, parameter sanitisation | ✅ | FR-TPL-3, FR-CAM-4 |
+| 2.15 | `campaign/variable-resolution.ts` — allow-listed field paths | ✅ | FR-CAM-4, specs/06 §5 |
 
-2.11–2.15 are pure and testable without a server; they belong with the rest of this phase and
-should be finished before the logic functions that consume them. **~2 days.**
+Phase 2 is **complete**. 2.11–2.15 landed with 115 unit tests plus a fixture-conformance suite
+that replays all 33 recorded deliveries through `buildDedupKey`, `classifyChange` and
+`normaliseInboundMessage` — the only kind of test that catches a field present in the
+documentation and absent in reality. Three spec corrections came out of it: multi-item dedup keys
+and `entry.time` (02 §8.1), the inline media URL's real 5-minute life (03 §8), and two added
+unsupported-template reasons (06 §2).
 
 ---
 

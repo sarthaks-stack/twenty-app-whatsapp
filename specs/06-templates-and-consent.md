@@ -64,7 +64,17 @@ duplicate the rules; it is done once at sync and stored.
 
 `assessSupport` marks a template `isUsableInCrm: false` with a reason for component types the CRM
 cannot fill correctly (FR-TPL-4) — currently `FLOW` buttons, `CAROUSEL`, `LIMITED_TIME_OFFER`,
-`CATALOG`/`MPM`, `COPY_CODE` (authentication) and `OTP` templates. Those templates still sync and
+`CATALOG`/`MPM`, `COPY_CODE` (authentication), `OTP` and `VOICE_CALL` buttons, plus two added
+during implementation:
+
+- **`LOCATION_HEADER`** — a location header takes a `{type:'location', location:{latitude,…}}`
+  parameter and the §5 allow-list has no coordinate source, so the CRM cannot fill it and every
+  send would fail. Failing closed here is exactly what the mechanism is for.
+- **`MIXED_PARAMETER_STYLES`** — Meta rejects a template mixing `{{1}}` and `{{name}}`, but a
+  synced record can still carry both if a component was edited. The parameter array would be
+  built one way and validated the other, so it is refused rather than half-supported.
+
+Those templates still sync and
 remain visible to admins with an explanation; they simply cannot be selected by a rep or a
 campaign. **Silent breakage is the failure mode being designed out**: an unsupported template
 that looked selectable would fail at Meta for every recipient.

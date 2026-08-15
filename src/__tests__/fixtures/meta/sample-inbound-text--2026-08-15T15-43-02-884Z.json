@@ -1,0 +1,60 @@
+{
+  "capturedAt": "2026-08-15T15:43:02.885Z",
+  "synthetic": false,
+  "isMetaDashboardSample": true,
+  "note": "Meta's dashboard Test payload. Genuinely signed, but the wamid, phone_number_id and timestamp are fabricated — do not use as a message fixture.",
+  "slugs": [
+    "sample-inbound-text"
+  ],
+  "fields": [
+    "messages"
+  ],
+  "kinds": [
+    "inbound_message"
+  ],
+  "headers": {
+    "content-type": "application/json",
+    "user-agent": "facebookexternalua"
+  },
+  "body": {
+    "object": "whatsapp_business_account",
+    "entry": [
+      {
+        "id": "0",
+        "changes": [
+          {
+            "field": "messages",
+            "value": {
+              "messaging_product": "whatsapp",
+              "metadata": {
+                "display_phone_number": "244933203397",
+                "phone_number_id": "123456123"
+              },
+              "contacts": [
+                {
+                  "profile": {
+                    "name": "Test Contact A836"
+                  },
+                  "wa_id": "244931788821",
+                  "user_id": "US.9553510798515186"
+                }
+              ],
+              "messages": [
+                {
+                  "id": "ABGGFlA5Fpa",
+                  "timestamp": "1504902988",
+                  "from": "244931788821",
+                  "from_user_id": "US.9553510798515186",
+                  "type": "text",
+                  "text": {
+                    "body": "this is a text message"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

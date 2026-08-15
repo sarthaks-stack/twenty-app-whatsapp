@@ -1,0 +1,40 @@
+{
+  "capturedAt": "2026-08-15T16:28:37.354Z",
+  "synthetic": false,
+  "isMetaDashboardSample": true,
+  "note": "Meta's dashboard Test payload. Genuinely signed, but the wamid, phone_number_id and timestamp are fabricated — do not use as a message fixture.",
+  "slugs": [
+    "sample-phone-quality-onboarding"
+  ],
+  "fields": [
+    "phone_number_quality_update"
+  ],
+  "kinds": [
+    "phone_quality"
+  ],
+  "headers": {
+    "content-type": "application/json",
+    "user-agent": "Webhooks/1.0 (https://fb.me/webhooks)"
+  },
+  "body": {
+    "entry": [
+      {
+        "id": "0",
+        "time": 1786811317,
+        "changes": [
+          {
+            "field": "phone_number_quality_update",
+            "value": {
+              "display_phone_number": "244933203397",
+              "event": "ONBOARDING",
+              "current_limit": "TIER_250",
+              "old_limit": "TIER_NOT_SET",
+              "max_daily_conversations_per_business": "TIER_250"
+            }
+          }
+        ]
+      }
+    ],
+    "object": "whatsapp_business_account"
+  }
+}

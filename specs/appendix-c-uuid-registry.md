@@ -1,0 +1,153 @@
+# Appendix C — Universal identifier registry
+
+Implements AR-4 and D-11.
+
+> **These values are permanent.** Changing one after installation orphans production data:
+> Twenty matches manifest entities to existing metadata by `universalIdentifier`. A changed
+> object identifier creates a second, empty object; a changed logic-function identifier changes
+> the webhook callback URL and silently breaks ingestion.
+
+All values below are UUID v4, generated once for this specification. They belong in
+`src/constants/universal-identifiers.ts` exactly as written.
+
+**Field identifiers are not listed** — they are derived at build time with
+`getFieldUniversalIdentifier({ applicationUniversalIdentifier, objectUniversalIdentifier, name })`,
+which produces a deterministic UUID v5 (01 §3). Consequence: a field **rename is a migration**,
+never an in-place edit.
+
+---
+
+## Application (existing, from the scaffold — do not change)
+
+| Constant | Value |
+|---|---|
+| `APPLICATION_UNIVERSAL_IDENTIFIER` | `c2c78378-ef25-465b-8aec-811dd72294e2` |
+| `DEFAULT_ROLE_UNIVERSAL_IDENTIFIER` | `dc3b8f39-06c0-4b60-b53d-0dabc4fe6046` |
+
+The scaffolded `MAIN_PAGE_*` identifiers are removed together with `src/front-components/main-page.tsx`,
+`src/page-layouts/main-page.page-layout.ts` and `src/navigation-menu-items/main-page.navigation-menu-item.ts`
+in task A1. Removing them before the first install avoids leaving a dead "Twenty whatsapp"
+placeholder page in the sidebar.
+
+## Objects
+
+| Constant | Value | Object |
+|---|---|---|
+| `OBJ_ACCOUNT` | `cd160140-588c-4228-a5b2-bc4eacd98c7a` | `whatsappAccount` |
+| `OBJ_THREAD` | `9a056cfe-e761-4f52-a108-dbd4768cb649` | `whatsappThread` |
+| `OBJ_MESSAGE` | `ba252191-22d5-40f4-b742-8b903722578a` | `whatsappMessage` |
+| `OBJ_TEMPLATE` | `ba47db24-593a-47c1-8ca3-5b4300296060` | `whatsappTemplate` |
+| `OBJ_CONSENT_EVENT` | `3800b122-6d3c-4a18-9511-21c69885bd5e` | `whatsappConsentEvent` |
+| `OBJ_CAMPAIGN` | `4ce9aed9-ea3c-44b6-9c32-1f2ea78f1dde` | `whatsappCampaign` |
+| `OBJ_CAMPAIGN_RECIPIENT` | `23d2ea06-96ce-464f-a26a-57f7ce3f719a` | `whatsappCampaignRecipient` |
+| `OBJ_WEBHOOK_EVENT` | `1df82127-1cf2-472c-9eee-968c233eff48` | `whatsappWebhookEvent` |
+
+## Logic functions
+
+| Constant | Value | Trigger |
+|---|---|---|
+| `LF_WEBHOOK_RESOLVER` | `bb76f114-7843-4a09-af64-9ceca78479cd` | serverRoute — **this UUID is the Meta callback URL** |
+| `LF_WEBHOOK_VERIFY` | `5f0a6d21-9c34-4bd0-9a4e-7c1f0b3d8e42` | httpRoute `GET /s/whatsapp/verify` |
+| `LF_WEBHOOK_INGEST` | `f0ea2b51-fee4-48f5-be82-ab53f17084d4` | dispatch target |
+| `LF_INBOUND_PROCESSOR` | `465dc426-fb48-46c8-9617-3005c9d3126b` | queued |
+| `LF_STATUS_PROCESSOR` | `2368666b-845f-45d5-8a36-c47f5d938aa9` | queued |
+| `LF_TEMPLATE_EVENT` | `0cfb67ed-bf67-4d79-9426-b89881a81bdb` | queued |
+| `LF_ACCOUNT_EVENT` | `32308b5c-2f63-400d-bd63-36eb92c5ea77` | queued |
+| `LF_MEDIA_WORKER` | `411818b2-ddfb-417b-8935-950eb5e25d91` | queued |
+| `LF_OUTBOUND_SENDER` | `317c4b9a-8a01-4813-b085-9874b5502457` | queued |
+| `LF_SEND_MESSAGE_ROUTE` | `7dfb20e7-f1bc-4a1a-8dfb-a8106007f31a` | httpRoute `POST /s/whatsapp/send` |
+| `LF_SEND_TEMPLATE_ACTION` | `eae099e6-aa2a-4d17-ab28-46ff3ab7b2e7` | workflowAction |
+| `LF_TEMPLATE_SYNC` | `4640b582-2185-4c2b-95f0-af63a52cf893` | cron `0 */6 * * *` + invoked |
+| `LF_WINDOW_SWEEPER` | `d673bc2e-a865-42c5-a230-48e213e37c95` | cron `*/15 * * * *` |
+| `LF_HEALTH_CHECK` | `841025d1-5a05-4a12-9180-753d7f7f5292` | cron `0 * * * *` |
+| `LF_CAMPAIGN_SNAPSHOT` | `e0fdfbaf-cf80-4390-9252-d8c64c1cad20` | queued, self-requeuing |
+| `LF_CAMPAIGN_RUNNER` | `eb3bac37-7607-4a51-bdf9-71064a8fe765` | cron `* * * * *` |
+| `LF_CAMPAIGN_CONTROL` | `a6f8c3d0-5ce8-4ca4-ac04-75606c255ad0` | httpRoute `POST /s/whatsapp/campaign` |
+| `LF_ACCOUNT_ADMIN_ROUTE` | `a0ce5bf6-0461-476a-9d99-52f6fde6019e` | httpRoute `POST /s/whatsapp/account` |
+| `LF_THREAD_ACTIONS_ROUTE` | `a34163dd-e1f2-4b44-8fcf-47f8c5dec37e` | httpRoute `POST /s/whatsapp/thread` |
+| `LF_CONSENT_ROUTE` | `ea75ba39-8fde-4559-bb51-81a12ee67b14` | httpRoute `POST /s/whatsapp/consent` |
+| `LF_INBOX_FEED_ROUTE` | `75d66009-e7ba-473b-9995-08abe6fe2cbd` | httpRoute `GET /s/whatsapp/feed` |
+| `LF_STATS_ROLLUP` | `a570be45-9bd2-491f-9405-6e1c681cf67f` | cron `* * * * *` (30 s effective via two-phase fold) |
+| `LF_RETENTION_PURGE` | `9f112ebd-68c1-478f-956b-285333a41e12` | cron `0 3 * * *` |
+| `LF_WEBHOOK_REPLAY_ROUTE` | `416e05c5-968a-462a-b0b8-48cc34c63d7f` | httpRoute `POST /s/whatsapp/replay` |
+| `LF_CONSENT_KEYWORD` | `c8e4a7b6-1d52-4f39-8a07-2b6e5d90c134` | queued |
+| `LF_TEMPLATE_SUBMIT` | `7b31c0da-6e48-4a2f-9d15-3ac8e2f47b90` | httpRoute `POST /s/whatsapp/templates` |
+| `LF_POST_INSTALL` | `dcea2279-13e2-491d-83b1-74387ff4e872` | postInstall |
+| `LF_UNINSTALL` | `4f0711c1-5bfe-49b5-995c-cdbc1680820f` | uninstall |
+
+## Front components
+
+| Constant | Value | Surface |
+|---|---|---|
+| `FC_PERSON_THREAD` | `9552182f-3626-425e-a63b-31cd56ee7cd1` | Person record tab widget |
+| `FC_SIDE_PANEL_CHAT` | `8b1df744-2ab3-4239-981f-61e5e6284d47` | command-menu side panel |
+| `FC_INBOX` | `02d97231-2f41-457f-add2-e56c5c8cd3c3` | standalone page |
+| `FC_CAMPAIGNS` | `feb002a1-ee1e-4ecd-8d82-1bcbfd031bef` | standalone page |
+| `FC_SETTINGS` | `1ef57cdd-06aa-430e-aa67-f789b7cd9bfa` | settings section |
+| `FC_INBOX_TOASTER` | `2d9c81ae-40f7-4bb6-9a55-6e3f01c7d8b2` | headless (D-10 layer 2) |
+
+## Page layouts, tabs, widgets
+
+| Constant | Value |
+|---|---|
+| `PL_INBOX` | `24620700-45ae-49aa-b686-879b22ca8cbf` |
+| `PL_INBOX_TAB` | `f3cf1e47-4050-41f9-97c9-6d90695cbab6` |
+| `PL_INBOX_WIDGET` | `22b6b6ff-cdda-4ca1-bd06-c06e309ac6ef` |
+| `PL_CAMPAIGNS` | `87b470e5-832e-4fcf-8762-6e10482570e1` |
+| `PL_CAMPAIGNS_TAB` | `08d96133-9e3c-4167-91ee-54295691108e` |
+| `PL_CAMPAIGNS_WIDGET` | `c1054099-011f-4a17-8e77-aa046f97aad9` |
+| `PLT_PERSON_WHATSAPP` | `137e43b2-9c3b-4545-a423-a869b9132d9a` |
+| `PLT_PERSON_WHATSAPP_WIDGET` | `2fc5c224-0b0e-4d38-b286-fa49bfbde311` |
+
+`PLT_PERSON_WHATSAPP` attaches to
+`STANDARD_PAGE_LAYOUT.personRecordPage.universalIdentifier` (`4223fadb-97f1-5c61-ba41-401ba8641eb5`)
+with `position: 1000` so it lands after the stock tabs, and
+`layoutMode: PageLayoutTabLayoutMode.VERTICAL_LIST` — set explicitly, because omitting it yields
+`GRID` on a record page (docs), which is wrong for a full-bleed chat.
+
+## Navigation and command menu
+
+| Constant | Value |
+|---|---|
+| `NAV_INBOX` | `40dac02c-cdcb-4d72-8235-b0d2d45ad578` |
+| `NAV_CAMPAIGNS` | `24b7fa8a-1e64-4b55-8fa0-eaddf2aa9514` |
+| `CMI_OPEN_CHAT` | `60230d67-8b27-4fa7-af25-f482f0215615` |
+
+## Roles
+
+| Constant | Value | Role |
+|---|---|---|
+| `ROLE_AGENT` | `8a466b1b-a44e-48fb-9864-63af63b3edc3` | WhatsApp Agent |
+| `ROLE_ADMIN` | `b97f72bf-83f7-4327-9024-c6b625de3f38` | WhatsApp Admin |
+
+## Indexes
+
+| Constant | Value | Definition |
+|---|---|---|
+| `IDX_ACCOUNT_PHONE_NUMBER_ID` | `c4856e13-f214-4856-a95d-ca52685329b5` | unique (`phoneNumberId`) |
+| `IDX_THREAD_ACCOUNT_WAID` | `f5070de9-8e6d-4156-90c1-3aebdb49c3f7` | unique (`accountId`, `waId`) |
+| `IDX_MESSAGE_WAMID` | `d11b7a34-5437-48ee-bfde-53b51ee4cdba` | unique (`wamid`) |
+| `IDX_MESSAGE_THREAD_TS` | `7a2406d4-873a-4c0a-b4f3-f1e1894c1fbb` | (`threadId`, `waTimestamp`) |
+| `IDX_TEMPLATE_ACCOUNT_META` | `e5992578-a239-4e76-b487-0984a72d5d7d` | unique (`accountId`, `metaTemplateId`) |
+| `IDX_RECIPIENT_CAMPAIGN_PERSON` | `1409fbe9-5357-44b0-acde-87c81d2bb8fc` | unique (`campaignId`, `personId`) |
+| `IDX_RECIPIENT_CAMPAIGN_STATUS` | `0ffa72a9-8c24-4fc6-bcc2-c5437c1ed43f` | (`campaignId`, `status`) |
+| `IDX_WEBHOOK_DEDUPKEY` | `4875cb33-f014-4d0f-9425-cd43d6290d3b` | unique (`dedupKey`) |
+
+## Platform identifiers referenced (not ours)
+
+| What | Value | Import |
+|---|---|---|
+| `person` object | `20202020-e674-48e5-a542-72570eee7213` | `STANDARD_OBJECT.person.universalIdentifier` |
+| Person record page layout | `4223fadb-97f1-5c61-ba41-401ba8641eb5` | `STANDARD_PAGE_LAYOUT.personRecordPage.universalIdentifier` |
+| `workspaceMember`, `company`, `timelineActivity`, `messageList` | see `STANDARD_OBJECT` | always import the constant; never paste the literal |
+
+---
+
+## Adding a new identifier
+
+1. Generate with `node -e "console.log(require('crypto').randomUUID())"` — must be v4.
+2. Add it to `src/constants/universal-identifiers.ts` **and** to this table in the same commit.
+3. Never reuse a retired identifier for a different entity.
+4. Prefer `yarn twenty dev:add <entityType>`, which scaffolds the file with a fresh UUID; then
+   replace the generated literal with the named constant so this registry stays the single source
+   of truth.

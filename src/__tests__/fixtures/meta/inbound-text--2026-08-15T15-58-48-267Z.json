@@ -1,0 +1,59 @@
+{
+  "capturedAt": "2026-08-15T15:58:48.269Z",
+  "synthetic": false,
+  "isMetaDashboardSample": false,
+  "slugs": [
+    "inbound-text"
+  ],
+  "fields": [
+    "messages"
+  ],
+  "kinds": [
+    "inbound_message"
+  ],
+  "headers": {
+    "content-type": "application/json",
+    "user-agent": "facebookexternalua"
+  },
+  "body": {
+    "object": "whatsapp_business_account",
+    "entry": [
+      {
+        "id": "2129199877947066",
+        "changes": [
+          {
+            "value": {
+              "messaging_product": "whatsapp",
+              "metadata": {
+                "display_phone_number": "244978735650",
+                "phone_number_id": "1206450239224164"
+              },
+              "contacts": [
+                {
+                  "profile": {
+                    "name": "Test Contact 5917"
+                  },
+                  "wa_id": "244917164819",
+                  "user_id": "AO.7811009540899047"
+                }
+              ],
+              "messages": [
+                {
+                  "from": "244917164819",
+                  "from_user_id": "AO.7811009540899047",
+                  "id": "wamid.-CRHLMUFWIQ5FRROJLHPWSXRHMR1OOPH",
+                  "timestamp": "1786809527",
+                  "text": {
+                    "body": "😃"
+                  },
+                  "type": "text"
+                }
+              ]
+            },
+            "field": "messages"
+          }
+        ]
+      }
+    ]
+  }
+}

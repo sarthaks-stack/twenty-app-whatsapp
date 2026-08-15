@@ -1,0 +1,81 @@
+{
+  "capturedAt": "2026-08-15T15:58:38.230Z",
+  "synthetic": false,
+  "isMetaDashboardSample": false,
+  "slugs": [
+    "inbound-contacts"
+  ],
+  "fields": [
+    "messages"
+  ],
+  "kinds": [
+    "inbound_message"
+  ],
+  "headers": {
+    "content-type": "application/json",
+    "user-agent": "facebookexternalua"
+  },
+  "body": {
+    "object": "whatsapp_business_account",
+    "entry": [
+      {
+        "id": "2129199877947066",
+        "changes": [
+          {
+            "value": {
+              "messaging_product": "whatsapp",
+              "metadata": {
+                "display_phone_number": "244978735650",
+                "phone_number_id": "1206450239224164"
+              },
+              "contacts": [
+                {
+                  "profile": {
+                    "name": "Test Contact 5917"
+                  },
+                  "wa_id": "244917164819",
+                  "user_id": "AO.7811009540899047"
+                }
+              ],
+              "messages": [
+                {
+                  "from": "244917164819",
+                  "from_user_id": "AO.7811009540899047",
+                  "id": "wamid.VDLUL7ANWLROR6FDYYM8BJYRGUOU3VGQ",
+                  "timestamp": "1786809517",
+                  "type": "contacts",
+                  "contacts": [
+                    {
+                      "name": {
+                        "first_name": "Test Contact 7443",
+                        "last_name": "Test Contact 3A0A",
+                        "formatted_name": "Test Contact DF15"
+                      },
+                      "phones": [
+                        {
+                          "phone": "+244923758006",
+                          "type": "‎número antigo"
+                        },
+                        {
+                          "phone": "+244910406119"
+                        },
+                        {
+                          "phone": "+244979019434",
+                          "wa_id": "244979019434",
+                          "type": "CELL"
+                        }
+                      ],
+                      "vcard": "QkVHSU46VkNBUkQKVkVSU0lPTjozLjAKTjpDb250YWN0O1Rlc3Q7OzsKRk46VGVzdCBDb250YWN0ClRFTDorMjQ0OTAwMDAwMDAwCkVORDpWQ0FSRA==",
+                      "origin": "other"
+                    }
+                  ]
+                }
+              ]
+            },
+            "field": "messages"
+          }
+        ]
+      }
+    ]
+  }
+}

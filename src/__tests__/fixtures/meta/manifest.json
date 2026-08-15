@@ -1,0 +1,121 @@
+{
+  "updatedAt": "2026-08-15T16:34:14.829Z",
+  "deliveries": 33,
+  "captured": {
+    "inbound-audio-voice": {
+      "count": 1,
+      "firstSeenAt": "2026-08-15T15:58:19.644Z",
+      "files": [
+        "inbound-audio-voice--2026-08-15T15-58-19-642Z.json"
+      ]
+    },
+    "inbound-contacts": {
+      "count": 1,
+      "firstSeenAt": "2026-08-15T15:58:38.230Z",
+      "files": [
+        "inbound-contacts--2026-08-15T15-58-38-229Z.json"
+      ]
+    },
+    "inbound-document": {
+      "count": 3,
+      "firstSeenAt": "2026-08-15T16:05:23.400Z",
+      "files": [
+        "inbound-document--2026-08-15T16-05-23-399Z.json",
+        "inbound-document--2026-08-15T16-06-44-597Z.json",
+        "inbound-document--2026-08-15T16-12-43-964Z.json"
+      ]
+    },
+    "inbound-image": {
+      "count": 1,
+      "firstSeenAt": "2026-08-15T15:58:16.524Z",
+      "files": [
+        "inbound-image--2026-08-15T15-58-16-523Z.json"
+      ]
+    },
+    "inbound-interactive-button-reply": {
+      "count": 1,
+      "firstSeenAt": "2026-08-15T16:08:05.463Z",
+      "files": [
+        "inbound-interactive-button-reply--2026-08-15T16-08-05-462Z.json"
+      ]
+    },
+    "inbound-interactive-list-reply": {
+      "count": 1,
+      "firstSeenAt": "2026-08-15T16:08:08.842Z",
+      "files": [
+        "inbound-interactive-list-reply--2026-08-15T16-08-08-841Z.json"
+      ]
+    },
+    "inbound-location": {
+      "count": 1,
+      "firstSeenAt": "2026-08-15T15:58:27.196Z",
+      "files": [
+        "inbound-location--2026-08-15T15-58-27-196Z.json"
+      ]
+    },
+    "inbound-reaction-add": {
+      "count": 2,
+      "firstSeenAt": "2026-08-15T15:58:50.837Z",
+      "files": [
+        "inbound-reaction-add--2026-08-15T15-58-50-836Z.json",
+        "inbound-reaction-add--2026-08-15T15-58-52-615Z.json"
+      ]
+    },
+    "inbound-reaction-remove": {
+      "count": 1,
+      "firstSeenAt": "2026-08-15T16:06:06.834Z",
+      "files": [
+        "inbound-reaction-remove--2026-08-15T16-06-06-832Z.json"
+      ]
+    },
+    "inbound-sticker": {
+      "count": 1,
+      "firstSeenAt": "2026-08-15T16:05:28.785Z",
+      "files": [
+        "inbound-sticker--2026-08-15T16-05-28-784Z.json"
+      ]
+    },
+    "inbound-text": {
+      "count": 4,
+      "firstSeenAt": "2026-08-15T15:53:39.996Z",
+      "files": [
+        "inbound-text--2026-08-15T15-53-39-994Z.json",
+        "inbound-text--2026-08-15T15-58-48-267Z.json",
+        "inbound-text--2026-08-15T16-05-36-756Z.json",
+        "inbound-text--2026-08-15T16-05-49-654Z.json"
+      ]
+    },
+    "inbound-text-reply": {
+      "count": 1,
+      "firstSeenAt": "2026-08-15T15:58:04.744Z",
+      "files": [
+        "inbound-text-reply--2026-08-15T15-58-04-743Z.json"
+      ]
+    },
+    "inbound-video": {
+      "count": 1,
+      "firstSeenAt": "2026-08-15T15:59:05.416Z",
+      "files": [
+        "inbound-video--2026-08-15T15-59-05-415Z.json"
+      ]
+    },
+    "status-delivered": {
+      "count": 3,
+      "firstSeenAt": "2026-08-15T16:07:50.894Z",
+      "files": [
+        "status-delivered--2026-08-15T16-07-50-893Z.json",
+        "status-delivered--2026-08-15T16-07-51-004Z.json",
+        "status-delivered--2026-08-15T16-07-51-485Z.json"
+      ]
+    },
+    "status-sent": {
+      "count": 3,
+      "firstSeenAt": "2026-08-15T16:07:50.177Z",
+      "files": [
+        "status-sent--2026-08-15T16-07-50-176Z.json",
+        "status-sent--2026-08-15T16-07-50-459Z.json",
+        "status-sent--2026-08-15T16-07-51-061Z.json"
+      ]
+    }
+  }
+}

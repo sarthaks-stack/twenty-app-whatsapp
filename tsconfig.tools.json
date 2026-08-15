@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node"]
+  },
+  "include": ["tools/**/*.ts", "src/domain/**/*.ts", "src/providers/**/*.ts"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"],
+  "references": []
+}

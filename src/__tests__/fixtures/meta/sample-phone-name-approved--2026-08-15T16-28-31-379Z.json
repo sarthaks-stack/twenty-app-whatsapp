@@ -1,0 +1,39 @@
+{
+  "capturedAt": "2026-08-15T16:28:31.380Z",
+  "synthetic": false,
+  "isMetaDashboardSample": true,
+  "note": "Meta's dashboard Test payload. Genuinely signed, but the wamid, phone_number_id and timestamp are fabricated — do not use as a message fixture.",
+  "slugs": [
+    "sample-phone-name-approved"
+  ],
+  "fields": [
+    "phone_number_name_update"
+  ],
+  "kinds": [
+    "phone_name"
+  ],
+  "headers": {
+    "content-type": "application/json",
+    "user-agent": "Webhooks/1.0 (https://fb.me/webhooks)"
+  },
+  "body": {
+    "entry": [
+      {
+        "id": "0",
+        "time": 1786811311,
+        "changes": [
+          {
+            "field": "phone_number_name_update",
+            "value": {
+              "display_phone_number": "244933203397",
+              "decision": "APPROVED",
+              "requested_verified_name": "WhatsApp",
+              "rejection_reason": null
+            }
+          }
+        ]
+      }
+    ],
+    "object": "whatsapp_business_account"
+  }
+}

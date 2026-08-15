@@ -11,12 +11,14 @@
   "packageManager": "yarn@4.13.0",
   "scripts": {
     "twenty": "twenty",
+    "capture": "node --env-file=.dev.vars tools/webhook-capture/server.ts",
     "lint": "oxlint -c .oxlintrc.json .",
     "lint:fix": "oxlint --fix -c .oxlintrc.json .",
-    "typecheck": "tsgo --noEmit -p tsconfig.spec.json",
+    "typecheck": "tsgo --noEmit -p tsconfig.spec.json && tsgo -p tsconfig.tools.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:unit": "vitest run --config vitest.unit.config.ts"
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "capture:reredact": "node --env-file=.dev.vars tools/webhook-capture/reredact.ts"
   },
   "devDependencies": {
     "@types/node": "^24.7.2",

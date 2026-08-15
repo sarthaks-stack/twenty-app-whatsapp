@@ -1,0 +1,63 @@
+{
+  "capturedAt": "2026-08-15T16:05:23.400Z",
+  "synthetic": false,
+  "isMetaDashboardSample": false,
+  "slugs": [
+    "inbound-document"
+  ],
+  "fields": [
+    "messages"
+  ],
+  "kinds": [
+    "inbound_message"
+  ],
+  "headers": {
+    "content-type": "application/json",
+    "user-agent": "facebookexternalua"
+  },
+  "body": {
+    "object": "whatsapp_business_account",
+    "entry": [
+      {
+        "id": "2129199877947066",
+        "changes": [
+          {
+            "value": {
+              "messaging_product": "whatsapp",
+              "metadata": {
+                "display_phone_number": "244978735650",
+                "phone_number_id": "1206450239224164"
+              },
+              "contacts": [
+                {
+                  "profile": {
+                    "name": "Test Contact 5917"
+                  },
+                  "wa_id": "244917164819",
+                  "user_id": "AO.7811009540899047"
+                }
+              ],
+              "messages": [
+                {
+                  "from": "244917164819",
+                  "from_user_id": "AO.7811009540899047",
+                  "id": "wamid.BNLU0D3AKSCVD49RF3EVLR2PP62T9RXU",
+                  "timestamp": "1786809921",
+                  "type": "document",
+                  "document": {
+                    "filename": "Arquivo-Completo-Capa-e-Separadores.pdf",
+                    "mime_type": "application/pdf",
+                    "sha256": "42HwJ5QwFS0h92cYseAOpvWMcfsjI5W2+WxP9G/3fSc=",
+                    "id": "846425001769782",
+                    "url": "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=846425001769782"
+                  }
+                }
+              ]
+            },
+            "field": "messages"
+          }
+        ]
+      }
+    ]
+  }
+}

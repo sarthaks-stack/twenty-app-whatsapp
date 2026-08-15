@@ -1,0 +1,41 @@
+{
+  "capturedAt": "2026-08-15T16:28:24.113Z",
+  "synthetic": false,
+  "isMetaDashboardSample": true,
+  "note": "Meta's dashboard Test payload. Genuinely signed, but the wamid, phone_number_id and timestamp are fabricated — do not use as a message fixture.",
+  "slugs": [
+    "sample-template-status-approved"
+  ],
+  "fields": [
+    "message_template_status_update"
+  ],
+  "kinds": [
+    "template_status"
+  ],
+  "headers": {
+    "content-type": "application/json",
+    "user-agent": "Webhooks/1.0 (https://fb.me/webhooks)"
+  },
+  "body": {
+    "entry": [
+      {
+        "id": "0",
+        "time": 1786811304,
+        "changes": [
+          {
+            "field": "message_template_status_update",
+            "value": {
+              "event": "APPROVED",
+              "message_template_id": 12345678,
+              "message_template_name": "my_message_template",
+              "message_template_language": "pt-BR",
+              "reason": null,
+              "message_template_category": "MARKETING"
+            }
+          }
+        ]
+      }
+    ],
+    "object": "whatsapp_business_account"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "capturedAt": "2026-08-15T16:27:53.156Z",
+  "synthetic": false,
+  "isMetaDashboardSample": true,
+  "note": "Meta's dashboard Test payload. Genuinely signed, but the wamid, phone_number_id and timestamp are fabricated — do not use as a message fixture.",
+  "slugs": [
+    "sample-account-review-approved"
+  ],
+  "fields": [
+    "account_review_update"
+  ],
+  "kinds": [
+    "account_review"
+  ],
+  "headers": {
+    "content-type": "application/json",
+    "user-agent": "Webhooks/1.0 (https://fb.me/webhooks)"
+  },
+  "body": {
+    "entry": [
+      {
+        "id": "0",
+        "time": 1786811273,
+        "changes": [
+          {
+            "field": "account_review_update",
+            "value": {
+              "decision": "APPROVED"
+            }
+          }
+        ]
+      }
+    ],
+    "object": "whatsapp_business_account"
+  }
+}

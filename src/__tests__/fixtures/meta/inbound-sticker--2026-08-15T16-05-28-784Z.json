@@ -1,0 +1,63 @@
+{
+  "capturedAt": "2026-08-15T16:05:28.785Z",
+  "synthetic": false,
+  "isMetaDashboardSample": false,
+  "slugs": [
+    "inbound-sticker"
+  ],
+  "fields": [
+    "messages"
+  ],
+  "kinds": [
+    "inbound_message"
+  ],
+  "headers": {
+    "content-type": "application/json",
+    "user-agent": "facebookexternalua"
+  },
+  "body": {
+    "object": "whatsapp_business_account",
+    "entry": [
+      {
+        "id": "2129199877947066",
+        "changes": [
+          {
+            "value": {
+              "messaging_product": "whatsapp",
+              "metadata": {
+                "display_phone_number": "244978735650",
+                "phone_number_id": "1206450239224164"
+              },
+              "contacts": [
+                {
+                  "profile": {
+                    "name": "Test Contact 5917"
+                  },
+                  "wa_id": "244917164819",
+                  "user_id": "AO.7811009540899047"
+                }
+              ],
+              "messages": [
+                {
+                  "from": "244917164819",
+                  "from_user_id": "AO.7811009540899047",
+                  "id": "wamid.VGXZPN1FLG3QWL4TQZN2K34NULBIQRUK",
+                  "timestamp": "1786809927",
+                  "type": "sticker",
+                  "sticker": {
+                    "mime_type": "image/webp",
+                    "sha256": "Qo7M9iq8BmwmEVV6h52uN5aK2k7TqAlYMXt1i+JTX1Y=",
+                    "id": "2237642523718780",
+                    "url": "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=2237642523718780",
+                    "animated": false
+                  }
+                }
+              ]
+            },
+            "field": "messages"
+          }
+        ]
+      }
+    ]
+  }
+}

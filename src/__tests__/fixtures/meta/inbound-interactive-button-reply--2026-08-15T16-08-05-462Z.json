@@ -1,0 +1,64 @@
+{
+  "capturedAt": "2026-08-15T16:08:05.463Z",
+  "synthetic": false,
+  "isMetaDashboardSample": false,
+  "slugs": [
+    "inbound-interactive-button-reply"
+  ],
+  "fields": [
+    "messages"
+  ],
+  "kinds": [
+    "inbound_message"
+  ],
+  "headers": {},
+  "body": {
+    "object": "whatsapp_business_account",
+    "entry": [
+      {
+        "id": "2129199877947066",
+        "changes": [
+          {
+            "value": {
+              "messaging_product": "whatsapp",
+              "metadata": {
+                "display_phone_number": "244978735650",
+                "phone_number_id": "1206450239224164"
+              },
+              "contacts": [
+                {
+                  "profile": {
+                    "name": "Test Contact 5917"
+                  },
+                  "wa_id": "244917164819",
+                  "user_id": "AO.7811009540899047"
+                }
+              ],
+              "messages": [
+                {
+                  "context": {
+                    "from": "244978735650",
+                    "id": "wamid.TRYLF04UJFOMQTWXPOCSXZF9DSKZZDCP"
+                  },
+                  "from": "244917164819",
+                  "from_user_id": "AO.7811009540899047",
+                  "id": "wamid.6JS77XMIOIOLPUCYLY0U2NTSSY5AYPPH",
+                  "timestamp": "1786810084",
+                  "type": "interactive",
+                  "interactive": {
+                    "type": "button_reply",
+                    "button_reply": {
+                      "id": "fixture_btn_sim",
+                      "title": "Sim"
+                    }
+                  }
+                }
+              ]
+            },
+            "field": "messages"
+          }
+        ]
+      }
+    ]
+  }
+}

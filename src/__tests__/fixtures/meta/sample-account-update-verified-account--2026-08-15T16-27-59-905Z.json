@@ -1,0 +1,37 @@
+{
+  "capturedAt": "2026-08-15T16:27:59.906Z",
+  "synthetic": false,
+  "isMetaDashboardSample": true,
+  "note": "Meta's dashboard Test payload. Genuinely signed, but the wamid, phone_number_id and timestamp are fabricated — do not use as a message fixture.",
+  "slugs": [
+    "sample-account-update-verified-account"
+  ],
+  "fields": [
+    "account_update"
+  ],
+  "kinds": [
+    "account_update"
+  ],
+  "headers": {
+    "content-type": "application/json",
+    "user-agent": "Webhooks/1.0 (https://fb.me/webhooks)"
+  },
+  "body": {
+    "entry": [
+      {
+        "id": "0",
+        "time": 1786811279,
+        "changes": [
+          {
+            "field": "account_update",
+            "value": {
+              "phone_number": "244933203397",
+              "event": "VERIFIED_ACCOUNT"
+            }
+          }
+        ]
+      }
+    ],
+    "object": "whatsapp_business_account"
+  }
+}

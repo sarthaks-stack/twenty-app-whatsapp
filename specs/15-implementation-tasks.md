@@ -104,21 +104,33 @@ unsupported-template reasons (06 §2).
 
 ---
 
-## Phase 3 — Provider seam ⬜ (AR-18, D-14)
+## Phase 3 — Provider seam ✅ (AR-18, D-14)
 
 | # | Module | Status | Notes |
 |---|---|---|---|
 | 3.1 | `providers/whatsapp/verify-signature.ts` | ✅ | proven against real Meta signatures |
-| 3.2 | `providers/whatsapp/types.ts` — `WhatsAppProvider` interface | ⬜ | appendix A §9 |
-| 3.3 | `providers/whatsapp/config.ts` — `requireSecret`, fails closed | ⬜ | SEC-1 |
-| 3.4 | `providers/whatsapp/payload.ts` — one builder per message type | ⬜ | appendix A §2 |
-| 3.5 | `providers/whatsapp/errors.ts` — the appendix B catalog | ⬜ | FR-OUT-4 |
-| 3.6 | `providers/whatsapp/cloud-api.provider.ts` | ⬜ | the only implementation |
-| 3.7 | `providers/whatsapp/index.ts` — `getProvider()` | ⬜ | AR-18 |
-| 3.8 | Golden-file contract tests, 17 payload shapes | ⬜ | specs/12 §3 |
-| 3.9 | oxlint rule banning `graph.facebook.com` outside `src/providers/` | ⬜ | AR-11 |
+| 3.2 | `providers/whatsapp/types.ts` — `WhatsAppProvider` interface | ✅ | appendix A §9 |
+| 3.3 | `providers/whatsapp/config.ts` — `requireSecret`, fails closed | ✅ | SEC-1 |
+| 3.4 | `providers/whatsapp/payload.ts` — one builder per message type | ✅ | appendix A §2 |
+| 3.5 | `providers/whatsapp/errors.ts` — the appendix B catalog | ✅ | FR-OUT-4 |
+| 3.6 | `providers/whatsapp/cloud-api.provider.ts` | ✅ | the only implementation |
+| 3.7 | `providers/whatsapp/index.ts` — `getProvider()` | ✅ | AR-18 |
+| 3.8 | Golden-file contract tests, 17 payload shapes | ✅ | specs/12 §3 |
+| 3.9 | Architecture guard: no Graph host, **no `fetch(`**, no token outside `src/providers/` | ✅ | AR-11 |
 
-**~3 days.** 3.8 is what makes a payload regression a failing commit rather than a Meta error.
+Phase 3 is **complete**, with 107 tests. Two deviations worth recording:
+
+- **3.9 is a test, not a lint rule.** oxlint ships no `no-restricted-syntax`, and the rule as
+  specified was too weak anyway: the media CDN URL arrives *inside* Meta's payload, so a module
+  could download from it without ever naming a host. The guard bans `fetch(` itself outside
+  `src/providers/`, which is the invariant AR-11 actually wants — one HTTP layer. Verified by
+  injecting a violation and watching three assertions fail.
+- **An aborted mutating request is `ambiguous`, never retryable.** Meta may have accepted it, and
+  a duplicate customer message is worse than a false failure. A 200 carrying no WAMID is treated
+  the same way, because a record with no idempotency key can never be matched by the status
+  webhooks that follow.
+
+3.8 is what makes a payload regression a failing commit rather than a Meta error.
 
 ---
 

@@ -1,10 +1,8 @@
-import { kv } from 'twenty-sdk/logic-function';
-
 import { OBJ_CAMPAIGN, OBJ_MESSAGE, OBJ_THREAD } from '../constants/universal-identifiers';
 import { query } from './repositories/base';
 import { config } from './config';
 import { describeError, logger } from './logger';
-import { metadataClient } from './clients';
+import { resolveObjectMetadataId } from './metadata-ids';
 
 /**
  * Timeline activities (FR-TL-1, D-9). The only writer.
@@ -64,49 +62,6 @@ export const shouldWriteActivity = (
   if (mode === TIMELINE_MODE.ALL) return true;
 
   return ALWAYS_IN_SUMMARY.has(event) || isFirstOfThread;
-};
-
-/**
- * `linkedObjectMetadataId` is a per-workspace id that has to be looked up, so
- * it is cached in `kv` — resolving it on every message would add a metadata
- * round-trip to the hot path for a value that never changes.
- */
-const metadataIdCacheKey = (universalIdentifier: string): string =>
-  `wa:object-metadata-id:${universalIdentifier}`;
-
-export const resolveObjectMetadataId = async (
-  universalIdentifier: string,
-): Promise<string | null> => {
-  const cached = await kv.get<string>(metadataIdCacheKey(universalIdentifier), {
-    scope: 'WORKSPACE',
-  });
-  if (typeof cached === 'string' && cached.length > 0) return cached;
-
-  try {
-    const result = await metadataClient().query({
-      objects: {
-        __args: { paging: { first: 500 }, filter: {} },
-        edges: { node: { id: true, universalIdentifier: true } },
-      },
-    });
-
-    const found = (result.objects.edges ?? [])
-      .map((edge) => edge.node)
-      .find((node) => node.universalIdentifier === universalIdentifier);
-
-    if (found?.id === undefined || found.id === null) return null;
-
-    await kv.set(metadataIdCacheKey(universalIdentifier), found.id, { scope: 'WORKSPACE' });
-
-    return found.id;
-  } catch (error) {
-    logger.debug('timeline.metadata_lookup_failed', {
-      universalIdentifier,
-      ...describeError(error),
-    });
-
-    return null;
-  }
 };
 
 export type TimelineActivityInput = {

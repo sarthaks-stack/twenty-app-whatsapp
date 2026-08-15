@@ -2,11 +2,11 @@ import { createHash } from 'node:crypto';
 
 import { defineLogicFunction } from 'twenty-sdk/define';
 
-import { LF_MEDIA_WORKER } from '../constants/universal-identifiers';
-import { MESSAGE_MEDIA_FILE } from '../constants/field-identifiers';
+import { LF_MEDIA_WORKER, OBJ_MESSAGE } from '../constants/universal-identifiers';
 import { MetaApiError } from '../providers/whatsapp/errors';
 import { getProvider } from '../providers/whatsapp';
-import { coreClient } from '../server/clients';
+import { metadataClient } from '../server/clients';
+import { resolveFieldUniversalIdentifier } from '../server/metadata-ids';
 import { config } from '../server/config';
 import { enqueue } from '../server/jobs';
 import { describeError, logger } from '../server/logger';
@@ -100,8 +100,30 @@ export const isInlineUrlUsable = (
   return expiresAt.getTime() - now.getTime() > 15_000;
 };
 
-const sha256Base64 = (buffer: Buffer): string =>
-  createHash('sha256').update(buffer).digest('base64');
+/**
+ * Meta reports the same `sha256` field in **two different encodings**, and
+ * documents neither:
+ *
+ * - the webhook's `messages[].image.sha256` is **base64**
+ *   (`63juxiuEcBW/0zL4fohL7BAe1wPQAZrR55NInYcG8qA=`)
+ * - `GET /{media_id}`'s `sha256` is **hex**
+ *   (`e5c85e2520f9a46ad476e3e8f9df238edc421308d3f0734eaecff5915c44122d`)
+ *
+ * Both observed on the same image, 2026-08-15. Comparing against one encoding
+ * rejected every media that took the resolution path — a byte-perfect 282 214-byte
+ * download failing on a string comparison. So the comparison is over the digest
+ * *bytes*, and the encoding of the declared value is inferred.
+ */
+export const digestMatches = (declared: string, buffer: Buffer): boolean => {
+  const actual = createHash('sha256').update(buffer).digest();
+  const trimmed = declared.trim();
+
+  const expected = /^[0-9a-f]{64}$/i.test(trimmed)
+    ? Buffer.from(trimmed, 'hex')
+    : Buffer.from(trimmed, 'base64');
+
+  return expected.length === actual.length && expected.equals(actual);
+};
 
 export const processMedia = async (
   payload: MediaWorkerPayload,
@@ -191,9 +213,7 @@ export const processMedia = async (
      * recover it — Meta's copy is long gone by then.
      */
     if (expectedSha !== null && expectedSha.length > 0) {
-      const actual = sha256Base64(download.buffer);
-
-      if (actual !== expectedSha) {
+      if (!digestMatches(expectedSha, download.buffer)) {
         count(METRIC.MEDIA_INTEGRITY_FAIL);
         log.error('wa.media.integrity_fail', {
           expectedBytes: expectedSize,
@@ -209,11 +229,29 @@ export const processMedia = async (
       mimeType ?? download.mimeType,
     );
 
-    const file = await coreClient().uploadFile(
+    /**
+     * The **metadata** client, not the core one. Both expose `uploadFile`, but
+     * `uploadFilesFieldFileByUniversalIdentifier` is only implemented on the
+     * metadata endpoint — calling it through the core client fails with
+     * 'Unknown type "Upload"'. The method existing on a client is not evidence
+     * that its endpoint serves the mutation.
+     */
+    /**
+     * Asked of the server, not derived. `getFieldUniversalIdentifier` is a
+     * build-time helper that the logic-function bundler replaces with a stub,
+     * so a derived constant is `undefined` here — see `server/metadata-ids.ts`.
+     */
+    const mediaFileFieldId = await resolveFieldUniversalIdentifier(OBJ_MESSAGE, 'mediaFile');
+
+    if (mediaFileFieldId === null) {
+      throw new Error('Could not resolve the mediaFile field identifier');
+    }
+
+    const file = await metadataClient().uploadFile(
       download.buffer,
       storedFilename,
       mimeType ?? download.mimeType,
-      MESSAGE_MEDIA_FILE,
+      mediaFileFieldId,
     );
 
     await patchMessage(message.id, {

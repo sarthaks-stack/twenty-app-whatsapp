@@ -427,3 +427,73 @@ type WhatsAppProvider = {
 | D-12 | Unique constraints + create-and-catch | Refines AR-8 |
 | D-13 | Keep app-owned campaign objects; accept `messageList` as audience source | Amend §2.1, FR-CAM-2 |
 | D-14 | Provider module + lint-enforced boundary | Refines AR-18 |
+
+
+---
+
+## D-15 — Runtime code never depends on `twenty-sdk/define` values
+
+**Status: SPECIFIED (forced by the platform)** · Discovered 2026-08-15 during phase 5 verification
+
+The logic-function bundler replaces every value imported from `twenty-sdk/define` with
+`__anyStub`. That module builds the *manifest*; it is not a runtime library. So a derived
+constant like
+
+```ts
+export const MESSAGE_MEDIA_FILE = fieldId(OBJ_MESSAGE, 'mediaFile');   // getFieldUniversalIdentifier
+```
+
+evaluates to nothing inside a running function.
+
+**Nothing warns.** The type checker still sees a `string`, `dev:build` succeeds, `plan` and
+`apply` are clean, and the first real call fails with
+`Variable "$fieldMetadataUniversalIdentifier" of required type "String!" was not provided` — a
+message naming neither the constant nor the cause. The bundle is the only place the truth is
+visible (`var getFieldUniversalIdentifier = __anyStub;`).
+
+Consequences:
+
+1. The `define*` factories remain fine to import: their return value is read at build time and
+   never at runtime, so the stub is harmless.
+2. Everything else — `getFieldUniversalIdentifier`, `STANDARD_OBJECT`, `FieldType` — is banned
+   from `src/logic-functions/**` and `src/server/**`, enforced by `architecture.test.ts`.
+3. Metadata identifiers a function needs at runtime are **asked of the server** and cached
+   (`src/server/metadata-ids.ts`). The server is the better authority anyway: it holds whatever
+   the last apply actually created.
+
+Plain string literals (`OBJ_*`, `LF_*`, `ROLE_*`) are unaffected — they are literals, not
+derived values, and survive bundling intact.
+
+---
+
+## D-16 — File uploads go through the **metadata** client
+
+**Status: SPECIFIED (forced by the platform)** · Discovered 2026-08-15
+
+`uploadFile` exists as a method on both `CoreApiClient` and `MetadataApiClient`, but
+`uploadFilesFieldFileByUniversalIdentifier` is implemented only on the **metadata** endpoint.
+Calling it through the core client fails with `Unknown type "Upload". Did you mean "Float"?`.
+
+A method existing on a client is not evidence that its endpoint serves the mutation. The original
+spec said `MetadataApiClient.uploadFile` and was right.
+
+---
+
+## D-17 — A changed application-variable declaration does not overwrite a saved value
+
+**Status: OBSERVED** · 2026-08-15
+
+An `applicationVariable` already stored in a workspace is a *user setting*. Editing its declared
+`value` and re-applying changes the default for fresh installs and leaves every existing install
+on the old value — correct behaviour, and a trap when the value is also a lookup key.
+
+It bit `WA_PROVIDER`, declared `cloud-api` while the provider registry knew `META_CLOUD_API`.
+Everything typechecked, every unit test passed, the app applied cleanly, and the first live
+connect failed with `Unknown WA_PROVIDER "CLOUD-API"`. Two fixes, both needed:
+
+- the declaration now matches the registry key, `UPPER_SNAKE_CASE` like every other SELECT;
+- `getProvider` canonicalises separators and carries an explicit alias for the previously shipped
+  value, because re-applying cannot migrate a setting an operator may have saved. An alias is not
+  a fallback: an unrecognised provider still throws.
+
+A test compares the declared options against the registry so the two cannot drift again.

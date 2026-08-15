@@ -132,3 +132,71 @@ describe('the source tree itself', () => {
     expect(productionOutsideProvider.length).toBeGreaterThan(40);
   });
 });
+
+describe('build-time versus runtime modules', () => {
+  /**
+   * The logic-function bundler replaces every value imported from
+   * `twenty-sdk/define` with `__anyStub` — it is the module that *builds the
+   * manifest*, not one that runs inside a function. A derived constant like
+   * `getFieldUniversalIdentifier(...)` therefore evaluates to nothing at
+   * runtime, and nothing warns: the type checker still sees a `string`, the
+   * bundle builds, the app applies, and the first real call fails with a
+   * GraphQL error naming neither the constant nor the cause.
+   *
+   * That cost an afternoon once. Runtime code asks the server for metadata
+   * identifiers instead (`server/metadata-ids.ts`).
+   */
+  const runtimeDirs = [join(SRC, 'logic-functions'), join(SRC, 'server')];
+
+  const runtimeFiles = files.filter(
+    (file) =>
+      runtimeDirs.some((dir) => file.startsWith(dir)) &&
+      !file.endsWith('.test.ts') &&
+      !file.includes('__tests__'),
+  );
+
+  it('scanned the runtime tree', () => {
+    expect(runtimeFiles.length).toBeGreaterThan(15);
+  });
+
+  /**
+   * The `define*` factories are the exception, and the only one: their whole
+   * purpose is to be read at build time, and their return value is never used
+   * at runtime, so a stub is harmless. Everything else from that module —
+   * `getFieldUniversalIdentifier`, `STANDARD_OBJECT`, `FieldType` — produces a
+   * value some line of running code will read, and there the stub is the bug.
+   */
+  it('imports only the define* factories from twenty-sdk/define', () => {
+    const offending: string[] = [];
+
+    for (const file of runtimeFiles) {
+      for (const match of contentsOf(file).matchAll(
+        /import\s+\{([^}]*)\}\s+from\s+'twenty-sdk\/define'/g,
+      )) {
+        const imported = match[1]!
+          .split(',')
+          .map((name) => name.trim().split(/\s+as\s+/)[0]!.trim())
+          .filter((name) => name.length > 0 && !name.startsWith('type '));
+
+        if (imported.some((name) => !/^define[A-Z]/.test(name))) {
+          offending.push(`${relative(SRC, file)}: ${imported.join(', ')}`);
+        }
+      }
+    }
+
+    expect(offending).toEqual([]);
+  });
+
+  /**
+   * The same trap one step removed: a module that derives identifiers is safe
+   * to import for its types, but importing its *values* into runtime code
+   * re-introduces the stub.
+   */
+  it('imports no derived field identifiers into runtime code', () => {
+    const offending = runtimeFiles.filter((file) =>
+      /from\s+'[^']*constants\/field-identifiers'/.test(contentsOf(file)),
+    );
+
+    expect(offending.map((file) => relative(SRC, file))).toEqual([]);
+  });
+});

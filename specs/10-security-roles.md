@@ -54,6 +54,12 @@ access to the app's own objects, read/write on `person` (auto-creation, consent 
 `workspaceMember`, and write on `timelineActivity`. It does **not** get
 `canDestroyAllObjectRecords` and does **not** get `canUpdateAllSettings`.
 
+It **does** get two discrete permission flags, `SystemPermissionFlag.UPLOAD_FILE` and
+`DOWNLOAD_FILE`, without which the media worker's attachment fails with *"Entity performing the
+request does not have permission"* — a message naming neither the permission nor the file.
+Granting `canUpdateAllSettings` would also have worked and would have been a poor trade: it hands
+every handler the data model, roles and billing in exchange for one file upload.
+
 ### 3.2 `WhatsApp Agent` (`ROLE_AGENT`)
 
 | Object | Read | Update | Delete |
@@ -82,6 +88,20 @@ the app's own role. Therefore every route in `src/logic-functions/*-route.ts` be
 const caller = await requireCaller(event);                  // resolves userWorkspaceId → member + roles
 requireRole(caller, 'admin');                               // or 'agent'
 ```
+
+Two behaviours established against the running platform rather than assumed:
+
+- **A Twenty workspace administrator counts as a WhatsApp admin** (`canUpdateAllSettings`).
+  Without this a fresh install has nobody able to connect a number — the app ships its roles and
+  assigns them to no one, including the person who installed it.
+- **An authenticated caller with no membership is a *machine* caller, not an anonymous one.**
+  Verified: on an `isAuthRequired: true` route the platform rejects a missing or invalid token
+  before the handler runs ("Missing authentication token" / "Token invalid."), so a null
+  `userWorkspaceId` means a valid API key. Such a key is treated as admin, because refusing it
+  would not be a control — an API key can already write any record through the Core API, and the
+  only thing these routes uniquely own is the `kv` routing claim. What SEC-5 defends against, a
+  logged-in *agent* calling an admin route, still fails. Machine actions are audited with a null
+  actor.
 
 Route-by-route requirement:
 

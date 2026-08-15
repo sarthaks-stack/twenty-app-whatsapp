@@ -103,6 +103,20 @@ downloads (03 §8).
 The URL expires in ~5 minutes and requires the Bearer token on download (C-6). On 404/410, re-call
 `GET /{media_id}` for a fresh URL — the media id itself remains valid for 7 days.
 
+> **`sha256` arrives in two different encodings under one field name.** Verified on a single
+> image, 2026-08-15:
+>
+> | Source | Encoding | Example |
+> |---|---|---|
+> | webhook `messages[].image.sha256` | **base64** | `63juxiuEcBW/0zL4fohL7BAe1wPQAZrR55NInYcG8qA=` |
+> | `GET /{media_id}` `sha256` | **hex** | `e5c85e2520f9a46ad476e3e8f9df238edc421308d3f0734eaecff5915c44122d` |
+>
+> Meta documents neither. Comparing against one encoding rejects every media that takes the
+> resolution path — a byte-perfect 282 214-byte download failing a string comparison, with the
+> retry machinery dutifully attempting it four times before giving up. The integrity check
+> therefore compares digest **bytes** and infers the declared encoding
+> (`digestMatches`, `wa-media-worker.ts`).
+
 **Limits** (mirrored as validation, AR-16):
 
 | Kind | Max | Types |

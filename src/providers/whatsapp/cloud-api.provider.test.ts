@@ -1,9 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createCloudApiProvider } from './cloud-api.provider';
 import { MissingConfigError, requireSecret } from './config';
 import { ERROR_CLASS, MetaApiError, classify } from './errors';
-import { getProvider, resetProviderCache } from './index';
+import { DEFAULT_PROVIDER, getProvider, resetProviderCache } from './index';
 
 /**
  * Transport behaviour with `fetch` stubbed. What matters here is not that a URL
@@ -329,5 +331,79 @@ describe('getProvider', () => {
     process.env.WA_PROVIDER = 'TWILIO';
 
     expect(() => getProvider()).toThrow(/Unknown WA_PROVIDER/);
+  });
+});
+
+describe('the provider registry and the config declaration', () => {
+  /**
+   * These are two sources of truth for one string: the SELECT options an admin
+   * picks from in Settings, and the keys `getProvider` knows. When they drifted
+   * (`cloud-api` vs `META_CLOUD_API`) everything typechecked, every unit test
+   * passed, the app applied cleanly — and the first live connect failed with
+   * "Unknown WA_PROVIDER". Only a real call could have found it, so now a test
+   * does.
+   *
+   * Read from the source text rather than the module: `defineApplication`
+   * returns a wrapped manifest, and asserting against its internal shape would
+   * make this test about the SDK instead of about the drift.
+   */
+  const source = readFileSync(join(process.cwd(), 'src/application-config.ts'), 'utf8');
+
+  const providerBlock = /WA_PROVIDER:\s*\{[\s\S]*?\n {4}\}/.exec(source)?.[0] ?? '';
+
+  const declaredDefault = /value:\s*'([^']+)'/.exec(providerBlock)?.[1] ?? null;
+
+  const declaredOptions = [...providerBlock.matchAll(/\{\s*label:\s*'[^']*',\s*value:\s*'([^']+)'\s*\}/g)].map(
+    (match) => match[1]!,
+  );
+
+  it('found the declaration to compare against', () => {
+    expect(declaredDefault).not.toBeNull();
+    expect(declaredOptions.length).toBeGreaterThan(0);
+  });
+
+  it('offers exactly the providers the factory can build', () => {
+    for (const option of declaredOptions) {
+      process.env.WA_PROVIDER = option;
+      resetProviderCache();
+
+      expect(() => getProvider(), `option ${option}`).not.toThrow();
+    }
+  });
+
+  it('declares a default the factory also accepts', () => {
+    process.env.WA_PROVIDER = declaredDefault!;
+    resetProviderCache();
+
+    expect(() => getProvider()).not.toThrow();
+    expect(declaredDefault).toBe(DEFAULT_PROVIDER);
+  });
+});
+
+describe('legacy provider values', () => {
+  /**
+   * An application variable already saved in a workspace is a user setting, so
+   * changing the declaration does not overwrite it. Every install that ran the
+   * earlier build still holds `cloud-api` — which is exactly how the first live
+   * connect failed.
+   */
+  it.each(['cloud-api', 'CLOUD-API', 'Cloud_Api', '  cloud-api  '])(
+    'still resolves the shipped legacy value %p',
+    (value) => {
+      process.env.WA_PROVIDER = value;
+      resetProviderCache();
+
+      expect(getProvider().name).toBe('meta-cloud-api');
+    },
+  );
+
+  /** An alias is not a fallback: anything genuinely unknown still throws. */
+  it('does not turn the alias rule into a catch-all', () => {
+    for (const value of ['twilio', 'meta-cloud-api-v2', 'infobip']) {
+      process.env.WA_PROVIDER = value;
+      resetProviderCache();
+
+      expect(() => getProvider(), value).toThrow(/Unknown WA_PROVIDER/);
+    }
   });
 });

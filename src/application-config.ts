@@ -213,9 +213,9 @@ export default defineApplication({
       universalIdentifier: '7d1c4a9e-5b83-4267-9f0a-3e8b6d2c5a71',
       description:
         'Selects the messaging provider. Only the direct Cloud API driver ships; the seam exists so a BSP driver or a future native channel can replace the transport without touching business logic (AR-18).',
-      value: 'cloud-api',
+      value: 'META_CLOUD_API',
       type: FieldType.SELECT,
-      options: [{ label: 'Meta Cloud API', value: 'cloud-api' }],
+      options: [{ label: 'Meta Cloud API', value: 'META_CLOUD_API' }],
     },
   },
 });

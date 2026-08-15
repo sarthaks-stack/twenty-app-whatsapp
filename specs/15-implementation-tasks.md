@@ -146,7 +146,7 @@ inventing their own conventions.
 | 4.3 | `server/metrics.ts` — kv counters | ✅ | NFR-O2 |
 | 4.4 | `server/batching.ts` — ≤60-record chunks, adaptive backoff | ✅ | NFR-R2, C-1 |
 | 4.5 | `server/config.ts` — account field → app variable → default | ✅ | NFR-M1 |
-| 4.6 | `server/auth.ts` — `requireCaller`, `requireRole` | 🚫 | SEC-5 |
+| 4.6 | `server/auth.ts` — `requireCaller`, `requireRole` | ✅ | SEC-5 |
 | 4.7 | `server/repositories/*` — typed CRUD per object | ✅ | — |
 | 4.8 | `server/matching.ts` — person matching, auto-create, needs-review | ✅ | FR-CID-3, FR-CID-5 |
 | 4.9 | `server/threads.ts` — `upsertThread`, lifecycle, assignment | ✅ | FR-THR-1…4 |
@@ -163,9 +163,9 @@ primary-phone pass finds nothing.
 
 Two items are not in this phase's commit:
 
-- **4.6 `auth.ts`** moves to the route phase. Every function built so far is a queue worker or a
-  webhook target with no `userWorkspaceId` to check; writing `requireRole` before there is a
-  caller to check would be guessing at its shape.
+- **4.6 `auth.ts`** landed with the first route that has a caller to check
+  (`wa-account-admin-route`), which is what let its two rules be established against the running
+  platform rather than guessed — see specs/10 §3.4.
 - **4.12 `schedule.ts`** is partly built. `jobs.ts` covers enqueueing with a retry policy and a
   loud failure; lane cursors and slot assignment belong with the outbound sender that reads them.
 
@@ -176,7 +176,7 @@ runtime on a real customer message; now it fails at `yarn test`.
 
 ---
 
-## Phase 5 — Ingestion ✅ 🔨 (the first observable end-to-end path)
+## Phase 5 — Ingestion ✅ (verified end to end against live Meta)
 
 | # | Function | Trigger | Status | Requirements |
 |---|---|---|---|---|
@@ -188,36 +188,38 @@ runtime on a real customer message; now it fails at `yarn test`.
 | 5.6 | `wa-template-event` | queued | ✅ | FR-TPL-1 |
 | 5.7 | `wa-account-event` | queued | ✅ | FR-ACC-3 |
 | 5.8 | `wa-media-worker` | queued | ✅ | AR-15, D-8 |
-| 5.9 | Integration tests against the 33 recorded fixtures | 🔨 | specs/12 §2 |
+| 5.9 | Integration tests against the 33 recorded fixtures | ✅ | specs/12 §2 |
 
-All eight functions are built and **applied to the live server** — `yarn twenty plan` reported
-`8 to add, 0 to change, 0 to destroy` with no metadata errors, and `/s/whatsapp/verify` answers
-over HTTP.
+**The loop is closed.** All eight functions are applied, and the whole recorded corpus was
+replayed at the live resolver using the raw bytes and signatures Meta itself produced:
 
-That live probe proved two things a unit test could not:
+| Check | Result |
+|---|---|
+| Real deliveries accepted | 25/25 → `202 {queued:true}` |
+| Meta dashboard samples rejected as unclaimed | 9/9 → `200`, correctly (their `entry.id` is `"0"`) |
+| Webhook events | 25, **all `PROCESSED`, zero errors** |
+| Messages created | 19, across 11 types |
+| Threads | 1, person matched and auto-created |
+| Media attached | 7/7, correct extensions from mime type |
+| **Redelivery (AR-8)** | second identical POST → **1 event, 1 message, 1 thread** |
 
-- The route returns the **bare challenge string** as `text/plain`. Meta rejects a JSON-quoted
-  body with no useful error, so this was worth confirming against a real HTTP response.
-- `requireSecret` **fails closed in production**, not just in a test: with `META_VERIFY_TOKEN`
-  unset the route returns 500 naming the missing variable. A malformed request still returns 400
-  without touching the secret at all, because the token is read only after the shape check.
+The unread count is worth its own line: 19 messages minus 3 reactions = **16**, confirming live
+that a reaction does not make the inbox claim attention it does not need.
 
-5.9 is partial. 48 tests cover the pure decision surface of each function — routing keys, the
-fan-out table, keyword matching, orphan grace, the components-update reconstruction, media
-filename derivation and inline-URL validity — plus a corpus test asserting that **every one of
-the 33 recorded changes reaches at least one processor**. A field that silently produced no jobs
-would leave a webhook row marked processed with nothing done, which reads exactly like success.
-End-to-end tests that drive the handlers against a live workspace still need a seeded account
-record and the server variables set.
+Five defects surfaced here that no unit test could have found, all now fixed and guarded:
 
-One defect this phase's tests caught, and it is the spec's own counterexample: token-set keyword
-matching accepted *"não vou parar de recomendar"* as an opt-out. Matching now requires **every**
-token to be a keyword. A false opt-out is a lost sale nothing can undo; a missed one is fixed by
-the customer repeating the word.
+1. **`WA_PROVIDER` drift** — the declaration said `cloud-api`, the registry knew
+   `META_CLOUD_API` (D-17).
+2. **`twenty-sdk/define` is stubbed in logic-function bundles**, so derived field identifiers are
+   `undefined` at runtime (D-15).
+3. **`uploadFile` works only on the metadata endpoint** (D-16).
+4. **Meta reports `sha256` in base64 on the webhook and hex from `GET /{media_id}`** — the
+   integrity check rejected every correctly-downloaded file (appendix A §3).
+5. **The function role needs `UPLOAD_FILE` / `DOWNLOAD_FILE`**, which fail with a message naming
+   neither the permission nor the file (specs/10 §3.1).
 
-**Before a real message can flow, an operator must set the server variables** (`META_APP_SECRET`,
-`META_ACCESS_TOKEN`, `META_VERIFY_TOKEN`) in Settings and create a `whatsappAccount` record with
-its `kv` routing claim.
+Each is now covered by a test that reproduces the original failure.
+
 
 ---
 
@@ -293,7 +295,7 @@ a duplicate customer message is worse than a false failure.
 | # | Task | Status | Requirements |
 |---|---|---|---|
 | 10.1 | `wa-send-template-action` workflow action | ⬜ | FR-WF-1 |
-| 10.2 | `wa-account-admin-route` — connect, test, disconnect, kv claim | ⬜ | FR-ACC-1, D-3 |
+| 10.2 | `wa-account-admin-route` — connect, test, disconnect, kv claim | ✅ | FR-ACC-1, D-3 |
 | 10.3 | `wa-webhook-replay-route` | ⬜ | §12.4 |
 | 10.4 | `wa-retention-purge` | ⬜ | SEC-9 |
 | 10.5 | `post-install` / `uninstall` hooks | ⬜ | AR-5 |

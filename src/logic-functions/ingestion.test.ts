@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -11,7 +12,12 @@ import {
 import { WINDOW_KIND } from '../domain/constants';
 import type { MetaChange, MetaWebhookBody } from '../domain/webhook/types';
 import { matchesKeyword, windowForMessage } from './wa-inbound-processor';
-import { isInlineUrlUsable, retryDelayMs, storageFilename } from './wa-media-worker';
+import {
+  digestMatches,
+  isInlineUrlUsable,
+  retryDelayMs,
+  storageFilename,
+} from './wa-media-worker';
 import { ORPHAN_GRACE_MS, isRecentEnoughToRetry } from './wa-status-processor';
 import { componentsFromUpdate } from './wa-template-event';
 import { STATUS_BATCH_SIZE, jobsForChange } from './wa-webhook-ingest';
@@ -413,5 +419,44 @@ describe('media worker', () => {
 
   it('backs off 2s, 8s, 32s, 128s', () => {
     expect([0, 1, 2, 3].map(retryDelayMs)).toEqual([2_000, 8_000, 32_000, 128_000]);
+  });
+});
+
+describe('media integrity across Meta\'s two sha256 encodings', () => {
+  /**
+   * Meta reports the same field in base64 on the webhook and hex from
+   * `GET /{media_id}` — undocumented, and observed on the same image on
+   * 2026-08-15. Assuming one encoding rejected every media that took the
+   * resolution path: a byte-perfect 282 214-byte download failing on a string
+   * comparison, with the retry machinery dutifully trying four times.
+   */
+  const payload = Buffer.from('the quick brown fox');
+  const hex = createHash('sha256').update(payload).digest('hex');
+  const base64 = createHash('sha256').update(payload).digest('base64');
+
+  it('accepts the hex form the media endpoint returns', () => {
+    expect(digestMatches(hex, payload)).toBe(true);
+    expect(digestMatches(hex.toUpperCase(), payload)).toBe(true);
+  });
+
+  it('accepts the base64 form the webhook carries', () => {
+    expect(digestMatches(base64, payload)).toBe(true);
+  });
+
+  it('tolerates surrounding whitespace', () => {
+    expect(digestMatches(`  ${hex}  `, payload)).toBe(true);
+  });
+
+  /** Still a real check: corruption must fail in either encoding. */
+  it('rejects a genuine mismatch', () => {
+    const other = Buffer.from('the quick brown fox.');
+
+    expect(digestMatches(hex, other)).toBe(false);
+    expect(digestMatches(base64, other)).toBe(false);
+  });
+
+  it('rejects a malformed declared digest rather than passing it', () => {
+    expect(digestMatches('not-a-digest', payload)).toBe(false);
+    expect(digestMatches('', payload)).toBe(false);
   });
 });

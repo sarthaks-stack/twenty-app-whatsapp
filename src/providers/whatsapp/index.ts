@@ -18,12 +18,32 @@ const REGISTRY: Record<string, () => WhatsAppProvider> = {
   META_CLOUD_API: createCloudApiProvider,
 };
 
+/**
+ * Values that earlier versions shipped as the declared default.
+ *
+ * An application variable already saved in a workspace is a *user setting*, so
+ * changing the declaration does not overwrite it — every install that ever ran
+ * the old build still holds `cloud-api`. This is an alias, not a fallback: it
+ * names the same single provider, and an unrecognised value still throws.
+ * Removable once no install carries the old value.
+ */
+const ALIASES: Record<string, string> = {
+  CLOUD_API: 'META_CLOUD_API',
+};
+
 export const DEFAULT_PROVIDER = 'META_CLOUD_API';
 
 let cached: { key: string; provider: WhatsAppProvider } | null = null;
 
+/** `cloud-api`, `Cloud-API` and `CLOUD_API` all denote one thing. */
+const canonicalise = (raw: string): string => {
+  const normalised = raw.trim().toUpperCase().replace(/-/g, '_');
+
+  return ALIASES[normalised] ?? normalised;
+};
+
 export const getProvider = (): WhatsAppProvider => {
-  const key = (process.env.WA_PROVIDER ?? DEFAULT_PROVIDER).trim().toUpperCase();
+  const key = canonicalise(process.env.WA_PROVIDER ?? DEFAULT_PROVIDER);
 
   if (cached?.key === key) return cached.provider;
 

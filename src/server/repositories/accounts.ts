@@ -117,11 +117,17 @@ export const findAccountByWabaId = async (
 
 export const findAccountById = async (id: string): Promise<WhatsappAccountRecord | null> => {
   const result = await query(
-    (client) => client.query({ whatsappAccount: { __args: { filter: { id: { eq: id } } }, ...ACCOUNT_FIELDS } }),
+    (client) =>
+      client.query({
+        whatsappAccounts: {
+          __args: { filter: { id: { eq: id } }, first: 1 },
+          edges: { node: ACCOUNT_FIELDS },
+        },
+      }),
     'accounts.findById',
   );
 
-  return (result.whatsappAccount as WhatsappAccountRecord | null) ?? null;
+  return nodesOf<WhatsappAccountRecord>(result.whatsappAccounts)[0] ?? null;
 };
 
 export const listAccounts = async (

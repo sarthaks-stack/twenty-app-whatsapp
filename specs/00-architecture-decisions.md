@@ -497,3 +497,48 @@ connect failed with `Unknown WA_PROVIDER "CLOUD-API"`. Two fixes, both needed:
   a fallback: an unrecognised provider still throws.
 
 A test compares the declared options against the registry so the two cannot drift again.
+
+---
+
+## D-18 — One HTTP exception outside the provider, narrowed by an origin guard
+
+**Status: DECIDED** · 2026-08-16
+
+AR-11 confines every outbound HTTP call to `src/providers/whatsapp`, and the rule is enforced by
+an architecture test rather than a lint rule because it needs to fail the build. Outbound media
+forces exactly one exception: an attachment's bytes live in Twenty's own storage, and something
+has to read them before they can be uploaded to Meta.
+
+`RestApiClient` from the SDK cannot do it — it reads every response with `response.text()`, which
+corrupts binary content silently rather than failing. So `src/server/files.ts` calls `fetch`, and
+is the only module outside the provider that may.
+
+What keeps that an exception rather than a hole:
+
+- `resolveFileUrl` compares `URL.origin` against `TWENTY_API_URL` and throws otherwise, so the
+  function cannot be handed Meta's media CDN URL — which arrives *inside* a webhook payload and is
+  precisely the second path to Meta that AR-11 exists to prevent;
+- the comparison is on `origin`, never a string prefix, because `startsWith` passes for
+  `https://crm.example.com.attacker.test/`;
+- the architecture test asserts both the exception list and the presence of the guard, so removing
+  the check fails the build rather than quietly widening the rule.
+
+---
+
+## D-19 — Repository finders never use Twenty's singular record query
+
+**Status: OBSERVED** · 2026-08-16
+
+`whatsappThread(filter: { id: { eq: … } })` does not answer `null` for a record that is not there.
+It answers `null` **and** a GraphQL error, `RECORD_NOT_FOUND`, which the genql client raises.
+
+So a finder written the obvious way — the one an editor's autocomplete offers first — throws where
+its signature promises `null`. Every caller's not-found branch becomes unreachable: a route that
+should answer `404 Unknown thread` answers `500 Internal error`, and inside a queued job a deleted
+record becomes a lost job rather than a handled skip.
+
+It typechecks, and it passes every unit test, because the defect is in the server's response and
+not in our code's shape. It was found by asking a live route for a thread id that does not exist.
+
+Every finder now uses the plural query with an id filter and `first: 1`, which answers an empty
+connection. An architecture test bans the singular form in `src/server/repositories`.

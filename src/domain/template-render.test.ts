@@ -168,16 +168,41 @@ describe('validateParameters', () => {
     expect(validateParameters(twoVars, params()).missing).toEqual([1, 2]);
   });
 
-  it('requires a media header to carry an id or a stored file', () => {
+  it('requires a media header to carry an id or a reachable file', () => {
     const mediaHeader = spec([{ type: 'HEADER', format: 'IMAGE' }, { type: 'BODY', text: 'Olá' }]);
 
     expect(validateParameters(mediaHeader, params()).missingKeys).toEqual(['header image']);
+
+    // Meta's own id: already uploaded, nothing to fetch.
     expect(
       validateParameters(mediaHeader, params({ header: { kind: 'media', mediaId: '1', fileId: null } })).ok,
     ).toBe(true);
+
+    // A storage handle: the sender can fetch these bytes and upload them.
+    for (const handle of [{ filePath: 'files/header.png' }, { fileUrl: '/files/header.png' }]) {
+      expect(
+        validateParameters(
+          mediaHeader,
+          params({ header: { kind: 'media', mediaId: null, fileId: null, ...handle } }),
+        ).ok,
+        JSON.stringify(handle),
+      ).toBe(true);
+    }
+  });
+
+  /**
+   * A record id names the file without naming its content, so it is not enough
+   * to send with — the sender has nothing to fetch. Accepting it here would
+   * turn a pre-flight exclusion with a clear reason into a Meta rejection for
+   * every recipient of a campaign.
+   */
+  it('does not accept a bare fileId as a resolved media header', () => {
+    const mediaHeader = spec([{ type: 'HEADER', format: 'IMAGE' }, { type: 'BODY', text: 'Olá' }]);
+
     expect(
-      validateParameters(mediaHeader, params({ header: { kind: 'media', mediaId: null, fileId: 'f' } })).ok,
-    ).toBe(true);
+      validateParameters(mediaHeader, params({ header: { kind: 'media', mediaId: null, fileId: 'f' } }))
+        .missingKeys,
+    ).toEqual(['header image']);
   });
 
   it('requires a text header variable', () => {

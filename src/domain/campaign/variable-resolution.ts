@@ -135,7 +135,13 @@ export type ButtonBinding = VariableBinding & {
 
 export type VariableMapping = {
   header?:
-    | { kind: 'media'; mediaId?: string | null; fileId?: string | null }
+    | {
+        kind: 'media';
+        mediaId?: string | null;
+        fileId?: string | null;
+        filePath?: string | null;
+        fileUrl?: string | null;
+      }
     | { kind: 'text'; bindings: VariableBinding[] };
   body?: VariableBinding[];
   buttons?: ButtonBinding[];
@@ -222,12 +228,24 @@ export const resolveParameters = ({
         return undefined;
       }
 
-      const { mediaId = null, fileId = null } = mapping.header;
-      if (isBlank(mediaId) && isBlank(fileId)) {
+      const {
+        mediaId = null,
+        fileId = null,
+        filePath = null,
+        fileUrl = null,
+      } = mapping.header;
+
+      /**
+       * Any one of these is enough: Meta's id needs no upload, and either
+       * storage handle lets the sender perform one. A header with only a
+       * record id and no way to reach its bytes is a missing variable, not a
+       * resolved one.
+       */
+      if (isBlank(mediaId) && isBlank(filePath) && isBlank(fileUrl)) {
         missingKeys.push(`header ${spec.header.format.toLowerCase()}`);
       }
 
-      return { kind: 'media', mediaId, fileId };
+      return { kind: 'media', mediaId, fileId, filePath, fileUrl };
     }
 
     if (spec.header.variableCount === 0) return undefined;

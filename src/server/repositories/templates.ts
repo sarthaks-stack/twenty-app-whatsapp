@@ -81,12 +81,15 @@ export const findTemplateById = async (
   const result = await query(
     (client) =>
       client.query({
-        whatsappTemplate: { __args: { filter: { id: { eq: id } } }, ...TEMPLATE_FIELDS },
+        whatsappTemplates: {
+          __args: { filter: { id: { eq: id } }, first: 1 },
+          edges: { node: TEMPLATE_FIELDS },
+        },
       }),
     'templates.findById',
   );
 
-  return (result.whatsappTemplate as WhatsappTemplateRecord | null) ?? null;
+  return nodesOf<WhatsappTemplateRecord>(result.whatsappTemplates)[0] ?? null;
 };
 
 export const listTemplatesForAccount = async (

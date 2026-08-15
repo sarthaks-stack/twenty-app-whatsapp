@@ -141,12 +141,15 @@ export const findWebhookEventById = async (
   const result = await query(
     (client) =>
       client.query({
-        whatsappWebhookEvent: { __args: { filter: { id: { eq: id } } }, ...EVENT_FIELDS },
+        whatsappWebhookEvents: {
+          __args: { filter: { id: { eq: id } }, first: 1 },
+          edges: { node: EVENT_FIELDS },
+        },
       }),
     'webhookEvents.findById',
   );
 
-  return (result.whatsappWebhookEvent as WhatsappWebhookEventRecord | null) ?? null;
+  return nodesOf<WhatsappWebhookEventRecord>(result.whatsappWebhookEvents)[0] ?? null;
 };
 
 export const findFailedWebhookEvents = async (

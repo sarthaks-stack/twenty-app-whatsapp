@@ -133,11 +133,17 @@ export const findPeopleByAdditionalPhone = async (
 
 export const findPersonById = async (id: string): Promise<PersonRecord | null> => {
   const result = await query(
-    (client) => client.query({ person: { __args: { filter: { id: { eq: id } } }, ...PERSON_FIELDS } }),
+    (client) =>
+      client.query({
+        people: {
+          __args: { filter: { id: { eq: id } }, first: 1 },
+          edges: { node: PERSON_FIELDS },
+        },
+      }),
     'people.findById',
   );
 
-  return (result.person as PersonRecord | null) ?? null;
+  return nodesOf<PersonRecord>(result.people)[0] ?? null;
 };
 
 export type PersonCreateInput = {

@@ -209,6 +209,27 @@ export default defineApplication({
       value: '0.0040',
       type: FieldType.NUMBER,
     },
+    WA_SEND_READ_RECEIPTS: {
+      universalIdentifier: 'baba913a-fb16-4bd2-bfd2-e005bdecbf99',
+      description:
+        'Marks a conversation read on WhatsApp — the customer sees blue ticks — when a rep opens it. Off by default: it promises the customer a human is present, which is a commitment the business should make deliberately (FR-OUT-8).',
+      value: false,
+      type: FieldType.BOOLEAN,
+    },
+    WA_WEBHOOK_STALENESS_HOURS: {
+      universalIdentifier: '15259fd1-f7a0-46e6-b337-f77a7dda7541',
+      description:
+        'Hours without a webhook after which the hourly health check warns. Only applies to numbers that have received an event before, so a newly connected quiet number is not reported as broken (NFR-O3).',
+      value: '24',
+      type: FieldType.NUMBER,
+    },
+    WA_AUTO_CLOSE_DAYS: {
+      universalIdentifier: '15df15e6-20e0-43f6-a64e-e7c3534473d0',
+      description:
+        'Days of silence after which the sweeper closes a conversation. `0` disables it. Closing is a CRM label only — it never affects the service window or the ability to send (Q-3).',
+      value: '0',
+      type: FieldType.NUMBER,
+    },
     WA_PROVIDER: {
       universalIdentifier: '7d1c4a9e-5b83-4267-9f0a-3e8b6d2c5a71',
       description:

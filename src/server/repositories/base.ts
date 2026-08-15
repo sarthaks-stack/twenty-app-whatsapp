@@ -48,6 +48,22 @@ export const pageOf = <T>(
 });
 
 /**
+ * **Never use the singular record query for a lookup that may miss.**
+ *
+ * `whatsappThread(filter: …)` does not return `null` for a record that is not
+ * there — it returns `null` *and* a GraphQL error, `RECORD_NOT_FOUND`, which
+ * genql raises. So a `findXById` written the obvious way throws instead of
+ * reporting absence, and every caller's `=== null` branch is unreachable:
+ * a deleted thread turns a clean 404 into a 500, and inside a queued job it
+ * turns a missing record into a lost job.
+ *
+ * Every finder therefore uses the plural query with an id filter and
+ * `first: 1`, which answers an empty connection. An architecture test keeps it
+ * that way, because the singular form is the one an editor's autocomplete
+ * offers first.
+ */
+
+/**
  * Every repository read and write funnels through these two, so the retry
  * policy and the call counters cannot be forgotten at a call site.
  */

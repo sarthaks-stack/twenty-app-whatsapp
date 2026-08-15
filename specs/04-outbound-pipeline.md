@@ -312,3 +312,48 @@ messages, are not billed, and must not consume send capacity.
 | NFR-P3 ≤3 s | §2 responds before the Meta round-trip |
 | NFR-R3 no limbo | §5 crash safety |
 | NFR-S5 campaign never delays 1:1 | §4 dual cursors |
+
+---
+
+## 10. As built (2026-08-16)
+
+Phase 6 is implemented. Five deviations and findings worth carrying forward.
+
+**The policy gate runs twice, and only the second one is a control.** The route's verdict exists so
+the composer can explain a refusal before a rep types; the sender re-runs it on data read at send
+time. Both call `evaluateSendPermission`, so there is one rule set and two moments — verified live
+by blocking a thread and watching `POST /whatsapp/send` answer `409 THREAD_BLOCKED` without
+creating a record or contacting Meta.
+
+**A template header now carries a file handle, not just a file id.** `HeaderParameter.fileId`
+names a record; it does not name content, and the sender needs bytes. `filePath` and `fileUrl`
+were added beside it, and `validateParameters` no longer counts a bare `fileId` as a resolved
+header — a header that cannot be uploaded is a pre-flight exclusion with a reason rather than a
+132000 for every recipient of a campaign.
+
+**Media limits are validated before the upload, not after** (`src/domain/media-limits.ts`). Meta
+answers an oversized image only once the bytes have been sent, so a 12 MB photo would spend the
+whole cost of a successful send to produce an error. The image ceiling is 5 MB, not the 16 MB of
+audio and video — the limit most often assumed wrong.
+
+**Reading a file from Twenty storage is the one HTTP call outside the provider** (D-18). The SDK's
+REST client cannot be used: it reads every response as text, which corrupts binary content
+silently.
+
+**Two application variables disagreed with their code fallbacks**, one of them by a factor of a
+hundred: `WA_INTERACTIVE_LANE_SHARE` was declared `0.4` against a constant of `40`, in a number
+that multiplies the send rate — clearing the variable would have paced the interactive lane at
+800/s against Meta's ceiling of 80. `config.interactiveLaneShare()` now reads anything above 1 as
+a percentage and clamps to `[0.1, 0.9]`, and `config-drift.test.ts` compares every declaration
+against its constant.
+
+### 10.1 Platform note: unauthenticated app routes answer 500
+
+An `isAuthRequired: true` route rejects a missing or invalid token **before the handler is
+entered** — confirmed for both `/whatsapp/send` and `/whatsapp/thread`, which answer
+`"Missing authentication token"` and `"Token invalid."`. The security property is the one we want,
+but the HTTP status is `500`, not `401`.
+
+Front components must therefore treat a 500 carrying either of those bodies as an auth failure and
+refresh the token, rather than reporting a server error. Nothing server-side can improve this: our
+handler never runs.

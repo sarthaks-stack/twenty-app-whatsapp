@@ -70,9 +70,39 @@ describe('the Meta seam', () => {
    * The rule AR-11 actually wants. Confining the hostname is not enough: the
    * media CDN URL arrives *inside* Meta's payload, so a module could download
    * from it without ever naming a host. One HTTP layer means one `fetch`.
+   *
+   * `server/files.ts` is the single exception, and it exists because an
+   * outbound attachment's bytes live in Twenty's own storage — not Meta's — and
+   * the SDK's REST client reads every response with `.text()`, which corrupts
+   * binary content silently. The exception is narrowed by the next test rather
+   * than by trust.
    */
+  const HTTP_CALLERS = ['server/files.ts'];
+
+  const withoutHttpCallers = productionOutsideProvider.filter(
+    (file) => !HTTP_CALLERS.some((allowed) => file.endsWith(allowed)),
+  );
+
   it('keeps every outbound HTTP call inside the provider', () => {
-    expect(offenders(/\bfetch\s*\(/, productionOutsideProvider)).toEqual([]);
+    expect(offenders(/\bfetch\s*\(/, withoutHttpCallers)).toEqual([]);
+  });
+
+  /**
+   * What keeps the exception an exception.
+   *
+   * A file reader that would fetch any URL handed to it is a general HTTP
+   * client wearing a different name — and the URL it would most plausibly be
+   * handed is Meta's media CDN, which is precisely what AR-11 exists to route
+   * through one place. So the module must compare origins, and must do it with
+   * `URL.origin` rather than a prefix test: `startsWith` passes for
+   * `https://twenty.example.com.attacker.test/`.
+   */
+  it('lets the one HTTP exception fetch only the workspace origin', () => {
+    const source = contentsOf(join(SRC, 'server', 'files.ts'));
+
+    expect(source).toMatch(/resolved\.origin\s*!==\s*expected\.origin/);
+    expect(source).toMatch(/resolveFileUrl\(/);
+    expect(source).not.toMatch(/startsWith\s*\(\s*base/);
   });
 
   /**
@@ -116,6 +146,49 @@ describe('the Meta seam', () => {
   });
 });
 
+describe('the single send path', () => {
+  /**
+   * AR-11's actual claim: exactly one function may call
+   * `POST /{phone_number_id}/messages`. Everything else creates a queued
+   * message and schedules a job.
+   *
+   * The invariant is not about tidiness. Retry, lane pacing, the policy
+   * re-check, media resolution and error classification are one inseparable
+   * piece of behaviour; a second caller would have to reproduce all five, and
+   * the one it would omit is the re-check — which is exactly the defect that
+   * sends a campaign message into a window that closed while it was queued.
+   */
+  const logicFunctions = files.filter(
+    (file) =>
+      file.startsWith(join(SRC, 'logic-functions')) &&
+      !file.endsWith('.test.ts') &&
+      !file.includes('__tests__'),
+  );
+
+  it('lets exactly one logic function call sendMessage', () => {
+    const callers = logicFunctions
+      .filter((file) => /\.sendMessage\s*\(/.test(contentsOf(file)))
+      .map((file) => relative(SRC, file));
+
+    expect(callers).toEqual(['logic-functions/wa-outbound-sender.ts']);
+  });
+
+  /**
+   * `markAsRead` is the deliberate second provider call from elsewhere
+   * (specs/04 §8) — a read receipt is not a message, is not billed, and must
+   * not consume send capacity, which is why it bypasses the scheduler. Named
+   * here so the exception is visible rather than merely absent from the rule
+   * above.
+   */
+  it('confines the read-receipt call to the thread actions route', () => {
+    const callers = logicFunctions
+      .filter((file) => /\.markAsRead\s*\(/.test(contentsOf(file)))
+      .map((file) => relative(SRC, file));
+
+    expect(callers).toEqual(['logic-functions/wa-thread-actions-route.ts']);
+  });
+});
+
 describe('provider construction', () => {
   /**
    * Constructing the Cloud API provider directly bypasses `WA_PROVIDER`, so a
@@ -123,6 +196,58 @@ describe('provider construction', () => {
    */
   it('routes every construction through getProvider()', () => {
     expect(offenders(/createCloudApiProvider/, productionOutsideProvider)).toEqual([]);
+  });
+});
+
+describe('repository reads', () => {
+  /**
+   * Twenty's *singular* record query answers a missing record with a GraphQL
+   * error (`RECORD_NOT_FOUND`), not with `null`. genql raises it, so a finder
+   * written the obvious way throws where its signature promises `null` — the
+   * caller's not-found branch is dead code, a deleted record becomes a 500
+   * rather than a 404, and inside a queued job it becomes a lost job.
+   *
+   * Live-only defect: it typechecks, and every unit test that stubs the client
+   * passes. The plural query with an id filter answers an empty connection
+   * instead, which is what every finder now uses.
+   */
+  const repositoryFiles = files.filter(
+    (file) =>
+      file.startsWith(join(SRC, 'server', 'repositories')) && !file.endsWith('.test.ts'),
+  );
+
+  const SINGULAR_QUERIES = [
+    'whatsappAccount',
+    'whatsappThread',
+    'whatsappMessage',
+    'whatsappTemplate',
+    'whatsappCampaign',
+    'whatsappCampaignRecipient',
+    'whatsappConsentEvent',
+    'whatsappWebhookEvent',
+    'person',
+  ];
+
+  it('scanned the repositories', () => {
+    expect(repositoryFiles.length).toBeGreaterThan(5);
+  });
+
+  it('never selects a record through the singular query', () => {
+    const offending: string[] = [];
+
+    for (const file of repositoryFiles) {
+      const source = contentsOf(file);
+
+      for (const name of SINGULAR_QUERIES) {
+        // `client.query({ whatsappThread: {` — the plural `whatsappThreads:`
+        // must not match, hence the explicit colon after the exact name.
+        if (new RegExp(`\\{\\s*${name}:\\s*\\{`).test(source)) {
+          offending.push(`${relative(SRC, file)}: ${name}`);
+        }
+      }
+    }
+
+    expect(offending).toEqual([]);
   });
 });
 

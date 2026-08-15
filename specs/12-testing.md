@@ -11,6 +11,17 @@ Two commands, two speeds:
   tier budgeting) are all pure functions by design (01 §1).
 - `yarn test` — `*.integration-test.ts` against a live Twenty via the scaffolded `global-setup.ts`.
 
+> **`yarn test` is destructive.** The scaffolded `global-setup.ts` uninstalls the app before *and*
+> after every run, which deletes every record its objects own — conversations, messages, media,
+> campaign history, the connected number and its `kv` routing claim. Nothing about the command says
+> so. A guard now counts `whatsappAccounts`, `whatsappThreads` and `whatsappMessages` first and
+> refuses to run unless all three are empty or `WA_ALLOW_DESTRUCTIVE_TESTS=true` is set, so
+> integration tests belong to a scratch workspace and saying otherwise has to be deliberate.
+>
+> The outbound integration suite is additionally **non-sending by construction**: its fixture
+> account is left `PENDING`, so the policy gate's first rule denies every send, and a final test
+> asserts nothing was left `QUEUED`.
+
 ---
 
 ## 1. Unit tests (`src/domain/**`)

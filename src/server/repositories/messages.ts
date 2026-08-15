@@ -43,6 +43,8 @@ const MESSAGE_FIELDS = {
   threadId: true,
   templateId: true,
   sentById: true,
+  clientToken: true,
+  createdAt: true,
 } as const;
 
 export type WhatsappMessageRecord = {
@@ -71,6 +73,8 @@ export type WhatsappMessageRecord = {
   threadId?: string | null;
   templateId?: string | null;
   sentById?: string | null;
+  clientToken?: string | null;
+  createdAt?: string | null;
 };
 
 export const findMessageByWamid = async (
@@ -124,12 +128,43 @@ export const findMessageById = async (id: string): Promise<WhatsappMessageRecord
   const result = await query(
     (client) =>
       client.query({
-        whatsappMessage: { __args: { filter: { id: { eq: id } } }, ...MESSAGE_FIELDS },
+        whatsappMessages: {
+          __args: { filter: { id: { eq: id } }, first: 1 },
+          edges: { node: MESSAGE_FIELDS },
+        },
       }),
     'messages.findById',
   );
 
-  return (result.whatsappMessage as WhatsappMessageRecord | null) ?? null;
+  return nodesOf<WhatsappMessageRecord>(result.whatsappMessages)[0] ?? null;
+};
+
+/**
+ * The newest inbound WAMID in a thread — what a read receipt marks.
+ *
+ * Meta marks that message *and everything before it* read, so one call clears
+ * the whole conversation and sending one per unread message would be both
+ * wasteful and wrong.
+ */
+export const findNewestInboundWamid = async (
+  threadId: string,
+): Promise<string | null> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappMessages: {
+          __args: {
+            filter: { threadId: { eq: threadId }, direction: { eq: 'INBOUND' } },
+            orderBy: [{ waTimestamp: 'DescNullsLast' }],
+            first: 1,
+          },
+          edges: { node: { id: true, wamid: true } },
+        },
+      }),
+    'messages.findNewestInbound',
+  );
+
+  return nodesOf<{ wamid?: string | null }>(result.whatsappMessages)[0]?.wamid ?? null;
 };
 
 export type MessageCreateInput = {
@@ -155,6 +190,66 @@ export type MessageCreateInput = {
   lane: Lane;
   sourceKind: SourceKind;
   sentById?: string | null;
+  clientToken?: string | null;
+};
+
+/**
+ * The idempotency read behind FR-OUT-1.
+ *
+ * A double-clicked send button, or the sandbox retrying on a network blip,
+ * arrives as two identical POSTs. The browser's token is what tells them apart
+ * from two deliberate identical messages — which people genuinely send, so
+ * de-duplicating on body text would be wrong.
+ */
+export const findMessageByClientToken = async (
+  clientToken: string,
+): Promise<WhatsappMessageRecord | null> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappMessages: {
+          __args: { filter: { clientToken: { eq: clientToken } }, first: 1 },
+          edges: { node: MESSAGE_FIELDS },
+        },
+      }),
+    'messages.findByClientToken',
+  );
+
+  return nodesOf<WhatsappMessageRecord>(result.whatsappMessages)[0] ?? null;
+};
+
+/**
+ * Outbound messages that never left (NFR-R3).
+ *
+ * A `QUEUED` row with no WAMID older than the grace period means its sender
+ * job died between the record write and the Meta call — a worker restart, an
+ * OOM, a deploy. Nothing else would ever move it, so the hourly health check
+ * re-enqueues it once and then fails it explicitly rather than leaving it in a
+ * limbo that looks like "sending…" forever.
+ */
+export const findStuckQueuedMessages = async (
+  olderThan: Date,
+  limit = 60,
+): Promise<WhatsappMessageRecord[]> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappMessages: {
+          __args: {
+            filter: {
+              status: { eq: 'QUEUED' },
+              direction: { eq: 'OUTBOUND' },
+              createdAt: { lt: olderThan.toISOString() },
+            },
+            first: limit,
+          },
+          edges: { node: MESSAGE_FIELDS },
+        },
+      }),
+    'messages.findStuckQueued',
+  );
+
+  return nodesOf<WhatsappMessageRecord>(result.whatsappMessages);
 };
 
 export const createMessage = async (

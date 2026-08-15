@@ -108,6 +108,37 @@ export const METRIC = {
   MEDIA_INTEGRITY_FAIL: 'wa.media.integrity_fail',
   MEDIA_FAILED: 'wa.media.failed',
 
+  SEND_SCHEDULED: 'wa.send.scheduled',
+  SEND_ACCEPTED: 'wa.send.accepted',
+  SEND_RETRY: 'wa.send.retry',
+  SEND_FAILED_TERMINAL: 'wa.send.failed_terminal',
+  SEND_SKIP_NONQUEUED: 'wa.send.skip_nonqueued',
+  SEND_UNMAPPED_ERROR: 'wa.send.unmapped_error',
+  /**
+   * The one that must never be routine. Each occurrence is a message Meta may
+   * or may not have delivered, resolved by a human reading the thread.
+   */
+  SEND_UNKNOWN_ACCEPTANCE: 'wa.send.unknown_acceptance',
+  SEND_SPACING_DEFERRED: 'wa.send.spacing_deferred',
+  SEND_MEDIA_UPLOADED: 'wa.send.media_uploaded',
+  SEND_MEDIA_CACHE_HIT: 'wa.send.media_cache_hit',
+
+  POLICY_DENIED_ACCOUNT: 'wa.policy.denied_account',
+  POLICY_DENIED_WINDOW: 'wa.policy.denied_window',
+  POLICY_DENIED_CONSENT: 'wa.policy.denied_consent',
+  POLICY_DENIED_TEMPLATE: 'wa.policy.denied_template',
+  POLICY_DENIED_QUALITY: 'wa.policy.denied_quality',
+  POLICY_DENIED_BLOCKED: 'wa.policy.denied_blocked',
+
+  WINDOW_SWEPT: 'wa.window.swept',
+  THREAD_AUTO_CLOSED: 'wa.thread.auto_closed',
+
+  HEALTH_ACCOUNT_ERROR: 'wa.health.account_error',
+  HEALTH_WEBHOOK_STALE: 'wa.health.webhook_stale',
+  HEALTH_STUCK_REQUEUED: 'wa.health.stuck_requeued',
+  HEALTH_STUCK_FAILED: 'wa.health.stuck_failed',
+  HEALTH_TIER_WINDOW_ROLLED: 'wa.health.tier_window_rolled',
+
   TEMPLATE_EVENT: 'wa.template.event',
   TEMPLATE_UNPUBLISHED_ON_DEGRADATION: 'wa.template.unpublished_on_degradation',
 

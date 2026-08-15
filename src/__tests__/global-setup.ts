@@ -55,10 +55,74 @@ function writeConfig(apiUrl: string, apiKey: string) {
   fs.writeFileSync(path.join(CONFIG_DIR, 'config.test.json'), payload);
 }
 
+/**
+ * Refuses to run against a workspace that holds real WhatsApp data.
+ *
+ * This setup **uninstalls the app before and after every run**, which deletes
+ * every record its objects own — conversations, messages, media, campaign
+ * history, the connected number and its routing claim. That is correct for a
+ * scratch workspace and catastrophic for the one an operator has connected a
+ * live number to, and nothing about typing `yarn test` suggests the difference.
+ *
+ * A count of zero means there is nothing to lose. Any other answer stops, and
+ * says how to override deliberately.
+ */
+async function assertWorkspaceIsDisposable(apiUrl: string, apiKey: string) {
+  if (process.env.WA_ALLOW_DESTRUCTIVE_TESTS === 'true') return;
+
+  const count = async (collection: string): Promise<number> => {
+    try {
+      const response = await fetch(`${apiUrl}/graphql`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: `query { ${collection}(first: 1) { totalCount } }`,
+        }),
+      });
+
+      const body = (await response.json()) as {
+        data?: Record<string, { totalCount?: number } | null>;
+      };
+
+      return body.data?.[collection]?.totalCount ?? 0;
+    } catch {
+      // The object does not exist, so the app is not installed: nothing to lose.
+      return 0;
+    }
+  };
+
+  const populated: string[] = [];
+
+  for (const collection of ['whatsappAccounts', 'whatsappThreads', 'whatsappMessages']) {
+    const total = await count(collection);
+
+    if (total > 0) populated.push(`${collection}: ${total}`);
+  }
+
+  if (populated.length === 0) return;
+
+  throw new Error(
+    [
+      'Refusing to run integration tests: this workspace holds WhatsApp data.',
+      `Found ${populated.join(', ')}.`,
+      '',
+      'These tests uninstall the app before and after the run, which deletes every',
+      'one of those records — including a connected number and its routing claim.',
+      '',
+      'Point TWENTY_API_URL at a scratch workspace, or set',
+      'WA_ALLOW_DESTRUCTIVE_TESTS=true if you genuinely mean to erase this one.',
+    ].join('\n'),
+  );
+}
+
 export async function setup() {
   const { apiUrl, apiKey } = validateEnv();
 
   await checkServer(apiUrl);
+  await assertWorkspaceIsDisposable(apiUrl, apiKey);
 
   writeConfig(apiUrl, apiKey);
 

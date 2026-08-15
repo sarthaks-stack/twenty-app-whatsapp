@@ -223,19 +223,35 @@ Each is now covered by a test that reproduces the original failure.
 
 ---
 
-## Phase 6 — Outbound ⬜
+## Phase 6 — Outbound ✅
 
 | # | Function | Trigger | Status | Requirements |
 |---|---|---|---|---|
-| 6.1 | `wa-outbound-sender` — the only caller of `POST /messages` | queued | ⬜ | AR-11…14 |
-| 6.2 | `wa-send-message-route` | httpRoute POST | ⬜ | FR-OUT-1…3 |
-| 6.3 | `wa-thread-actions-route` — assign, close, relink, mark read | httpRoute POST | ⬜ | FR-THR-3, FR-CID-4 |
-| 6.4 | `wa-window-sweeper` | cron 15 min | ⬜ | FR-THR-5 |
-| 6.5 | `wa-health-check` | cron hourly | ⬜ | FR-ACC-4, NFR-R3 |
-| 6.6 | Integration tests: policy denial, retry, crash recovery | ⬜ | specs/12 §2 |
+| 6.1 | `wa-outbound-sender` — the only caller of `POST /messages` | queued | ✅ | AR-11…14 |
+| 6.2 | `wa-send-message-route` | httpRoute POST | ✅ | FR-OUT-1…3 |
+| 6.3 | `wa-thread-actions-route` — assign, close, relink, mark read | httpRoute POST | ✅ | FR-THR-3, FR-CID-4 |
+| 6.4 | `wa-window-sweeper` | cron 15 min | ✅ | FR-THR-5 |
+| 6.5 | `wa-health-check` | cron hourly | ✅ | FR-ACC-4, NFR-R3 |
+| 6.6 | Integration tests: policy denial, retry, crash recovery | ✅ | specs/12 §2 |
 
 **~5 days.** 6.1 carries the `UNKNOWN_ACCEPTANCE` rule — never retry an ambiguous outcome, since
 a duplicate customer message is worse than a false failure.
+
+Supporting modules built alongside: `src/server/schedule.ts` (dual-cursor pacing),
+`src/server/files.ts` (the one HTTP exception, D-18), `src/domain/media-limits.ts` (AR-16),
+`src/server/repositories/campaigns.ts` (the slice the sender needs to pause a run).
+
+**Verified live, without sending a message.** Auth rejection, body validation, unknown thread and
+unknown template, a `409` policy denial that created no record, every thread action, and
+`clientToken` idempotency returning the existing message rather than queueing a second.
+
+The `*/15` cron was observed firing: a throwaway thread with an expired window flipped to
+`EXPIRED` at 23:30:00Z, which is the only way to know a cron trigger is wired rather than merely
+declared. `wa-health-check` is registered on the same mechanism at `0 * * * *`.
+
+What remains unexercised is a real Meta send — the call itself, and the `accepted → sent →
+delivered` chain that follows it. Everything up to `provider.sendMessage` is covered. See
+specs/04 §10.
 
 ---
 

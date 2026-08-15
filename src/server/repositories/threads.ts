@@ -4,6 +4,7 @@ import type {
   WindowKind,
   WindowState,
 } from '../../domain/constants';
+import { inBatches } from '../batching';
 import { nodesOf, query, type JsonObject } from './base';
 
 /**
@@ -86,11 +87,16 @@ export const findThread = async (
 export const findThreadById = async (id: string): Promise<WhatsappThreadRecord | null> => {
   const result = await query(
     (client) =>
-      client.query({ whatsappThread: { __args: { filter: { id: { eq: id } } }, ...THREAD_FIELDS } }),
+      client.query({
+        whatsappThreads: {
+          __args: { filter: { id: { eq: id } }, first: 1 },
+          edges: { node: THREAD_FIELDS },
+        },
+      }),
     'threads.findById',
   );
 
-  return (result.whatsappThread as WhatsappThreadRecord | null) ?? null;
+  return nodesOf<WhatsappThreadRecord>(result.whatsappThreads)[0] ?? null;
 };
 
 export type ThreadCreateInput = {
@@ -161,6 +167,7 @@ export type ThreadPatch = {
   assigneeId?: string | null;
   originCampaignId?: string | null;
   isBlocked?: boolean;
+  snoozedUntil?: string | null;
 };
 
 /**
@@ -176,6 +183,62 @@ export const patchThread = async (id: string, data: ThreadPatch): Promise<void> 
     (client) => client.mutation({ updateWhatsappThread: { __args: { id, data }, id: true } }),
     'threads.patch',
   );
+};
+
+/**
+ * One patch applied to many threads, chunked at 60.
+ *
+ * The window sweeper's whole cost model depends on this: expiring 60 windows
+ * as 60 mutations every quarter hour would be a standing load on the Core API
+ * for what is only a cache refresh.
+ */
+export const patchThreads = async (ids: string[], data: ThreadPatch): Promise<void> => {
+  if (ids.length === 0) return;
+
+  await inBatches(
+    ids,
+    (batch) =>
+      query(
+        (client) =>
+          client.mutation({
+            updateWhatsappThreads: {
+              __args: { data, filter: { id: { in: batch } } },
+              id: true,
+            },
+          }),
+        'threads.patchMany',
+      ),
+    { label: 'threads.patchMany' },
+  );
+};
+
+/**
+ * Conversations with no activity for a while — the optional auto-close sweep
+ * (Q-3). Only `OPEN` and `AWAITING_REPLY` are candidates; a `NEEDS_REVIEW`
+ * thread is waiting on a human and closing it would hide the request.
+ */
+export const findIdleThreads = async (
+  idleSince: Date,
+  limit = 60,
+): Promise<WhatsappThreadRecord[]> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappThreads: {
+          __args: {
+            filter: {
+              status: { in: ['OPEN', 'AWAITING_REPLY'] },
+              lastMessageAt: { lt: idleSince.toISOString() },
+            },
+            first: limit,
+          },
+          edges: { node: { id: true, status: true, lastMessageAt: true } },
+        },
+      }),
+    'threads.findIdle',
+  );
+
+  return nodesOf<WhatsappThreadRecord>(result.whatsappThreads);
 };
 
 /** The 15-minute sweeper's read (FR-THR-5). */

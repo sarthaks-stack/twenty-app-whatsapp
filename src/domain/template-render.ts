@@ -62,7 +62,23 @@ export const isBlank = (value: string | null | undefined): boolean =>
   typeof value !== 'string' || value.trim().length === 0;
 
 export type HeaderParameter =
-  | { kind: 'media'; mediaId: string | null; fileId: string | null }
+  /**
+   * A media header carries either Meta's own id — already uploaded, which a
+   * campaign does once for its whole audience — or a handle to the file in
+   * Twenty storage for the sender to upload.
+   *
+   * `fileId` alone is not enough to fetch bytes, which is why `filePath` and
+   * `fileUrl` exist beside it: the id names the record, the other two name
+   * the content. Carrying only the id would typecheck everywhere and fail at
+   * the one moment it mattered.
+   */
+  | {
+      kind: 'media';
+      mediaId: string | null;
+      fileId: string | null;
+      filePath?: string | null;
+      fileUrl?: string | null;
+    }
   | { kind: 'text'; values: string[] };
 
 export type ButtonParameter = { index: number; subType: string; value: string };
@@ -120,9 +136,17 @@ export const validateParameters = (
     const isMediaHeader = header.format !== 'TEXT' && header.format !== 'LOCATION';
 
     if (isMediaHeader) {
+      /**
+       * Meta's own id, or a handle the sender can fetch bytes with. `fileId`
+       * alone names a record without naming its content, so it does not count
+       * as supplied — a header that cannot be uploaded is a send that fails
+       * for every recipient.
+       */
       const supplied =
         parameters.header?.kind === 'media' &&
-        (!isBlank(parameters.header.mediaId) || !isBlank(parameters.header.fileId));
+        (!isBlank(parameters.header.mediaId) ||
+          !isBlank(parameters.header.filePath) ||
+          !isBlank(parameters.header.fileUrl));
 
       if (!supplied) missingKeys.push(`header ${header.format.toLowerCase()}`);
     } else if (header.variableCount > 0) {

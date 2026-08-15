@@ -102,6 +102,38 @@ export const findRecipientByThreadId = async (
   return nodesOf<WhatsappCampaignRecipientRecord>(result.whatsappCampaignRecipients)[0] ?? null;
 };
 
+/**
+ * Recipients claimed by a runner tick that never sent them (specs/07 §6.1).
+ *
+ * A claim is a lease, not a lock: the runner that took it may have died
+ * mid-tick. Without this sweep those rows would sit `CLAIMED` forever and the
+ * campaign would report itself running while sending nothing — the failure mode
+ * that looks most like success.
+ */
+export const findStaleClaimedRecipients = async (
+  claimedBefore: Date,
+  limit = 60,
+): Promise<WhatsappCampaignRecipientRecord[]> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappCampaignRecipients: {
+          __args: {
+            filter: {
+              status: { eq: 'CLAIMED' },
+              claimedAt: { lt: claimedBefore.toISOString() },
+            },
+            first: limit,
+          },
+          edges: { node: RECIPIENT_FIELDS },
+        },
+      }),
+    'recipients.findStaleClaims',
+  );
+
+  return nodesOf<WhatsappCampaignRecipientRecord>(result.whatsappCampaignRecipients);
+};
+
 export type RecipientPatch = {
   status?: RecipientStatus;
   exclusionReason?: ExclusionReason | null;

@@ -57,23 +57,37 @@ export const listVar = (name: string, fallback: string[]): string[] => {
   return items.length === 0 ? fallback : items;
 };
 
+/**
+ * Every constant here must equal the value declared for the same variable in
+ * `application-config.ts`; `config-drift.test.ts` fails the build otherwise.
+ *
+ * The rule exists because a mismatch is invisible in both directions: with the
+ * variable set, the declaration wins and the constant is dead code; clear it
+ * and behaviour jumps to a number nobody chose. Two of these were already
+ * wrong — a lane share of `40` where the declaration says `0.4`, which would
+ * have paced interactive sends at 800/s instead of 8/s, and a spacing eight
+ * times the declared one.
+ */
 export const DEFAULTS = {
   defaultCountryCallingCode: '+244',
   sendThrottlePerSecond: 20,
-  interactiveLaneShare: 40,
-  recipientMinSpacingMs: 2_000,
+  interactiveLaneShare: 0.4,
+  recipientMinSpacingMs: 250,
   mediaAutoDownloadMaxBytes: 25 * 1024 * 1024,
   serviceWindowHours: 24,
   fepWindowHours: 72,
   optOutKeywords: ['STOP', 'SAIR', 'PARAR', 'CANCELAR'],
   optInKeywords: ['START', 'INICIAR', 'SIM'],
-  campaignBatchSize: 100,
+  campaignBatchSize: 200,
   campaignTierReservePct: 10,
   campaignFailureWindow: 100,
   campaignMaxFailureRatePct: 10,
   retentionWebhookEventDays: 30,
-  retentionMessageMonths: 24,
-  timelineMode: 'SUMMARY',
+  retentionMessageMonths: 0,
+  timelineMode: 'summary',
+  sendReadReceipts: false,
+  webhookStalenessHours: 24,
+  autoCloseDays: 0,
   rateMarketingUsd: 0.0225,
   rateUtilityUsd: 0.004,
   rateAuthenticationUsd: 0.004,
@@ -84,8 +98,20 @@ export const config = {
     stringVar('WA_DEFAULT_COUNTRY_CALLING_CODE', DEFAULTS.defaultCountryCallingCode),
   sendThrottlePerSecond: () =>
     numberVar('WA_SEND_THROTTLE_PER_SECOND', DEFAULTS.sendThrottlePerSecond),
-  interactiveLaneShare: () =>
-    numberVar('WA_INTERACTIVE_LANE_SHARE', DEFAULTS.interactiveLaneShare),
+  /**
+   * Always a fraction of one, whichever way an operator types it.
+   *
+   * "Share" invites both `0.4` and `40`, and the two differ by a factor of a
+   * hundred in a number that multiplies the send rate. Rather than trust the
+   * label, anything above 1 is read as a percentage — so `40` and `0.4` mean
+   * the same thing and neither can produce an 800/s lane.
+   */
+  interactiveLaneShare: () => {
+    const raw = numberVar('WA_INTERACTIVE_LANE_SHARE', DEFAULTS.interactiveLaneShare);
+    const fraction = raw > 1 ? raw / 100 : raw;
+
+    return Math.min(0.9, Math.max(0.1, fraction));
+  },
   recipientMinSpacingMs: () =>
     numberVar('WA_RECIPIENT_MIN_SPACING_MS', DEFAULTS.recipientMinSpacingMs),
   mediaAutoDownloadMaxBytes: () =>
@@ -111,6 +137,16 @@ export const config = {
   retentionMessageMonths: () =>
     intVar('WA_RETENTION_MESSAGE_MONTHS', DEFAULTS.retentionMessageMonths),
   timelineMode: () => stringVar('WA_TIMELINE_MODE', DEFAULTS.timelineMode).toUpperCase(),
+  /**
+   * Off by default, and that is a product decision rather than caution: a read
+   * receipt tells the customer a human has seen their message, so turning it on
+   * is a promise about response times the business has to be willing to make.
+   */
+  sendReadReceipts: () => boolVar('WA_SEND_READ_RECEIPTS', DEFAULTS.sendReadReceipts),
+  webhookStalenessHours: () =>
+    numberVar('WA_WEBHOOK_STALENESS_HOURS', DEFAULTS.webhookStalenessHours),
+  /** `0` disables auto-close entirely (Q-3 is still open, specs/05 §3.2). */
+  autoCloseDays: () => intVar('WA_AUTO_CLOSE_DAYS', DEFAULTS.autoCloseDays),
   rates: () => ({
     marketingUsd: numberVar('WA_RATE_MARKETING_USD', DEFAULTS.rateMarketingUsd),
     utilityUsd: numberVar('WA_RATE_UTILITY_USD', DEFAULTS.rateUtilityUsd),

@@ -70,6 +70,18 @@ Per account, in order:
    (07 §6.1).
 6. Failed webhook events in the last 24 h → surface the count.
 
+**As built (2026-08-16).** Steps 1–6 are implemented in `wa-health-check`. Two details worth
+recording:
+
+- **Step 4 records its own retry.** A message queued longer than 15 minutes is re-enqueued once and
+  failed the second time; the fact that it was already retried is written to
+  `statusTimestamps.requeuedAt` rather than to `kv` or a new column, so it survives a cache
+  eviction and an operator reading the record can see the system already tried.
+- **Meta reports throughput as a level, not a number** (`STANDARD`, `HIGH`). It is stored as
+  messages per second so the panel can show the headroom above `sendThrottlePerSecond`; an
+  unrecognised level leaves the stored value alone rather than guessing, since a wrong ceiling here
+  would licence a burst.
+
 **Alert delivery.** There is no notification API (D-10). Alerts are delivered as:
 
 - red rows in the settings health panel (always),

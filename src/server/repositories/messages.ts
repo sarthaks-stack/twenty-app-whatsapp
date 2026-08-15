@@ -171,8 +171,17 @@ export const createMessage = async (
   return result.createWhatsappMessage as WhatsappMessageRecord;
 };
 
+/**
+ * A FILES column takes `{ fileId, label }`, not the object `uploadFile`
+ * returns. Passing the upload result straight through is accepted by the type
+ * checker only if the field is typed loosely, and rejected by the server at
+ * runtime — so the shape is named here.
+ */
+export type FileItemInput = { fileId: string; label: string };
+
 export type MessagePatch = {
   wamid?: string | null;
+  mediaFile?: FileItemInput[];
   status?: MessageStatus;
   statusTimestamps?: JsonObject | null;
   errorCode?: string | null;

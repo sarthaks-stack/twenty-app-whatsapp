@@ -176,22 +176,48 @@ runtime on a real customer message; now it fails at `yarn test`.
 
 ---
 
-## Phase 5 — Ingestion ⬜ (the first observable end-to-end path)
+## Phase 5 — Ingestion ✅ 🔨 (the first observable end-to-end path)
 
 | # | Function | Trigger | Status | Requirements |
 |---|---|---|---|---|
-| 5.1 | `wa-webhook-verify` | httpRoute GET | ⬜ | AR-6, D-1 |
-| 5.2 | `wa-webhook-resolver` | serverRoute | ⬜ | AR-6, SEC-2, D-3 |
-| 5.3 | `wa-webhook-ingest` | dispatched | ⬜ | AR-7, D-2 |
-| 5.4 | `wa-inbound-processor` | queued | ⬜ | FR-IN-1…4 |
-| 5.5 | `wa-status-processor` | queued | ⬜ | AR-9, FR-CAM-9 |
-| 5.6 | `wa-template-event` | queued | ⬜ | FR-TPL-1 |
-| 5.7 | `wa-account-event` | queued | ⬜ | FR-ACC-3 |
-| 5.8 | `wa-media-worker` | queued | ⬜ | AR-15, D-8 |
-| 5.9 | Integration tests against the 33 recorded fixtures | ⬜ | specs/12 §2 |
+| 5.1 | `wa-webhook-verify` | httpRoute GET | ✅ | AR-6, D-1 |
+| 5.2 | `wa-webhook-resolver` | serverRoute | ✅ | AR-6, SEC-2, D-3 |
+| 5.3 | `wa-webhook-ingest` | dispatched | ✅ | AR-7, D-2 |
+| 5.4 | `wa-inbound-processor` | queued | ✅ | FR-IN-1…4 |
+| 5.5 | `wa-status-processor` | queued | ✅ | AR-9, FR-CAM-9 |
+| 5.6 | `wa-template-event` | queued | ✅ | FR-TPL-1 |
+| 5.7 | `wa-account-event` | queued | ✅ | FR-ACC-3 |
+| 5.8 | `wa-media-worker` | queued | ✅ | AR-15, D-8 |
+| 5.9 | Integration tests against the 33 recorded fixtures | 🔨 | specs/12 §2 |
 
-**~6 days.** The fixtures already exist, so 5.9 can be written alongside rather than after. This
-phase ends with a real message from a device appearing as a record — the week-4 checkpoint.
+All eight functions are built and **applied to the live server** — `yarn twenty plan` reported
+`8 to add, 0 to change, 0 to destroy` with no metadata errors, and `/s/whatsapp/verify` answers
+over HTTP.
+
+That live probe proved two things a unit test could not:
+
+- The route returns the **bare challenge string** as `text/plain`. Meta rejects a JSON-quoted
+  body with no useful error, so this was worth confirming against a real HTTP response.
+- `requireSecret` **fails closed in production**, not just in a test: with `META_VERIFY_TOKEN`
+  unset the route returns 500 naming the missing variable. A malformed request still returns 400
+  without touching the secret at all, because the token is read only after the shape check.
+
+5.9 is partial. 48 tests cover the pure decision surface of each function — routing keys, the
+fan-out table, keyword matching, orphan grace, the components-update reconstruction, media
+filename derivation and inline-URL validity — plus a corpus test asserting that **every one of
+the 33 recorded changes reaches at least one processor**. A field that silently produced no jobs
+would leave a webhook row marked processed with nothing done, which reads exactly like success.
+End-to-end tests that drive the handlers against a live workspace still need a seeded account
+record and the server variables set.
+
+One defect this phase's tests caught, and it is the spec's own counterexample: token-set keyword
+matching accepted *"não vou parar de recomendar"* as an opt-out. Matching now requires **every**
+token to be a keyword. A false opt-out is a lost sale nothing can undo; a missed one is fixed by
+the customer repeating the word.
+
+**Before a real message can flow, an operator must set the server variables** (`META_APP_SECRET`,
+`META_ACCESS_TOKEN`, `META_VERIFY_TOKEN`) in Settings and create a `whatsappAccount` record with
+its `kv` routing claim.
 
 ---
 

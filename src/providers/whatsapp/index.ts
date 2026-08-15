@@ -1,4 +1,6 @@
 import { createCloudApiProvider } from './cloud-api.provider';
+import { requireSecret } from './config';
+import { verifyMetaSignature, verifyMetaVerifyToken } from './verify-signature';
 import type { WhatsAppProvider } from './types';
 
 /**
@@ -43,7 +45,33 @@ export const resetProviderCache = (): void => {
   cached = null;
 };
 
+/**
+ * Signature and token checks that read their own secret.
+ *
+ * `verify-signature.ts` stays dependency-free so the capture harness can import
+ * it and pass a secret from `.dev.vars` — that is what makes a capture session
+ * a live conformance test. These two wrappers exist so that no *handler* ever
+ * names `META_APP_SECRET` or `META_VERIFY_TOKEN`: the secret enters the process
+ * in one directory, which is the rule the architecture test enforces.
+ */
+export const verifyIncomingSignature = ({
+  rawBody,
+  header,
+}: {
+  rawBody: string | Buffer;
+  header: string | undefined;
+}): boolean =>
+  verifyMetaSignature({ rawBody, header, appSecret: requireSecret('META_APP_SECRET') });
+
+export const verifyIncomingToken = (provided: string | undefined): boolean =>
+  verifyMetaVerifyToken(provided, requireSecret('META_VERIFY_TOKEN'));
+
 export * from './types';
 export * from './errors';
 export * from './payload';
-export { verifyMetaSignature, verifyMetaVerifyToken, constantTimeEquals } from './verify-signature';
+export {
+  META_SIGNATURE_HEADER,
+  verifyMetaSignature,
+  verifyMetaVerifyToken,
+  constantTimeEquals,
+} from './verify-signature';

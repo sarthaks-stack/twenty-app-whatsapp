@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RestApiClient } from 'twenty-client-sdk/rest';
 import { copyToClipboard } from 'twenty-sdk/front-component';
+import { Tag } from 'twenty-ui/data-display';
 import { useTheme } from 'twenty-ui/theme-constants';
 
 import { useCopy } from '../common/copy';
@@ -79,12 +80,12 @@ const Copyable = ({
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing[2] }}>
       <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 auto' }}>
-        <span style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+        <span style={{ fontSize: theme.font.size.sm, color: theme.font.color.light }}>
           {label}
         </span>
         <code
           style={{
-            fontSize: theme.font.size.xs,
+            fontSize: theme.font.size.sm,
             color: theme.font.color.secondary,
             overflowX: 'auto',
             whiteSpace: 'nowrap',
@@ -111,6 +112,13 @@ export const SettingsView = () => {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  /**
+   * The account id whose disconnect is one click from happening. No portals
+   * means no modal, so the confirmation is an inline second step: the danger
+   * button arms it, and only the explicit confirm actually posts.
+   */
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     name: '',
@@ -236,7 +244,7 @@ export const SettingsView = () => {
               title={`${connected.name ?? '—'} · ${connected.displayPhoneNumber ?? ''}`}
               actions={<StatusPill status={connected.status ?? null} />}
             >
-              <div style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
+              <div style={{ fontSize: theme.font.size.md, color: theme.font.color.secondary }}>
                 {t('settings.summary', {
                   displayName: String(connected.displayName ?? '—'),
                   quality: String(connected.qualityRating ?? '—'),
@@ -285,22 +293,69 @@ export const SettingsView = () => {
                     setNotice(t('settings.syncRequested'));
                   }}
                 />
-                <ActionButton
-                  label={t('settings.disconnect')}
-                  tone="danger"
-                  busy={busy}
-                  onClick={async () => {
-                    const disconnected = await post('/s/whatsapp/account', {
-                      action: 'disconnect',
-                      accountId: connected.id,
-                    });
+              </div>
 
-                    // Reloading after a failure would immediately clear the
-                    // error the failure just wrote — the operator sees a flash
-                    // and nothing else.
-                    if (disconnected !== null) void load();
+              {/*
+                Disconnect is not a third maintenance shortcut: it lives alone
+                below a divider, says what it will cost, and takes two clicks.
+              */}
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: theme.spacing[2],
+                  borderTop: `1px solid ${theme.border.color.light}`,
+                  paddingTop: theme.spacing[2],
+                  marginTop: theme.spacing[1],
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: theme.font.size.sm,
+                    fontWeight: theme.font.weight.medium,
+                    color: theme.font.color.danger,
                   }}
-                />
+                >
+                  {t('settings.dangerZone')}
+                </span>
+                <span style={{ fontSize: theme.font.size.md, color: theme.font.color.secondary }}>
+                  {t('settings.disconnectWarning')}
+                </span>
+                {confirmingDisconnect === connected.id ? (
+                  <div style={{ display: 'flex', gap: theme.spacing[2], flexWrap: 'wrap' }}>
+                    <ActionButton
+                      label={t('settings.disconnectConfirm')}
+                      tone="danger"
+                      busy={busy}
+                      onClick={async () => {
+                        const disconnected = await post('/s/whatsapp/account', {
+                          action: 'disconnect',
+                          accountId: connected.id,
+                        });
+
+                        setConfirmingDisconnect(null);
+
+                        // Reloading after a failure would immediately clear the
+                        // error the failure just wrote — the operator sees a
+                        // flash and nothing else.
+                        if (disconnected !== null) void load();
+                      }}
+                    />
+                    <ActionButton
+                      label={t('common.cancel')}
+                      onClick={() => setConfirmingDisconnect(null)}
+                    />
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex' }}>
+                    <ActionButton
+                      label={t('settings.disconnect')}
+                      tone="danger"
+                      busy={busy}
+                      onClick={() => setConfirmingDisconnect(connected.id)}
+                    />
+                  </div>
+                )}
               </div>
             </Card>
           ))}
@@ -343,8 +398,9 @@ export const SettingsView = () => {
             <label
               style={{
                 display: 'flex',
-                gap: theme.spacing[1],
-                fontSize: theme.font.size.xs,
+                alignItems: 'center',
+                gap: theme.spacing[2],
+                fontSize: theme.font.size.md,
                 color: theme.font.color.secondary,
               }}
             >
@@ -387,13 +443,13 @@ export const SettingsView = () => {
               value={data?.webhook.verifyUrl ?? null}
               copyLabel={t('common.copy')}
             />
-            <div style={{ fontSize: theme.font.size.xs, color: theme.font.color.secondary }}>
+            <div style={{ fontSize: theme.font.size.md, color: theme.font.color.secondary }}>
               {t('settings.verifyToken')}:{' '}
               {data?.webhook.verifyTokenConfigured === true
                 ? t('settings.verifyTokenSet')
                 : t('settings.verifyTokenMissing')}
             </div>
-            <div style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+            <div style={{ fontSize: theme.font.size.sm, color: theme.font.color.tertiary }}>
               {t('settings.requiredFields')}: {(data?.webhook.requiredFields ?? []).join(', ')}
             </div>
             <ActionButton
@@ -408,7 +464,12 @@ export const SettingsView = () => {
 
       {tab === 'health' ? (
         <TabPanel group="settings" tabKey="health">
-        <Card title={t('settings.tab.health')}>
+        <Card
+          title={t('settings.tab.health')}
+          actions={
+            <ActionButton label={t('common.refresh')} busy={busy} onClick={() => void load()} />
+          }
+        >
           {(data?.rows ?? []).length === 0 ? <Banner>{t('common.loading')}</Banner> : null}
 
           {HEALTH_KEYS.map((key) =>
@@ -418,9 +479,9 @@ export const SettingsView = () => {
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: theme.spacing[0.5],
+                  gap: theme.spacing[1],
                   borderTop: `1px solid ${theme.border.color.light}`,
-                  paddingTop: theme.spacing[1],
+                  paddingTop: theme.spacing[2],
                 }}
               >
                 <div
@@ -428,24 +489,21 @@ export const SettingsView = () => {
                     display: 'flex',
                     alignItems: 'center',
                     gap: theme.spacing[2],
-                    fontSize: theme.font.size.xs,
+                    fontSize: theme.font.size.md,
+                    fontWeight: theme.font.weight.medium,
                   }}
                 >
-                  <span aria-hidden="true">{row.ok ? '🟢' : '🔴'}</span>
                   <span>{t(`settings.health.${key}`)}</span>
                   <span style={{ flex: '1 1 auto' }} />
-                  <span
-                    style={{
-                      fontSize: theme.font.size.xxs,
-                      color: theme.font.color.tertiary,
-                    }}
-                  >
-                    {row.ok ? t('settings.ok') : t('settings.needsAttention')}
-                  </span>
+                  <Tag
+                    color={row.ok ? 'green' : 'red'}
+                    text={row.ok ? t('settings.ok') : t('settings.needsAttention')}
+                    weight="medium"
+                  />
                 </div>
 
                 <span
-                  style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}
+                  style={{ fontSize: theme.font.size.sm, color: theme.font.color.tertiary }}
                 >
                   {describeHealth(row.key, row.detail, t, lang)}
                 </span>
@@ -454,7 +512,7 @@ export const SettingsView = () => {
                     instructions — the operator ends up reading the source. */}
                 {row.ok ? null : (
                   <span
-                    style={{ fontSize: theme.font.size.xxs, color: theme.font.color.danger }}
+                    style={{ fontSize: theme.font.size.sm, color: theme.font.color.danger }}
                   >
                     {t(`settings.health.${key}.remedy`)}
                   </span>
@@ -462,8 +520,6 @@ export const SettingsView = () => {
               </div>
             )),
           )}
-
-          <ActionButton label={t('common.refresh')} busy={busy} onClick={() => void load()} />
         </Card>
         </TabPanel>
       ) : null}
@@ -481,7 +537,7 @@ export const SettingsView = () => {
           }
         >
           {templates.length === 0 ? (
-            <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
+            <span style={{ fontSize: theme.font.size.md, color: theme.font.color.tertiary }}>
               {t('settings.noTemplates')}
             </span>
           ) : null}
@@ -494,8 +550,8 @@ export const SettingsView = () => {
                 alignItems: 'center',
                 gap: theme.spacing[2],
                 borderTop: `1px solid ${theme.border.color.light}`,
-                paddingTop: theme.spacing[1],
-                fontSize: theme.font.size.xs,
+                paddingTop: theme.spacing[2],
+                fontSize: theme.font.size.md,
                 flexWrap: 'wrap',
               }}
             >
@@ -559,7 +615,7 @@ export const SettingsView = () => {
                 <span
                   style={{
                     width: '100%',
-                    fontSize: theme.font.size.xxs,
+                    fontSize: theme.font.size.sm,
                     color: theme.font.color.tertiary,
                   }}
                 >
@@ -599,7 +655,7 @@ export const SettingsView = () => {
         <TabPanel group="settings" tabKey="diagnostics">
           <Card title={t('settings.failedEvents')}>
             {(data?.failedEvents ?? []).length === 0 ? (
-              <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
+              <span style={{ fontSize: theme.font.size.md, color: theme.font.color.tertiary }}>
                 {t('common.none')}
               </span>
             ) : null}
@@ -607,7 +663,7 @@ export const SettingsView = () => {
               <div
                 key={String(event.id)}
                 style={{
-                  fontSize: theme.font.size.xxs,
+                  fontSize: theme.font.size.sm,
                   color: theme.font.color.secondary,
                   borderTop: `1px solid ${theme.border.color.light}`,
                   paddingTop: theme.spacing[1],
@@ -623,14 +679,14 @@ export const SettingsView = () => {
 
           <Card title={t('settings.stuckMessages')}>
             {(data?.stuckOutbound ?? []).length === 0 ? (
-              <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
+              <span style={{ fontSize: theme.font.size.md, color: theme.font.color.tertiary }}>
                 {t('common.none')}
               </span>
             ) : null}
             {(data?.stuckOutbound ?? []).map((message) => (
               <div
                 key={String(message.id)}
-                style={{ fontSize: theme.font.size.xxs, color: theme.font.color.secondary }}
+                style={{ fontSize: theme.font.size.sm, color: theme.font.color.secondary }}
               >
                 {String(message.id)} ·{' '}
                 {relativeTime(message.createdAt as string | null, now, lang)}
@@ -639,14 +695,14 @@ export const SettingsView = () => {
           </Card>
 
           <Card title={t('settings.consent')}>
-            <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
+            <span style={{ fontSize: theme.font.size.md, color: theme.font.color.tertiary }}>
               {t('settings.consentNote')}
             </span>
           </Card>
         </TabPanel>
       ) : null}
 
-      <span style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+      <span style={{ fontSize: theme.font.size.sm, color: theme.font.color.tertiary }}>
         {t('chat.testAccount')}: {t(account?.isTestAccount === true ? 'common.yes' : 'common.no')}
       </span>
     </div>

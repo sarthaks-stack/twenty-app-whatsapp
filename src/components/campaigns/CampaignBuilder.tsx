@@ -247,18 +247,51 @@ export const CampaignBuilder = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing[2] }}>
-      <div style={{ display: 'flex', gap: theme.spacing[2], alignItems: 'center' }}>
+      {/*
+        The stepper at reading size: a numbered disc per step, filled for the
+        current one, checked for the ones already persisted. Hierarchy comes
+        from weight and fill, not from making the words smaller.
+      */}
+      <div
+        style={{
+          display: 'flex',
+          gap: theme.spacing[3],
+          alignItems: 'center',
+          flexWrap: 'wrap',
+        }}
+      >
         {STEPS.map((key, index) => (
           <span
             key={key}
             style={{
-              fontSize: theme.font.size.xxs,
+              display: 'flex',
+              alignItems: 'center',
+              gap: theme.spacing[1],
+              fontSize: theme.font.size.md,
               color: index === step ? theme.font.color.primary : theme.font.color.tertiary,
               fontWeight:
                 index === step ? theme.font.weight.semiBold : theme.font.weight.regular,
             }}
           >
-            {index + 1}. {t(key)}
+            <span
+              aria-hidden="true"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '20px',
+                height: '20px',
+                borderRadius: theme.border.radius.rounded,
+                fontSize: theme.font.size.sm,
+                background:
+                  index === step ? theme.color.blue : theme.background.transparent.light,
+                color:
+                  index === step ? theme.font.color.inverted : theme.font.color.tertiary,
+              }}
+            >
+              {index < step ? '✓' : index + 1}
+            </span>
+            {t(key)}
           </span>
         ))}
       </div>
@@ -361,7 +394,7 @@ export const CampaignBuilder = ({
         {step === 3 ? (
           <>
             {labels.length === 0 ? (
-              <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
+              <span style={{ fontSize: theme.font.size.md, color: theme.font.color.tertiary }}>
                 {t('campaign.noVariables')}
               </span>
             ) : null}

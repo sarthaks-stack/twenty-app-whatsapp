@@ -3,6 +3,7 @@ import { useTheme } from 'twenty-ui/theme-constants';
 
 import type { ThreadProjection } from '../../domain/feed/projection';
 import { useCopy } from '../common/copy';
+import { ActionButton } from '../common/ui';
 import { countdown, displayPhone, relativeTime } from '../common/format';
 import { SURFACE_MAX_HEIGHT, SURFACE_MIN_HEIGHT } from '../common/surface';
 import { InboundToaster } from './InboundToaster';
@@ -86,7 +87,7 @@ const ThreadRow = ({
               (thread.unreadCount ?? 0) > 0
                 ? theme.font.weight.semiBold
                 : theme.font.weight.regular,
-            fontSize: theme.font.size.sm,
+            fontSize: theme.font.size.md,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -95,14 +96,14 @@ const ThreadRow = ({
           {name === '' ? displayPhone(thread.waId) : name}
         </span>
         <span style={{ flex: '1 1 auto' }} />
-        <span style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+        <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
           {relativeTime(thread.lastMessageAt, now, lang)}
         </span>
       </span>
 
       <span
         style={{
-          fontSize: theme.font.size.xs,
+          fontSize: theme.font.size.sm,
           color: theme.font.color.tertiary,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -118,7 +119,7 @@ const ThreadRow = ({
         {(thread.unreadCount ?? 0) > 0 ? (
           <span
             style={{
-              fontSize: theme.font.size.xxs,
+              fontSize: theme.font.size.xs,
               background: theme.color.blue,
               color: theme.font.color.inverted,
               borderRadius: theme.border.radius.pill,
@@ -129,17 +130,17 @@ const ThreadRow = ({
           </span>
         ) : null}
         {remaining === null ? null : (
-          <span style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+          <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
             🟢 {remaining}
           </span>
         )}
         {thread.originCampaignId === null ? null : (
-          <span style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+          <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
             📣
           </span>
         )}
         {thread.status === 'NEEDS_REVIEW' ? (
-          <span style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+          <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
             ❓
           </span>
         ) : null}
@@ -273,8 +274,8 @@ export const InboxView = () => {
         <div
           role="status"
           style={{
-            padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-            fontSize: theme.font.size.xs,
+            padding: theme.spacing[2],
+            fontSize: theme.font.size.md,
             background: theme.background.transparent.danger,
             color: theme.font.color.danger,
           }}
@@ -287,8 +288,8 @@ export const InboxView = () => {
         <div
           role="status"
           style={{
-            padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-            fontSize: theme.font.size.xs,
+            padding: theme.spacing[2],
+            fontSize: theme.font.size.md,
             background: theme.background.transparent.light,
             color: theme.font.color.secondary,
           }}
@@ -302,8 +303,8 @@ export const InboxView = () => {
         <div
           role="status"
           style={{
-            padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-            fontSize: theme.font.size.xxs,
+            padding: theme.spacing[2],
+            fontSize: theme.font.size.md,
             background: theme.background.transparent.danger,
             color: theme.font.color.danger,
           }}
@@ -321,6 +322,11 @@ export const InboxView = () => {
           borderBottom: `1px solid ${theme.border.color.light}`,
         }}
       >
+        {/*
+          Kept as `aria-pressed` toggles rather than `twenty-ui` chips, which
+          carry no pressed state — but at chip scale: `sm` text and a 24px+
+          box, not the 16px-high 8px-type pills the review measured.
+        */}
         {FILTERS.map((key) => (
           <button
             key={key}
@@ -334,10 +340,12 @@ export const InboxView = () => {
               borderRadius: theme.border.radius.pill,
               background:
                 filter === key ? theme.background.transparent.light : 'transparent',
-              color: filter === key ? theme.font.color.primary : theme.font.color.tertiary,
+              color: filter === key ? theme.font.color.primary : theme.font.color.secondary,
               cursor: 'pointer',
-              fontSize: theme.font.size.xxs,
-              padding: `${theme.spacing[0.5]} ${theme.spacing[2]}`,
+              fontFamily: theme.font.family,
+              fontSize: theme.font.size.sm,
+              fontWeight: filter === key ? theme.font.weight.medium : theme.font.weight.regular,
+              padding: `${theme.spacing[1]} ${theme.spacing[3]}`,
               whiteSpace: 'nowrap',
             }}
           >
@@ -375,30 +383,15 @@ export const InboxView = () => {
                   textAlign: 'center',
                 }}
               >
-                <span style={{ color: theme.font.color.danger, fontSize: theme.font.size.sm }}>
+                <span style={{ color: theme.font.color.danger, fontSize: theme.font.size.md }}>
                   {t('common.unavailable')}
                 </span>
                 <span
-                  style={{ color: theme.font.color.tertiary, fontSize: theme.font.size.xxs }}
+                  style={{ color: theme.font.color.tertiary, fontSize: theme.font.size.sm }}
                 >
                   {feed.error}
                 </span>
-                <button
-                  type="button"
-                  onClick={feed.refresh}
-                  style={{
-                    border: `1px solid ${theme.border.color.medium}`,
-                    borderRadius: theme.border.radius.sm,
-                    background: 'transparent',
-                    color: theme.font.color.secondary,
-                    cursor: 'pointer',
-                    fontFamily: theme.font.family,
-                    fontSize: theme.font.size.xs,
-                    padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-                  }}
-                >
-                  {t('common.retry')}
-                </button>
+                <ActionButton label={t('common.retry')} onClick={feed.refresh} />
               </div>
             ) : feed.isLoading && feed.data === null ? (
               <div
@@ -406,7 +399,7 @@ export const InboxView = () => {
                   padding: theme.spacing[4],
                   textAlign: 'center',
                   color: theme.font.color.tertiary,
-                  fontSize: theme.font.size.sm,
+                  fontSize: theme.font.size.md,
                 }}
               >
                 {t('common.loading')}
@@ -417,7 +410,7 @@ export const InboxView = () => {
                   padding: theme.spacing[4],
                   textAlign: 'center',
                   color: theme.font.color.tertiary,
-                  fontSize: theme.font.size.sm,
+                  fontSize: theme.font.size.md,
                 }}
               >
                 {t('inbox.empty')}
@@ -450,8 +443,9 @@ export const InboxView = () => {
                   background: 'transparent',
                   color: theme.font.color.secondary,
                   cursor: 'pointer',
-                  fontSize: theme.font.size.xs,
-                  padding: theme.spacing[1],
+                  fontFamily: theme.font.family,
+                  fontSize: theme.font.size.md,
+                  padding: theme.spacing[2],
                 }}
               >
                 ← {t('inbox.conversations')}
@@ -463,7 +457,7 @@ export const InboxView = () => {
                 style={{
                   margin: 'auto',
                   color: theme.font.color.tertiary,
-                  fontSize: theme.font.size.sm,
+                  fontSize: theme.font.size.md,
                 }}
               >
                 {t('inbox.pick')}

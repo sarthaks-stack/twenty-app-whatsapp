@@ -1,15 +1,18 @@
+import 'twenty-ui/style.css';
 import { useRef } from 'react';
+import { Tag } from 'twenty-ui/data-display';
+import { Button } from 'twenty-ui/input';
 import { useTheme } from 'twenty-ui/theme-constants';
 
 /**
  * The handful of primitives the campaigns and settings surfaces both need.
  *
- * Not a design system — `twenty-ui` is that, and every colour below comes from
- * `useTheme()`. These exist because a `<select>` styled seven times in two files
- * drifts, and because the sandbox forbids the usual escape hatches: no portals,
- * so no popovers; no observers, so no auto-sizing; no `.focus()`, so no
- * focus-trapped modals. What is left is honest inline layout, and it may as well
- * be written once.
+ * Not a design system — `twenty-ui` is that, and wherever it has the component
+ * (`Button`, `Tag`) these are thin wrappers over it, so buttons and statuses
+ * are the real Twenty ones at the real Twenty scale. What stays hand-rolled is
+ * only what the sandbox forces: no portals, so no popovers; no observers, so no
+ * auto-sizing; no `.focus()`, so no focus-trapped modals. What is left is
+ * honest inline layout, and it may as well be written once.
  */
 
 export const Card = ({
@@ -42,7 +45,7 @@ export const Card = ({
             <h3
               style={{
                 margin: 0,
-                fontSize: theme.font.size.sm,
+                fontSize: theme.font.size.md,
                 fontWeight: theme.font.weight.semiBold,
                 color: theme.font.color.primary,
               }}
@@ -70,14 +73,25 @@ export const Field = ({
 }) => {
   const theme = useTheme();
 
+  /**
+   * `sm` label over an `md` control, matching the label-over-input rhythm of
+   * Twenty's own settings forms. `xxs` was measured at ~8px in the rendered
+   * page — legible to nobody — so nothing interactive or required wears it.
+   */
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing[1] }}>
-      <span style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+      <span
+        style={{
+          fontSize: theme.font.size.sm,
+          fontWeight: theme.font.weight.medium,
+          color: theme.font.color.light,
+        }}
+      >
         {label}
       </span>
       {children}
       {hint === undefined ? null : (
-        <span style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+        <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
           {hint}
         </span>
       )}
@@ -88,14 +102,21 @@ export const Field = ({
 export const useInputStyle = (): React.CSSProperties => {
   const theme = useTheme();
 
+  /**
+   * 32px min-height and `md` text: the same box Twenty draws for its own App
+   * URL input on the settings page these forms sit under. `minHeight` rather
+   * than `height` so a `<textarea rows={4}>` sharing the style keeps its rows.
+   */
   return {
     border: `1px solid ${theme.border.color.medium}`,
     borderRadius: theme.border.radius.sm,
     background: theme.background.primary,
     color: theme.font.color.primary,
     fontFamily: theme.font.family,
-    fontSize: theme.font.size.sm,
-    padding: theme.spacing[1],
+    fontSize: theme.font.size.md,
+    padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
+    minHeight: '32px',
+    boxSizing: 'border-box',
     width: '100%',
   };
 };
@@ -108,89 +129,48 @@ export type ActionButtonProps = {
   busy?: boolean;
 };
 
+/**
+ * Twenty's own `Button`, with this app's three tones mapped onto its
+ * variant/accent axes. Wrapping rather than importing it at every call site
+ * keeps the old `tone`/`busy` API the surfaces already speak.
+ */
 export const ActionButton = ({
   label,
   onClick,
   disabled = false,
   tone = 'default',
   busy = false,
-}: ActionButtonProps) => {
-  const theme = useTheme();
+}: ActionButtonProps) => (
+  <Button
+    title={label}
+    ariaLabel={label}
+    onClick={onClick}
+    disabled={disabled || busy}
+    isLoading={busy}
+    variant={tone === 'primary' ? 'primary' : 'secondary'}
+    accent={tone === 'primary' ? 'blue' : tone === 'danger' ? 'danger' : 'default'}
+    size="medium"
+  />
+);
 
-  const background =
-    disabled || busy
-      ? theme.background.transparent.light
-      : tone === 'primary'
-        ? theme.color.blue
-        : tone === 'danger'
-          ? theme.background.transparent.danger
-          : 'transparent';
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled || busy}
-      aria-label={label}
-      aria-busy={busy}
-      style={{
-        border:
-          tone === 'primary' && !disabled && !busy
-            ? 'none'
-            : `1px solid ${
-                tone === 'danger' ? theme.border.color.danger : theme.border.color.medium
-              }`,
-        borderRadius: theme.border.radius.sm,
-        background,
-        color:
-          disabled || busy
-            ? theme.font.color.tertiary
-            : tone === 'primary'
-              ? theme.font.color.inverted
-              : tone === 'danger'
-                ? theme.font.color.danger
-                : theme.font.color.secondary,
-        cursor: disabled || busy ? 'default' : 'pointer',
-        fontFamily: theme.font.family,
-        fontSize: theme.font.size.xs,
-        padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {label}
-    </button>
-  );
-};
-
-export const StatusPill = ({ status }: { status: string | null }) => {
-  const theme = useTheme();
-
-  /**
-   * Status is never colour alone: the pill always carries its own word. A
-   * reader who cannot tell amber from green still reads "PAUSED".
-   */
-  const tone =
-    status === 'RUNNING' || status === 'COMPLETED'
-      ? theme.background.transparent.success
-      : status === 'FAILED' || status === 'CANCELLED'
-        ? theme.background.transparent.danger
-        : theme.background.transparent.light;
-
-  return (
-    <span
-      style={{
-        fontSize: theme.font.size.xxs,
-        background: tone,
-        color: theme.font.color.secondary,
-        borderRadius: theme.border.radius.pill,
-        padding: `0 ${theme.spacing[2]}`,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {status ?? '—'}
-    </span>
-  );
-};
+/**
+ * Twenty's `Tag`, so statuses read at the scale and shape of every other
+ * status in the workspace. Never colour alone: the tag always carries its own
+ * word, so a reader who cannot tell amber from green still reads "PAUSED".
+ */
+export const StatusPill = ({ status }: { status: string | null }) => (
+  <Tag
+    color={
+      status === 'RUNNING' || status === 'COMPLETED'
+        ? 'green'
+        : status === 'FAILED' || status === 'CANCELLED'
+          ? 'red'
+          : 'gray'
+    }
+    text={status ?? '—'}
+    weight="medium"
+  />
+);
 
 export const Banner = ({
   tone = 'info',
@@ -205,9 +185,9 @@ export const Banner = ({
     <div
       role="status"
       style={{
-        padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
+        padding: theme.spacing[2],
         borderRadius: theme.border.radius.sm,
-        fontSize: theme.font.size.xs,
+        fontSize: theme.font.size.md,
         background:
           tone === 'danger'
             ? theme.background.transparent.danger
@@ -352,6 +332,12 @@ export const Tabs = ({
            */
           tabIndex={active === tab.key ? 0 : -1}
           onClick={() => onSelect(tab.key)}
+          /**
+           * Styled to `twenty-ui`'s `TabButton` scale (`md` text, 2px active
+           * underline) rather than replaced by it: `TabButton` accepts no
+           * `role`, `aria-*`, or ref, and swapping it in would silently drop
+           * the roving-tabindex tab list built above.
+           */
           style={{
             border: 'none',
             borderBottom: `2px solid ${
@@ -361,8 +347,9 @@ export const Tabs = ({
             color: active === tab.key ? theme.font.color.primary : theme.font.color.tertiary,
             cursor: 'pointer',
             fontFamily: theme.font.family,
-            fontSize: theme.font.size.xs,
-            padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
+            fontSize: theme.font.size.md,
+            fontWeight: theme.font.weight.medium,
+            padding: `${theme.spacing[2]} ${theme.spacing[2]}`,
             whiteSpace: 'nowrap',
           }}
         >

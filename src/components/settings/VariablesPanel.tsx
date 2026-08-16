@@ -80,14 +80,14 @@ const VariableRow = ({
     >
       <span
         style={{
-          fontSize: theme.font.size.xs,
+          fontSize: theme.font.size.md,
           fontWeight: theme.font.weight.semiBold,
           fontFamily: theme.font.family,
         }}
       >
         {variable.key}
       </span>
-      <span style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+      <span style={{ fontSize: theme.font.size.sm, color: theme.font.color.tertiary }}>
         {variable.description}
       </span>
 
@@ -98,7 +98,7 @@ const VariableRow = ({
               display: 'flex',
               alignItems: 'center',
               gap: theme.spacing[1],
-              fontSize: theme.font.size.xs,
+              fontSize: theme.font.size.md,
               color: theme.font.color.secondary,
             }}
           >

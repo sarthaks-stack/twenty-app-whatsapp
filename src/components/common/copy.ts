@@ -398,6 +398,15 @@ const COPY = {
   'settings.syncTemplates': { pt: 'Sincronizar modelos', en: 'Sync templates' },
   'settings.syncRequested': { pt: 'Sincronização pedida.', en: 'Sync requested.' },
   'settings.disconnect': { pt: 'Desligar', en: 'Disconnect' },
+  'settings.dangerZone': { pt: 'Zona de perigo', en: 'Danger zone' },
+  'settings.disconnectWarning': {
+    pt: 'Desligar este número pára o envio e a recepção de mensagens WhatsApp neste espaço de trabalho até que volte a ser ligado.',
+    en: 'Disconnecting this number stops sending and receiving WhatsApp messages in this workspace until it is connected again.',
+  },
+  'settings.disconnectConfirm': {
+    pt: 'Confirmar e desligar',
+    en: 'Confirm disconnect',
+  },
   'settings.connectTitle': { pt: 'Ligar um número', en: 'Connect a number' },
   'settings.connect': { pt: 'Ligar', en: 'Connect' },
   'settings.name': { pt: 'Nome', en: 'Name' },

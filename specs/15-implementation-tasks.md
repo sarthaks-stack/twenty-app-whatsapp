@@ -333,11 +333,11 @@ only; reaching them live needs an account at its tier ceiling.
 | 9.4 | Composer with policy-driven states | ✅ | FR-OUT-1/2 |
 | 9.5 | Template picker + variable form | ✅ | FR-TPL-3 |
 | 9.6 | Person tab, side panel, command menu item | ✅ | FR-UI-1/3 |
-| 9.7 | Inbox page + headless toaster | 🟡 | FR-UI-2, D-10 — page done, toaster pending |
+| 9.7 | Inbox page + headless toaster | ✅ | FR-UI-2, D-10 |
 | 9.8 | Campaigns page — list, builder, pre-flight, detail | ✅ | FR-CAM-1/6/10 |
 | 9.9 | Settings — connection, callback card, health, templates, consent, diagnostics | ✅ | FR-ACC-1…5, NFR-O3 |
 | 9.10 | Page layouts, tabs, nav items, views | ✅ | FR-UI-1/2 |
-| 9.11 | pt-PT / en catalogs | 🟡 | FR-UI-5 — chat catalog done; campaigns/settings are pt-only |
+| 9.11 | pt-PT / en catalogs | ✅ | FR-UI-5 |
 
 **~15 days, the largest and least certain phase.** P-6 has not run; if it fails, UI tiers 2/3
 (08 §10) change the presentation without touching any server contract.

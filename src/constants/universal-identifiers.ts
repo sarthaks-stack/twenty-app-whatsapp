@@ -72,6 +72,7 @@ export const FC_INBOX_TOASTER = '2d9c81ae-40f7-4bb6-9a55-6e3f01c7d8b2';
 export const PL_INBOX = '24620700-45ae-49aa-b686-879b22ca8cbf';
 export const PL_INBOX_TAB = 'f3cf1e47-4050-41f9-97c9-6d90695cbab6';
 export const PL_INBOX_WIDGET = '22b6b6ff-cdda-4ca1-bd06-c06e309ac6ef';
+export const PL_INBOX_TOASTER_WIDGET = 'b0cdc297-8c69-402d-ad3e-99a94e0807fe';
 export const PL_CAMPAIGNS = '87b470e5-832e-4fcf-8762-6e10482570e1';
 export const PL_CAMPAIGNS_TAB = '08d96133-9e3c-4167-91ee-54295691108e';
 export const PL_CAMPAIGNS_WIDGET = 'c1054099-011f-4a17-8e77-aa046f97aad9';

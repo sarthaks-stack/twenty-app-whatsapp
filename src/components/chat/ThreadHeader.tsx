@@ -148,7 +148,7 @@ export const ThreadHeader = ({
           <button
             type="button"
             onClick={onToggleBlock}
-            aria-label={thread.isBlocked ? 'Desbloquear' : 'Bloquear'}
+            aria-label={t(thread.isBlocked ? 'chat.unblock' : 'chat.block')}
             style={{
               border: `1px solid ${theme.border.color.medium}`,
               background: 'transparent',
@@ -159,7 +159,7 @@ export const ThreadHeader = ({
               padding: `0 ${theme.spacing[1]}`,
             }}
           >
-            {thread.isBlocked ? 'Desbloquear' : 'Bloquear'}
+            {t(thread.isBlocked ? 'chat.unblock' : 'chat.block')}
           </button>
         )}
 
@@ -167,7 +167,7 @@ export const ThreadHeader = ({
           <button
             type="button"
             onClick={onClose}
-            aria-label={thread.status === 'CLOSED' ? 'Reabrir' : 'Fechar'}
+            aria-label={t(thread.status === 'CLOSED' ? 'chat.reopen' : 'chat.close')}
             style={{
               border: `1px solid ${theme.border.color.medium}`,
               background: 'transparent',
@@ -178,7 +178,7 @@ export const ThreadHeader = ({
               padding: `0 ${theme.spacing[1]}`,
             }}
           >
-            {thread.status === 'CLOSED' ? 'Reabrir' : 'Fechar'}
+            {t(thread.status === 'CLOSED' ? 'chat.reopen' : 'chat.close')}
           </button>
         )}
       </div>

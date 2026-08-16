@@ -38,34 +38,29 @@ type Diagnostics = {
   stuckOutbound: Record<string, any>[];
 };
 
-const HEALTH_COPY: Record<string, { pt: string; remedy: string }> = {
-  token: {
-    pt: 'Token de acesso',
-    remedy: 'A verificação horária não corre há mais de duas horas, ou falhou. Veja specs/11 §2.',
-  },
-  webhook: {
-    pt: 'Webhook',
-    remedy: 'Não chegam eventos há mais tempo do que o limite. Confirme a subscrição na Meta.',
-  },
-  quality: {
-    pt: 'Qualidade do número',
-    remedy: 'A Meta baixou a classificação. Reduza envios de marketing e reveja os modelos.',
-  },
-  tier: {
-    pt: 'Escalão diário',
-    remedy: 'A reserva para conversas 1:1 já consumiu o que resta — nenhuma campanha arranca hoje.',
-  },
-  failedWebhookEvents: {
-    pt: 'Entregas falhadas (24h)',
-    remedy: 'Há eventos por processar. Veja o separador Diagnóstico.',
-  },
-  stuckOutbound: {
-    pt: 'Mensagens presas',
-    remedy: 'Mensagens em fila há mais de 15 minutos. A verificação horária volta a tentar.',
-  },
-};
+/**
+ * The order the panel reads in, and the only place a row key is written down.
+ * Each has a `settings.health.<key>` name and a `.remedy` in the catalog: a red
+ * light with no instructions sends the operator to the source code.
+ */
+const HEALTH_KEYS = [
+  'token',
+  'webhook',
+  'quality',
+  'tier',
+  'failedWebhookEvents',
+  'stuckOutbound',
+] as const;
 
-const Copyable = ({ label, value }: { label: string; value: string | null }) => {
+const Copyable = ({
+  label,
+  value,
+  copyLabel,
+}: {
+  label: string;
+  value: string | null;
+  copyLabel: string;
+}) => {
   const theme = useTheme();
 
   if (value === null) return null;
@@ -87,7 +82,7 @@ const Copyable = ({ label, value }: { label: string; value: string | null }) => 
           {value}
         </code>
       </div>
-      <ActionButton label="Copiar" onClick={() => void copyToClipboard(value)} />
+      <ActionButton label={copyLabel} onClick={() => void copyToClipboard(value)} />
     </div>
   );
 };
@@ -185,10 +180,10 @@ export const SettingsView = () => {
         active={tab}
         onSelect={setTab}
         tabs={[
-          { key: 'connection', label: 'Ligação' },
-          { key: 'health', label: 'Saúde' },
-          { key: 'templates', label: 'Modelos' },
-          { key: 'diagnostics', label: 'Diagnóstico' },
+          { key: 'connection', label: t('settings.tab.connection') },
+          { key: 'health', label: t('settings.tab.health') },
+          { key: 'templates', label: t('settings.tab.templates') },
+          { key: 'diagnostics', label: t('settings.tab.diagnostics') },
         ]}
       />
 
@@ -204,39 +199,50 @@ export const SettingsView = () => {
               actions={<StatusPill status={connected.status ?? null} />}
             >
               <div style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
-                {connected.displayName ?? '—'} · qualidade {connected.qualityRating ?? '—'} ·
-                escalão {connected.messagingLimitTier ?? '—'}
-                {connected.isTestAccount === true ? ' · número de teste' : ''}
+                {t('settings.summary', {
+                  displayName: String(connected.displayName ?? '—'),
+                  quality: String(connected.qualityRating ?? '—'),
+                  tier: String(connected.messagingLimitTier ?? '—'),
+                })}
+                {connected.isTestAccount === true ? ` · ${t('chat.testAccount')}` : ''}
               </div>
-              <Copyable label="phone_number_id" value={connected.phoneNumberId ?? null} />
-              <Copyable label="WABA id" value={connected.wabaId ?? null} />
+              <Copyable
+                label="phone_number_id"
+                value={connected.phoneNumberId ?? null}
+                copyLabel={t('common.copy')}
+              />
+              <Copyable
+                label="WABA id"
+                value={connected.wabaId ?? null}
+                copyLabel={t('common.copy')}
+              />
 
               <div style={{ display: 'flex', gap: theme.spacing[2], flexWrap: 'wrap' }}>
                 <ActionButton
-                  label="Testar ligação"
+                  label={t('settings.test')}
                   busy={busy}
                   onClick={async () => {
                     await post('/s/whatsapp/account', {
                       action: 'test',
                       accountId: connected.id,
                     });
-                    setNotice('Ligação testada.');
+                    setNotice(t('settings.tested'));
                     void load();
                   }}
                 />
                 <ActionButton
-                  label="Sincronizar modelos"
+                  label={t('settings.syncTemplates')}
                   busy={busy}
                   onClick={async () => {
                     await post('/s/whatsapp/account', {
                       action: 'syncTemplates',
                       accountId: connected.id,
                     });
-                    setNotice('Sincronização pedida.');
+                    setNotice(t('settings.syncRequested'));
                   }}
                 />
                 <ActionButton
-                  label="Desligar"
+                  label={t('settings.disconnect')}
                   tone="danger"
                   busy={busy}
                   onClick={async () => {
@@ -251,8 +257,8 @@ export const SettingsView = () => {
             </Card>
           ))}
 
-          <Card title="Ligar um número">
-            <Field label="Nome">
+          <Card title={t('settings.connectTitle')}>
+            <Field label={t('settings.name')}>
               <input
                 type="text"
                 value={form.name}
@@ -260,7 +266,7 @@ export const SettingsView = () => {
                 style={input}
               />
             </Field>
-            <Field label="phone_number_id" hint="Meta → WhatsApp → API Setup.">
+            <Field label="phone_number_id" hint={t('settings.phoneNumberIdHint')}>
               <input
                 type="text"
                 value={form.phoneNumberId}
@@ -276,7 +282,7 @@ export const SettingsView = () => {
                 style={input}
               />
             </Field>
-            <Field label="Indicativo por omissão">
+            <Field label={t('settings.callingCode')}>
               <input
                 type="text"
                 value={form.defaultCountryCallingCode}
@@ -299,10 +305,10 @@ export const SettingsView = () => {
                 checked={form.isTestAccount}
                 onChange={(event) => setForm({ ...form, isTestAccount: event.target.checked })}
               />
-              É um número de teste
+              {t('settings.isTestAccount')}
             </label>
             <ActionButton
-              label="Ligar"
+              label={t('settings.connect')}
               tone="primary"
               busy={busy}
               disabled={form.phoneNumberId === '' || form.wabaId === ''}
@@ -313,21 +319,33 @@ export const SettingsView = () => {
             />
           </Card>
 
-          <Card title="Callback da Meta">
-            <Copyable label="URL do callback" value={data?.webhook.callbackUrl ?? null} />
-            <Copyable label="Forma directa" value={data?.webhook.directUrl ?? null} />
-            <Copyable label="URL de verificação" value={data?.webhook.verifyUrl ?? null} />
+          <Card title={t('settings.callback')}>
+            <Copyable
+              label={t('settings.callbackUrl')}
+              value={data?.webhook.callbackUrl ?? null}
+              copyLabel={t('common.copy')}
+            />
+            <Copyable
+              label={t('settings.directUrl')}
+              value={data?.webhook.directUrl ?? null}
+              copyLabel={t('common.copy')}
+            />
+            <Copyable
+              label={t('settings.verifyUrl')}
+              value={data?.webhook.verifyUrl ?? null}
+              copyLabel={t('common.copy')}
+            />
             <div style={{ fontSize: theme.font.size.xs, color: theme.font.color.secondary }}>
-              Token de verificação:{' '}
+              {t('settings.verifyToken')}:{' '}
               {data?.webhook.verifyTokenConfigured === true
-                ? 'configurado na variável de servidor META_VERIFY_TOKEN'
-                : '⚠ em falta — defina META_VERIFY_TOKEN'}
+                ? t('settings.verifyTokenSet')
+                : t('settings.verifyTokenMissing')}
             </div>
             <div style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
-              Campos a subscrever: {(data?.webhook.requiredFields ?? []).join(', ')}
+              {t('settings.requiredFields')}: {(data?.webhook.requiredFields ?? []).join(', ')}
             </div>
             <ActionButton
-              label="Copiar lista de campos"
+              label={t('settings.copyFields')}
               onClick={() =>
                 void copyToClipboard((data?.webhook.requiredFields ?? []).join('\n'))
               }
@@ -337,10 +355,10 @@ export const SettingsView = () => {
       ) : null}
 
       {tab === 'health' ? (
-        <Card title="Saúde">
-          {(data?.rows ?? []).length === 0 ? <Banner>A carregar…</Banner> : null}
+        <Card title={t('settings.tab.health')}>
+          {(data?.rows ?? []).length === 0 ? <Banner>{t('common.loading')}</Banner> : null}
 
-          {Object.keys(HEALTH_COPY).map((key) =>
+          {HEALTH_KEYS.map((key) =>
             rowsFor(key).map((row, index) => (
               <div
                 key={`${key}-${index}`}
@@ -361,7 +379,7 @@ export const SettingsView = () => {
                   }}
                 >
                   <span aria-hidden="true">{row.ok ? '🟢' : '🔴'}</span>
-                  <span>{HEALTH_COPY[key].pt}</span>
+                  <span>{t(`settings.health.${key}`)}</span>
                   <span style={{ flex: '1 1 auto' }} />
                   <span
                     style={{
@@ -369,7 +387,7 @@ export const SettingsView = () => {
                       color: theme.font.color.tertiary,
                     }}
                   >
-                    {row.ok ? 'OK' : 'a precisar de atenção'}
+                    {row.ok ? t('settings.ok') : t('settings.needsAttention')}
                   </span>
                 </div>
 
@@ -385,25 +403,31 @@ export const SettingsView = () => {
                   <span
                     style={{ fontSize: theme.font.size.xxs, color: theme.font.color.danger }}
                   >
-                    {HEALTH_COPY[key].remedy}
+                    {t(`settings.health.${key}.remedy`)}
                   </span>
                 )}
               </div>
             )),
           )}
 
-          <ActionButton label="Actualizar" busy={busy} onClick={() => void load()} />
+          <ActionButton label={t('common.refresh')} busy={busy} onClick={() => void load()} />
         </Card>
       ) : null}
 
       {tab === 'templates' ? (
         <Card
-          title="Modelos"
-          actions={<ActionButton label="Actualizar" busy={busy} onClick={() => void loadTemplates()} />}
+          title={t('settings.tab.templates')}
+          actions={
+            <ActionButton
+              label={t('common.refresh')}
+              busy={busy}
+              onClick={() => void loadTemplates()}
+            />
+          }
         >
           {templates.length === 0 ? (
             <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
-              Nenhum modelo sincronizado.
+              {t('settings.noTemplates')}
             </span>
           ) : null}
 
@@ -440,7 +464,7 @@ export const SettingsView = () => {
 
               {template.publishedToCrm === true ? (
                 <ActionButton
-                  label="Despublicar"
+                  label={t('settings.unpublish')}
                   busy={busy}
                   onClick={async () => {
                     await post('/s/whatsapp/template', {
@@ -452,7 +476,7 @@ export const SettingsView = () => {
                 />
               ) : (
                 <ActionButton
-                  label="Publicar"
+                  label={t('settings.publish')}
                   tone="primary"
                   busy={busy}
                   disabled={template.publishRefusal !== null}
@@ -484,10 +508,10 @@ export const SettingsView = () => {
 
       {tab === 'diagnostics' ? (
         <>
-          <Card title="Entregas falhadas (24h)">
+          <Card title={t('settings.failedEvents')}>
             {(data?.failedEvents ?? []).length === 0 ? (
               <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
-                Nenhuma.
+                {t('common.none')}
               </span>
             ) : null}
             {(data?.failedEvents ?? []).map((event) => (
@@ -502,15 +526,16 @@ export const SettingsView = () => {
               >
                 {String(event.webhookField ?? '—')} ·{' '}
                 {relativeTime(event.receivedAt as string | null, now, lang)} ·{' '}
-                {String(event.error ?? '')} · tentativas {Number(event.attemptCount ?? 0)}
+                {String(event.error ?? '')} · {t('settings.attempts')}{' '}
+                {Number(event.attemptCount ?? 0)}
               </div>
             ))}
           </Card>
 
-          <Card title="Mensagens presas">
+          <Card title={t('settings.stuckMessages')}>
             {(data?.stuckOutbound ?? []).length === 0 ? (
               <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
-                Nenhuma.
+                {t('common.none')}
               </span>
             ) : null}
             {(data?.stuckOutbound ?? []).map((message) => (
@@ -524,19 +549,16 @@ export const SettingsView = () => {
             ))}
           </Card>
 
-          <Card title="Consentimento">
+          <Card title={t('settings.consent')}>
             <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
-              As palavras-chave de subscrição e cancelamento, e o texto da confirmação, são
-              variáveis da aplicação — edite-as em Definições → Aplicações → WhatsApp →
-              Variáveis. Estão fora deste ecrã de propósito: o texto é revisto por
-              aconselhamento jurídico e uma alteração não deve exigir um deploy.
+              {t('settings.consentNote')}
             </span>
           </Card>
         </>
       ) : null}
 
       <span style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
-        {t('chat.testAccount')}: {account?.isTestAccount === true ? 'sim' : 'não'}
+        {t('chat.testAccount')}: {t(account?.isTestAccount === true ? 'common.yes' : 'common.no')}
       </span>
     </div>
   );

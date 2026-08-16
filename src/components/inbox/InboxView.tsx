@@ -24,13 +24,14 @@ import { ThreadView } from '../chat/ThreadView';
 
 export const TWO_PANE_MIN_WIDTH = 720;
 
+/** The six the feed route accepts; the labels come from the catalog. */
 const FILTERS = [
-  { key: 'mine', pt: 'Minhas', en: 'Mine' },
-  { key: 'unassigned', pt: 'Sem responsável', en: 'Unassigned' },
-  { key: 'all', pt: 'Todas', en: 'All' },
-  { key: 'campaign_replies', pt: 'Respostas a campanhas', en: 'Campaign replies' },
-  { key: 'window_expiring', pt: 'A fechar', en: 'Closing soon' },
-  { key: 'closed', pt: 'Fechadas', en: 'Closed' },
+  'mine',
+  'unassigned',
+  'all',
+  'campaign_replies',
+  'window_expiring',
+  'closed',
 ] as const;
 
 const ThreadRow = ({
@@ -258,28 +259,27 @@ export const InboxView = () => {
           borderBottom: `1px solid ${theme.border.color.light}`,
         }}
       >
-        {FILTERS.map((entry) => (
+        {FILTERS.map((key) => (
           <button
-            key={entry.key}
+            key={key}
             type="button"
-            onClick={() => setFilter(entry.key)}
-            aria-pressed={filter === entry.key}
+            onClick={() => setFilter(key)}
+            aria-pressed={filter === key}
             style={{
               border: `1px solid ${
-                filter === entry.key ? theme.border.color.strong : theme.border.color.light
+                filter === key ? theme.border.color.strong : theme.border.color.light
               }`,
               borderRadius: theme.border.radius.pill,
               background:
-                filter === entry.key ? theme.background.transparent.light : 'transparent',
-              color:
-                filter === entry.key ? theme.font.color.primary : theme.font.color.tertiary,
+                filter === key ? theme.background.transparent.light : 'transparent',
+              color: filter === key ? theme.font.color.primary : theme.font.color.tertiary,
               cursor: 'pointer',
               fontSize: theme.font.size.xxs,
               padding: `${theme.spacing[0.5]} ${theme.spacing[2]}`,
               whiteSpace: 'nowrap',
             }}
           >
-            {lang === 'pt' ? entry.pt : entry.en}
+            {t(`inbox.${key}`)}
           </button>
         ))}
       </div>
@@ -305,7 +305,7 @@ export const InboxView = () => {
                   fontSize: theme.font.size.sm,
                 }}
               >
-                —
+                {t('inbox.empty')}
               </div>
             ) : null}
 
@@ -328,7 +328,7 @@ export const InboxView = () => {
               <button
                 type="button"
                 onClick={() => setSelectedId(null)}
-                aria-label="Voltar"
+                aria-label={t('common.back')}
                 style={{
                   alignSelf: 'flex-start',
                   border: 'none',
@@ -339,7 +339,7 @@ export const InboxView = () => {
                   padding: theme.spacing[1],
                 }}
               >
-                ← {lang === 'pt' ? 'Conversas' : 'Conversations'}
+                ← {t('inbox.conversations')}
               </button>
             ) : null}
 
@@ -351,7 +351,7 @@ export const InboxView = () => {
                   fontSize: theme.font.size.sm,
                 }}
               >
-                {lang === 'pt' ? 'Escolha uma conversa' : 'Pick a conversation'}
+                {t('inbox.pick')}
               </div>
             ) : (
               <ThreadView threadId={selectedId} variant="inbox" />

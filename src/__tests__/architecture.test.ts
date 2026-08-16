@@ -423,3 +423,53 @@ describe('build-time versus runtime modules', () => {
     expect(offending.map((file) => relative(SRC, file))).toEqual([]);
   });
 });
+
+/**
+ * Copy keys (FR-UI-5).
+ *
+ * A `t('campaign.col.nmae')` renders as `campaign.col.nmae` on screen — chosen
+ * deliberately over rendering nothing, because a blank denial reads as "you may
+ * send". But visible is not the same as noticed, and a large mechanical sweep
+ * of inline strings onto a catalog is exactly where a typo hides.
+ *
+ * Only literal keys can be checked. `t(`campaign.counter.${key}`)` and
+ * `t(`policy.${reason}`)` are resolved from server values at runtime, and the
+ * catalog carries a row for every value those can take.
+ */
+describe('copy catalog', () => {
+  const componentFiles = files.filter(
+    (file) => file.startsWith(join(SRC, 'components')) && !isTestFile(file),
+  );
+
+  it('scanned the component tree', () => {
+    expect(componentFiles.length).toBeGreaterThan(8);
+  });
+
+  it('uses no copy key that the catalog does not define', async () => {
+    const { TABLES } = await import('../components/common/copy');
+    const known = new Set(Object.keys(TABLES.pt));
+    const missing: string[] = [];
+
+    for (const file of componentFiles) {
+      for (const match of contentsOf(file).matchAll(/\bt\('([^']+)'/g)) {
+        const key = match[1]!;
+
+        if (!known.has(key)) missing.push(`${relative(SRC, file)}: ${key}`);
+      }
+    }
+
+    expect(missing).toEqual([]);
+  });
+
+  /**
+   * The other direction is a warning, not a failure: a key can legitimately be
+   * reached only through interpolation, and deleting one because a scanner
+   * could not see it used would remove the copy for a Meta error code that
+   * appears twice a year.
+   */
+  it('was able to resolve the catalog', async () => {
+    const { TABLES } = await import('../components/common/copy');
+
+    expect(Object.keys(TABLES.pt).length).toBeGreaterThan(100);
+  });
+});

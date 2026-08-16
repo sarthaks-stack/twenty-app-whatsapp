@@ -77,7 +77,7 @@ export const Composer = ({
   };
 
   const disabledReason = !canSend
-    ? 'Sem permissão para enviar.'
+    ? t('chat.noPermission')
     : reason === null
       ? null
       : t(`policy.${reason}`);
@@ -125,7 +125,7 @@ export const Composer = ({
           <button
             type="button"
             onClick={onDismissRefusal}
-            aria-label="Fechar aviso"
+            aria-label={t('common.dismiss')}
             style={{
               border: 'none',
               background: 'transparent',

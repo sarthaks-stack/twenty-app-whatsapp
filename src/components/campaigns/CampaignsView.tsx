@@ -89,7 +89,7 @@ export const CampaignsView = () => {
         }}
       >
         {campaign === null ? (
-          <Banner>A carregar…</Banner>
+          <Banner>{t('common.loading')}</Banner>
         ) : (
           <CampaignDetail
             campaign={campaign}
@@ -126,18 +126,22 @@ export const CampaignsView = () => {
         <span
           style={{ fontWeight: theme.font.weight.semiBold, fontSize: theme.font.size.md }}
         >
-          Campanhas
+          {t('campaign.title')}
         </span>
         <span style={{ flex: '1 1 auto' }} />
         {canManage ? (
-          <ActionButton label="Nova campanha" tone="primary" onClick={() => setScreen('builder')} />
+          <ActionButton
+            label={t('campaign.new')}
+            tone="primary"
+            onClick={() => setScreen('builder')}
+          />
         ) : null}
       </div>
 
       {list.isStale ? <Banner tone="danger">{t('chat.offline')}</Banner> : null}
 
       {anyRunning ? (
-        <Banner>Uma campanha está a decorrer — os números actualizam sozinhos.</Banner>
+        <Banner>{t('campaign.running')}</Banner>
       ) : null}
 
       <Card>
@@ -147,15 +151,21 @@ export const CampaignsView = () => {
           >
             <thead>
               <tr style={{ textAlign: 'left', color: theme.font.color.tertiary }}>
-                <th style={{ padding: theme.spacing[1] }}>Nome</th>
-                <th style={{ padding: theme.spacing[1] }}>Estado</th>
-                <th style={{ padding: theme.spacing[1] }}>Destinatários</th>
-                <th style={{ padding: theme.spacing[1] }}>Entregues</th>
-                <th style={{ padding: theme.spacing[1] }}>Lidas</th>
-                <th style={{ padding: theme.spacing[1] }}>Falhadas</th>
-                <th style={{ padding: theme.spacing[1] }}>Respostas</th>
-                <th style={{ padding: theme.spacing[1] }}>Custo</th>
-                <th style={{ padding: theme.spacing[1] }}>Criada</th>
+                {[
+                  'campaign.col.name',
+                  'campaign.col.status',
+                  'campaign.counter.recipientCount',
+                  'campaign.counter.deliveredCount',
+                  'campaign.counter.readCount',
+                  'campaign.counter.failedCount',
+                  'campaign.counter.respondedCount',
+                  'campaign.counter.actualCost',
+                  'campaign.col.created',
+                ].map((key) => (
+                  <th key={key} style={{ padding: theme.spacing[1] }}>
+                    {t(key)}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -169,7 +179,7 @@ export const CampaignsView = () => {
                       color: theme.font.color.tertiary,
                     }}
                   >
-                    Ainda não há campanhas.
+                    {t('campaign.none')}
                   </td>
                 </tr>
               ) : null}

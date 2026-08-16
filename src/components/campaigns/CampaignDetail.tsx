@@ -54,15 +54,15 @@ type Preflight = {
 };
 
 const COUNTERS = [
-  ['recipientCount', 'Destinatários'],
-  ['queuedCount', 'Em fila'],
-  ['sentCount', 'Enviadas'],
-  ['deliveredCount', 'Entregues'],
-  ['readCount', 'Lidas'],
-  ['respondedCount', 'Respostas'],
-  ['failedCount', 'Falhadas'],
-  ['skippedCount', 'Ignoradas'],
-  ['excludedCount', 'Excluídas'],
+  'recipientCount',
+  'queuedCount',
+  'sentCount',
+  'deliveredCount',
+  'readCount',
+  'respondedCount',
+  'failedCount',
+  'skippedCount',
+  'excludedCount',
 ] as const;
 
 export const CampaignDetail = ({
@@ -137,7 +137,7 @@ export const CampaignDetail = ({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing[2] }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing[2] }}>
-        <ActionButton label="← Campanhas" onClick={onBack} />
+        <ActionButton label={`← ${t('campaign.title')}`} onClick={onBack} />
         <span
           style={{
             fontWeight: theme.font.weight.semiBold,
@@ -152,15 +152,16 @@ export const CampaignDetail = ({
 
         {canManage && status === 'READY' ? (
           <ActionButton
-            label="Lançar"
+            label={t('campaign.launch')}
             tone="primary"
             busy={busy}
             onClick={() =>
               void confirmThen(
-                'Lançar',
-                `${preflight?.recipients.total ?? 0} destinatários, ~$${(
-                  preflight?.cost.estimatedUsd ?? 0
-                ).toFixed(2)}`,
+                t('campaign.launch'),
+                t('campaign.launchSubtitle', {
+                  count: preflight?.recipients.total ?? 0,
+                  cost: (preflight?.cost.estimatedUsd ?? 0).toFixed(2),
+                }),
                 'launch',
               )
             }
@@ -168,16 +169,20 @@ export const CampaignDetail = ({
         ) : null}
         {canManage && (status === 'RUNNING' || status === 'TIER_WAITING') ? (
           <ActionButton
-            label="Pausar"
+            label={t('campaign.pause')}
             busy={busy}
-            onClick={() => void confirmThen('Pausar', campaign.name ?? '', 'pause')}
+            onClick={() =>
+              void confirmThen(t('campaign.pause'), String(campaign.name ?? ''), 'pause')
+            }
           />
         ) : null}
         {canManage && status === 'PAUSED' ? (
           <ActionButton
-            label="Retomar"
+            label={t('campaign.resume')}
             busy={busy}
-            onClick={() => void confirmThen('Retomar', campaign.name ?? '', 'resume')}
+            onClick={() =>
+              void confirmThen(t('campaign.resume'), String(campaign.name ?? ''), 'resume')
+            }
           />
         ) : null}
         {canManage &&
@@ -185,13 +190,13 @@ export const CampaignDetail = ({
         status !== 'CANCELLED' &&
         status !== 'FAILED' ? (
           <ActionButton
-            label="Cancelar"
+            label={t('campaign.cancel')}
             tone="danger"
             busy={busy}
             onClick={() =>
               void confirmThen(
-                'Cancelar',
-                'As mensagens ainda não enviadas não serão enviadas.',
+                t('campaign.cancel'),
+                t('campaign.cancelSubtitle'),
                 'cancel',
                 'danger',
               )
@@ -203,28 +208,27 @@ export const CampaignDetail = ({
       {error === null ? null : <Banner tone="danger">{error}</Banner>}
 
       {campaign.statusReason === null || campaign.statusReason === undefined ? null : (
-        <Banner>Motivo: {String(campaign.statusReason)}</Banner>
+        <Banner>
+          {t('campaign.reason')}: {String(campaign.statusReason)}
+        </Banner>
       )}
 
       {campaign.pacingObserved === true ? (
-        <Banner>
-          O ritmo foi reduzido para respeitar o limite do número — a campanha demora mais do
-          que o previsto, e nada foi perdido.
-        </Banner>
+        <Banner>{t('campaign.pacing')}</Banner>
       ) : null}
 
-      <Card title="Números">
+      <Card title={t('campaign.numbers')}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: theme.spacing[4] }}>
-          {COUNTERS.map(([key, caption]) => (
+          {COUNTERS.map((key) => (
             <div key={key} style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={label}>{caption}</span>
+              <span style={label}>{t(`campaign.counter.${key}`)}</span>
               <span style={{ fontSize: theme.font.size.lg, color: theme.font.color.primary }}>
                 {Number(campaign[key] ?? 0)}
               </span>
             </div>
           ))}
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={label}>Custo real</span>
+            <span style={label}>{t('campaign.counter.actualCost')}</span>
             <span style={{ fontSize: theme.font.size.lg, color: theme.font.color.primary }}>
               ${Number(campaign.actualCostUsd ?? 0).toFixed(2)}
             </span>
@@ -234,16 +238,16 @@ export const CampaignDetail = ({
 
       {preflight === null ? null : (
         <>
-          <Card title="Pré-voo — audiência">
+          <Card title={t('campaign.preflightAudience')}>
             <div style={{ display: 'flex', gap: theme.spacing[4], flexWrap: 'wrap' }}>
               <div>
-                <span style={label}>Vão receber</span>
+                <span style={label}>{t('campaign.willReceive')}</span>
                 <div style={{ fontSize: theme.font.size.lg }}>
                   {preflight.recipients.total}
                 </div>
               </div>
               <div>
-                <span style={label}>Excluídos</span>
+                <span style={label}>{t('campaign.excluded')}</span>
                 <div style={{ fontSize: theme.font.size.lg }}>
                   {preflight.recipients.excluded}
                 </div>
@@ -267,27 +271,47 @@ export const CampaignDetail = ({
               ))}
           </Card>
 
-          <Card title="Pré-voo — custo e limite">
+          <Card title={t('campaign.preflightCost')}>
             <div style={{ fontSize: theme.font.size.sm }}>
-              ~${preflight.cost.estimatedUsd.toFixed(2)} a $
-              {preflight.cost.ratePerMessageUsd} por mensagem
+              {t('campaign.perMessage', {
+                total: preflight.cost.estimatedUsd.toFixed(2),
+                rate: preflight.cost.ratePerMessageUsd,
+              })}
             </div>
             <div style={label}>{preflight.cost.note}</div>
 
             {preflight.tier === null ? null : (
               <div style={{ fontSize: theme.font.size.xs, color: theme.font.color.secondary }}>
-                Escalão {preflight.tier.tier}: {preflight.tier.used} usados de{' '}
-                {preflight.tier.limit}, {preflight.tier.reserve} reservados para conversas
-                1:1 — {preflight.tier.available} disponíveis hoje.
-                {' '}
-                {JSON.stringify(preflight.tier.spread)}
+                {t('campaign.tierLine', {
+                  tier: preflight.tier.tier,
+                  used: preflight.tier.used,
+                  limit: preflight.tier.limit,
+                  reserve: preflight.tier.reserve,
+                  available: preflight.tier.available,
+                })}
+              </div>
+            )}
+
+            {/*
+              The spread is the number that turns "your audience is bigger than
+              your daily allowance" from a surprise two days in into a sentence
+              read before launch (R-10).
+            */}
+            {preflight.tier === null || preflight.tier.spread.days === null ? null : (
+              <div style={{ fontSize: theme.font.size.xs, color: theme.font.color.secondary }}>
+                {preflight.tier.spread.days <= 1
+                  ? t('campaign.spreadFits')
+                  : t('campaign.spreadDays', {
+                      firstDay: preflight.tier.spread.firstDay,
+                      days: preflight.tier.spread.days,
+                    })}
               </div>
             )}
           </Card>
 
-          <Card title="Pré-voo — qualidade e modelo">
+          <Card title={t('campaign.preflightQuality')}>
             <div style={{ fontSize: theme.font.size.xs }}>
-              Qualidade: {preflight.quality.rating}
+              {t('campaign.quality')}: {preflight.quality.rating}
               {preflight.quality.gate.allowed ? '' : ` — ${preflight.quality.gate.reason ?? ''}`}
             </div>
 
@@ -305,13 +329,13 @@ export const CampaignDetail = ({
                   checked={acknowledgeQuality}
                   onChange={(event) => setAcknowledgeQuality(event.target.checked)}
                 />
-                Reconheço a classificação e quero lançar mesmo assim
+                {t('campaign.acknowledge')}
               </label>
             )}
 
             {acknowledgeQuality && status === 'READY' ? (
               <ActionButton
-                label="Lançar mesmo assim"
+                label={t('campaign.launchAnyway')}
                 tone="danger"
                 busy={busy}
                 onClick={() => void run('launch', { acknowledgeQuality: true })}
@@ -330,7 +354,7 @@ export const CampaignDetail = ({
           </Card>
 
           {preflight.preview.length === 0 ? null : (
-            <Card title="Pré-voo — como fica">
+            <Card title={t('campaign.preflightPreview')}>
               <div
                 style={{
                   border: `1px dashed ${theme.border.color.medium}`,
@@ -356,7 +380,7 @@ export const CampaignDetail = ({
 
           {canManage && status === 'READY' ? (
             <ActionButton
-              label="Envio de teste"
+              label={t('campaign.testSend')}
               busy={busy}
               onClick={() => void run('testSend')}
             />
@@ -364,14 +388,14 @@ export const CampaignDetail = ({
         </>
       )}
 
-      <Card title={`Destinatários (amostra de ${recipients.length})`}>
+      <Card title={t('campaign.recipientsSample', { count: recipients.length })}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse', fontSize: theme.font.size.xs, width: '100%' }}>
             <thead>
               <tr style={{ textAlign: 'left', color: theme.font.color.tertiary }}>
-                <th style={{ padding: theme.spacing[1] }}>Telefone</th>
-                <th style={{ padding: theme.spacing[1] }}>Estado</th>
-                <th style={{ padding: theme.spacing[1] }}>Motivo</th>
+                <th style={{ padding: theme.spacing[1] }}>{t('campaign.col.phone')}</th>
+                <th style={{ padding: theme.spacing[1] }}>{t('campaign.col.status')}</th>
+                <th style={{ padding: theme.spacing[1] }}>{t('campaign.col.reason')}</th>
               </tr>
             </thead>
             <tbody>

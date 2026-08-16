@@ -103,7 +103,7 @@ export const TemplatePicker = ({
     >
       {templates.length === 0 ? (
         <div style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
-          Não há modelos publicados para este número.
+          {t('chat.noTemplates')}
         </div>
       ) : (
         <label style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing[1] }}>
@@ -182,7 +182,7 @@ export const TemplatePicker = ({
 
       {validation !== null && !validation.ok ? (
         <div style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
-          Em falta: {validation.missingKeys.join(', ')}
+          {t('chat.missing')}: {validation.missingKeys.join(', ')}
         </div>
       ) : null}
 
@@ -217,7 +217,7 @@ export const TemplatePicker = ({
         <button
           type="button"
           onClick={onCancel}
-          aria-label="Cancelar"
+          aria-label={t('common.cancel')}
           style={{
             border: `1px solid ${theme.border.color.medium}`,
             borderRadius: theme.border.radius.sm,
@@ -228,7 +228,7 @@ export const TemplatePicker = ({
             padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
           }}
         >
-          Cancelar
+          {t('common.cancel')}
         </button>
       </div>
     </div>

@@ -4,6 +4,7 @@ import { useTheme } from 'twenty-ui/theme-constants';
 import type { AccountProjection } from '../../domain/feed/projection';
 import type { VariableSpec } from '../../domain/template-spec';
 import type { FeedTemplate } from '../common/use-feed';
+import { useCopy } from '../common/copy';
 import { ActionButton, Banner, Card, Field, useInputStyle } from '../common/ui';
 import { useCampaignActions } from './campaign-actions';
 
@@ -40,7 +41,12 @@ export type CampaignBuilderProps = {
 
 type AudienceKind = 'view' | 'manual';
 
-const STEPS = ['Básico', 'Modelo', 'Audiência', 'Variáveis'] as const;
+const STEPS = [
+  'campaign.step.basics',
+  'campaign.step.template',
+  'campaign.step.audience',
+  'campaign.step.variables',
+] as const;
 
 const specOf = (template: FeedTemplate | undefined): VariableSpec | null =>
   template?.variableSpec === null || template?.variableSpec === undefined
@@ -55,6 +61,7 @@ export const CampaignBuilder = ({
 }: CampaignBuilderProps) => {
   const theme = useTheme();
   const input = useInputStyle();
+  const { t } = useCopy();
   const { call } = useCampaignActions();
 
   const [step, setStep] = useState(0);
@@ -166,7 +173,7 @@ export const CampaignBuilder = ({
         const id = created.campaign?.id ?? null;
 
         if (id === null) {
-          setError('O servidor criou a campanha mas não devolveu o id.');
+          setError(t('campaign.createdNoId'));
 
           return false;
         }
@@ -176,7 +183,7 @@ export const CampaignBuilder = ({
 
       return true;
     },
-    [call, campaignId],
+    [call, campaignId, t],
   );
 
   const next = useCallback(async () => {
@@ -241,9 +248,9 @@ export const CampaignBuilder = ({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing[2] }}>
       <div style={{ display: 'flex', gap: theme.spacing[2], alignItems: 'center' }}>
-        {STEPS.map((label, index) => (
+        {STEPS.map((key, index) => (
           <span
-            key={label}
+            key={key}
             style={{
               fontSize: theme.font.size.xxs,
               color: index === step ? theme.font.color.primary : theme.font.color.tertiary,
@@ -251,17 +258,17 @@ export const CampaignBuilder = ({
                 index === step ? theme.font.weight.semiBold : theme.font.weight.regular,
             }}
           >
-            {index + 1}. {label}
+            {index + 1}. {t(key)}
           </span>
         ))}
       </div>
 
       {error === null ? null : <Banner tone="danger">{error}</Banner>}
 
-      <Card title={STEPS[step]}>
+      <Card title={t(STEPS[step])}>
         {step === 0 ? (
           <>
-            <Field label="Nome">
+            <Field label={t('campaign.name')}>
               <input
                 type="text"
                 value={name}
@@ -269,7 +276,7 @@ export const CampaignBuilder = ({
                 style={input}
               />
             </Field>
-            <Field label="Número de envio">
+            <Field label={t('campaign.account')}>
               <select
                 value={accountId}
                 onChange={(event) => setAccountId(event.target.value)}
@@ -282,10 +289,7 @@ export const CampaignBuilder = ({
                 ))}
               </select>
             </Field>
-            <Field
-              label="Agendamento"
-              hint="Vazio envia assim que for lançada. A hora é a do seu navegador e é guardada em UTC."
-            >
+            <Field label={t('campaign.schedule')} hint={t('campaign.scheduleHint')}>
               <input
                 type="datetime-local"
                 value={scheduledAt}
@@ -297,10 +301,7 @@ export const CampaignBuilder = ({
         ) : null}
 
         {step === 1 ? (
-          <Field
-            label="Modelo"
-            hint="Só modelos aprovados e publicados. Os de autenticação não servem para campanhas."
-          >
+          <Field label={t('campaign.step.template')} hint={t('campaign.templateHint')}>
             <select
               value={templateId}
               onChange={(event) => setTemplateId(event.target.value)}
@@ -318,19 +319,19 @@ export const CampaignBuilder = ({
 
         {step === 2 ? (
           <>
-            <Field label="Origem">
+            <Field label={t('campaign.source')}>
               <select
                 value={audienceKind}
                 onChange={(event) => setAudienceKind(event.target.value as AudienceKind)}
                 style={input}
               >
-                <option value="view">Vista guardada de Pessoas</option>
-                <option value="manual">Lista de ids</option>
+                <option value="view">{t('campaign.sourceView')}</option>
+                <option value="manual">{t('campaign.sourceManual')}</option>
               </select>
             </Field>
 
             {audienceKind === 'view' ? (
-              <Field label="Vista">
+              <Field label={t('campaign.view')}>
                 <select
                   value={viewId}
                   onChange={(event) => setViewId(event.target.value)}
@@ -345,7 +346,7 @@ export const CampaignBuilder = ({
                 </select>
               </Field>
             ) : (
-              <Field label="Ids de Pessoa" hint="Separados por vírgula ou por linha.">
+              <Field label={t('campaign.personIds')} hint={t('campaign.personIdsHint')}>
                 <textarea
                   rows={4}
                   value={personIds}
@@ -361,7 +362,7 @@ export const CampaignBuilder = ({
           <>
             {labels.length === 0 ? (
               <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
-                Este modelo não tem variáveis.
+                {t('campaign.noVariables')}
               </span>
             ) : null}
 
@@ -382,7 +383,7 @@ export const CampaignBuilder = ({
 
               return (
                 <Card key={label} title={label}>
-                  <Field label="Origem">
+                  <Field label={t('campaign.source')}>
                     <select
                       value={binding.kind}
                       onChange={(event) =>
@@ -390,13 +391,13 @@ export const CampaignBuilder = ({
                       }
                       style={input}
                     >
-                      <option value="field">Campo do contacto</option>
-                      <option value="static">Texto fixo</option>
+                      <option value="field">{t('campaign.bindingField')}</option>
+                      <option value="static">{t('campaign.bindingStatic')}</option>
                     </select>
                   </Field>
 
                   {binding.kind === 'field' ? (
-                    <Field label="Campo">
+                    <Field label={t('campaign.field')}>
                       <select
                         value={binding.path}
                         onChange={(event) => update({ path: event.target.value })}
@@ -410,7 +411,7 @@ export const CampaignBuilder = ({
                       </select>
                     </Field>
                   ) : (
-                    <Field label="Texto">
+                    <Field label={t('campaign.text')}>
                       <input
                         type="text"
                         value={binding.value}
@@ -420,10 +421,7 @@ export const CampaignBuilder = ({
                     </Field>
                   )}
 
-                  <Field
-                    label="Alternativa"
-                    hint="Usada quando o campo está vazio. Sem alternativa, o contacto é excluído."
-                  >
+                  <Field label={t('campaign.fallback')} hint={t('campaign.fallbackHint')}>
                     <input
                       type="text"
                       value={binding.fallback}
@@ -440,13 +438,16 @@ export const CampaignBuilder = ({
 
       <div style={{ display: 'flex', gap: theme.spacing[2] }}>
         {step > 0 ? (
-          <ActionButton label="Voltar" onClick={() => setStep((current) => current - 1)} />
+          <ActionButton
+            label={t('common.back')}
+            onClick={() => setStep((current) => current - 1)}
+          />
         ) : null}
         <span style={{ flex: '1 1 auto' }} />
-        <ActionButton label="Cancelar" onClick={onCancel} />
+        <ActionButton label={t('common.cancel')} onClick={onCancel} />
         {step < STEPS.length - 1 ? (
           <ActionButton
-            label="Continuar"
+            label={t('common.continue')}
             tone="primary"
             busy={busy}
             disabled={!canAdvance}
@@ -454,7 +455,7 @@ export const CampaignBuilder = ({
           />
         ) : (
           <ActionButton
-            label="Construir audiência"
+            label={t('campaign.build')}
             tone="primary"
             busy={busy}
             onClick={() => void build()}

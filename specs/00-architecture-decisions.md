@@ -1019,17 +1019,44 @@ the send path checks — approved at Meta, renderable by the app — because
 publishing an unrenderable template puts a row in the picker that fails at Meta
 for every recipient.
 
-### D-51 — `twenty-sdk/define` is not readable at runtime, and the failure is silent
+### D-51 — D-15 recurred, and the guard that would have caught it was never run
 
-The logic-function bundler replaces everything imported from `twenty-sdk/define`
-with a stub, which `server/metadata-ids.ts` documents. The campaign builder's
-view list still walked into it:
-`resolveObjectMetadataId(STANDARD_OBJECT.person.universalIdentifier)` type-checks,
-builds, applies, and resolves `undefined` at runtime — so the lookup returned
-nothing and the audience step offered an empty dropdown, with no error in any
-log.
+Not a new decision — a record of D-15 happening again, because the way it
+happened is more useful than the rule.
 
-`PERSON_OBJECT_UID` is now a literal in `constants/universal-identifiers.ts`,
-and a unit test asserts it equals `STANDARD_OBJECT.person.universalIdentifier`.
-The test runs in Node, where the stub does not apply, so the copy cannot drift
-from the SDK without failing.
+The campaign builder's view list called
+`resolveObjectMetadataId(STANDARD_OBJECT.person.universalIdentifier)`. That is
+exactly what D-15 forbids and what `architecture.test.ts` has asserted against
+since phase 5 — verified by reverting the fix, which fails the guard with
+`logic-functions/wa-campaign-control.ts: defineLogicFunction, STANDARD_OBJECT`.
+
+It reached a running server anyway, because the deploy that carried it ran
+`typecheck` and `lint` and not `test`. Both were clean; neither is the guard.
+The symptom was an empty dropdown and nothing in any log — the failure mode
+D-15 is entirely about.
+
+Two things came out of it. `PERSON_OBJECT_UID` is now a literal in
+`constants/universal-identifiers.ts`, with a unit test asserting it still equals
+`STANDARD_OBJECT.person.universalIdentifier` — the test runs in Node, where the
+stub does not apply, so the copy cannot drift. And the ordering rule for this
+repository is now explicit: **`yarn test:unit` before `yarn twenty apply`, every
+time.** A guard that is not run is a comment.
+
+### D-52 — Copy is paired, not tabled twice
+
+`copy.ts` held a `PT` table and an `EN` table. Nothing made them agree: a key
+could exist in one and not the other, and the failure surfaces as an English
+sentence inside a Portuguese screen — or, once a cross-language fallback is
+removed, as nothing at all. Neither is visible to a reviewer who reads only one
+of the two languages.
+
+Entries are now written as `{ pt, en }` pairs and the two tables are derived, so
+a half-translated key is unrepresentable. Two tests hold the rest: every key has
+a non-blank string in both languages, and both use the same `{placeholder}` set
+— a placeholder present in one language and not the other renders as literal
+braces for half the users, which is the same defect wearing different clothes.
+
+A third guard scans the component tree for literal `t('...')` keys the catalog
+does not define. Interpolated keys — `t(\`policy.${reason}\`)` — cannot be
+checked that way, and the catalog carries a row for every value the server can
+put in them.

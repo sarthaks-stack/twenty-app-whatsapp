@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { translateWith } from './copy';
+import { TABLES, translateWith } from './copy';
 import { clockTime, countdown, dayKey, daySeparator, fileSize } from './format';
 
 const t = translateWith('pt');
@@ -76,8 +76,45 @@ describe('copy', () => {
     expect(t('policy.NOT_A_REAL_CODE')).toBe('policy.NOT_A_REAL_CODE');
   });
 
-  it('falls back to Portuguese for a key not yet translated', () => {
+  it('answers in the reader’s language', () => {
+    expect(translateWith('pt')('policy.WINDOW_CLOSED')).toContain('janela');
     expect(translateWith('en')('policy.WINDOW_CLOSED')).toContain('window');
+  });
+
+  /**
+   * The structural guarantee, asserted rather than assumed. Parallel tables let
+   * a key exist in one language and not the other, and the failure surfaces as
+   * an English sentence in a Portuguese screen — or as nothing at all. Paired
+   * entries make it unrepresentable; this is what proves the pairing held.
+   */
+  it('has both languages for every key, and neither is blank', () => {
+    const keys = Object.keys(TABLES.pt);
+
+    expect(keys.length).toBeGreaterThan(100);
+    expect(Object.keys(TABLES.en)).toEqual(keys);
+
+    const blank = keys.filter(
+      (key) => TABLES.pt[key]!.trim() === '' || TABLES.en[key]!.trim() === '',
+    );
+
+    expect(blank).toEqual([]);
+  });
+
+  /**
+   * A `{placeholder}` that exists in one language and not the other renders as
+   * literal braces for half the users — the kind of defect that survives review
+   * because the language the reviewer reads is fine.
+   */
+  it('uses the same placeholders in both languages', () => {
+    const placeholders = (text: string): string[] =>
+      (text.match(/\{[a-zA-Z]+\}/g) ?? []).sort();
+
+    const mismatched = Object.keys(TABLES.pt).filter(
+      (key) =>
+        placeholders(TABLES.pt[key]!).join(',') !== placeholders(TABLES.en[key]!).join(','),
+    );
+
+    expect(mismatched).toEqual([]);
   });
 
   it('substitutes values', () => {

@@ -582,3 +582,67 @@ confines every `destroy*` mutation to `src/server/erasure.ts`. That is stronger 
 was — it names the module, fails the build, and states the reason — and it does not break the
 feature it protects. Anything else that must destroy records (the retention purge, SEC-9) joins
 the list deliberately, with its own justification.
+
+---
+
+## D-22 — A campaign thread carries the person the campaign chose
+
+**Status: DECIDED (forced by a live defect)** · 2026-08-16
+
+`upsertThread` resolved identity only for inbound, on the reasoning that an outbound-initiated
+thread has nobody to match. That is true for a rep starting a chat from a phone number. It is
+false for a campaign, which picked the contact *out of a CRM audience* and therefore knows
+exactly who it is — and the runner was not telling the thread.
+
+The consequence is not cosmetic, because **the sender reads consent through `thread.personId`**.
+With no link the policy gate saw no person, read `UNKNOWN`, and reached its marketing-only
+branch. That branch happened to deny the run under test, which is how the defect surfaced at all:
+the denial came back `NO_CONSENT` for two contacts who had explicitly opted out. Had the campaign
+used a **utility** template, no branch would have fired and the opt-out that arrived while the
+message sat in the queue would have been ignored — the exact failure FR-CON-2 and SEC-6 forbid.
+
+Two lesser consequences followed from the same gap: the conversation never appeared on the
+contact's record, and a reply went back through identity matching, which can create a *second*
+Person for someone the campaign already had.
+
+`upsertThread` now accepts a known `personId`. It links an unlinked thread in place and **never
+re-links a linked one** — an identity a human decided, or that inbound matching resolved,
+outranks a caller's assumption, and silently moving a conversation to a different contact is
+worse than leaving it where it is.
+
+Nothing short of a live run would have found this. It type-checks, it passes every unit test, and
+the denial it produces looks like a policy working correctly.
+
+---
+
+## D-23 — An audience filter is translated exactly or refused by name
+
+**Status: DECIDED** · 2026-08-16
+
+FR-CAM-2a lets an admin pick a saved Twenty view as a campaign audience. A view is *metadata* —
+`viewFilter` rows against `fieldMetadataId`, nested in `viewFilterGroup`s — and the Core API
+accepts none of that, so the audience path has to translate it into a `PersonFilterInput`.
+
+A translation that is *nearly* right is worse than none. The audience is who receives a marketing
+message; a dropped condition widens it, and the result is indistinguishable from working. So
+`src/domain/campaign/view-filter.ts` translates each (field type, operand) pair exactly or returns
+a sentence saying why it cannot, and **one untranslatable filter refuses the whole view** — at
+build time, with a 400 naming the filter, rather than three log lines deep inside a queued
+snapshot.
+
+Deliberately unsupported today:
+
+- **`IS_RELATIVE`.** "This month" and "the last 30 days" have calendar boundaries whose
+  interpretation we would be guessing at, in a timezone we would also be guessing at. Live
+  probing showed Twenty stores these as a token — `PAST_30_DAY` — rather than the structured
+  object the naming suggests, which is one more thing to get wrong. Refusing costs the admin an
+  absolute date; guessing costs the wrong several hundred people a message.
+- **`VECTOR_SEARCH`.** A full-text search cannot define an audience: its results change with the
+  index.
+- **`NOT` filter groups.** They do not appear in the UI's filter builder, and treating one as
+  `AND` would invert the audience.
+
+Everything else the builder can produce is covered: text (including composite fan-out across
+`firstName`/`lastName` when no sub-field is named), select, multi-select, boolean, number, date
+and relation, with `IS_EMPTY` on text correctly meaning *null or empty string*, since Twenty
+writes `''` into a cleared column.

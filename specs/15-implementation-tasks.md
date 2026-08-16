@@ -289,18 +289,36 @@ awaiting review.
 
 ---
 
-## Phase 8 — Campaigns ⬜
+## Phase 8 — Campaigns ✅
 
 | # | Function | Trigger | Status | Requirements |
 |---|---|---|---|---|
-| 8.1 | `wa-campaign-control` — build, preview, preflight, launch, pause, resume, cancel, test send | httpRoute | ⬜ | FR-CAM-8, SEC-12 |
-| 8.2 | `wa-campaign-snapshot` — self-requeuing, kv duplicate set | queued | ⬜ | FR-CAM-2/3, NFR-S4 |
-| 8.3 | `wa-campaign-runner` — claim, send, stale-claim sweep | cron 1 min | ⬜ | AR-20, AR-21 |
-| 8.4 | `wa-stats-rollup` — kv delta fold | cron | ⬜ | FR-CAM-10 |
-| 8.5 | Integration: resumability, `tier_waiting`, breaker, cancel semantics | ⬜ | specs/12 §2 |
+| 8.1 | `wa-campaign-control` — create, update, build, preview, preflight, testSend, launch, pause, resume, cancel | httpRoute | ✅ | FR-CAM-8, SEC-12 |
+| 8.2 | `wa-campaign-snapshot` — self-requeuing, duplicates read from the rows | queued | ✅ | FR-CAM-2/3, NFR-S4 |
+| 8.3 | `wa-campaign-runner` — claim, queue, stale-claim sweep | cron 1 min | ✅ | AR-20, AR-21 |
+| 8.4 | `wa-stats-rollup` — funnel recomputed, `kv` delta as the change hint | cron 1 min | ✅ | FR-CAM-10 |
+| 8.5 | Saved-view audience translation (`domain/campaign/view-filter.ts`) | — | ✅ | FR-CAM-2a, D-23 |
+| 8.6 | Tier ledger (`server/tier-ledger.ts`), written after acceptance | — | 🔨 unit only | AR-21 |
+| 8.7 | Integration: exclusions, cancel semantics, terminal refusals, view refusal | ✅ | specs/12 §2 |
 
-**~6 days.** 8.3's three independent no-duplicate guarantees (claim-before-act, unique
-`(campaign, person)`, unique WAMID) are the release-gate criterion.
+**Verified at level 3** against a live Twenty and the connected WABA, arranged so nothing was
+sent: the workspace finished with zero outbound messages. The full record is in
+[07 §14.8](07-campaigns.md#148-live-verification-2026-08-16).
+
+Two findings that only a live run could produce:
+
+- **A campaign thread did not carry the person the campaign chose** ([D-22](00-architecture-decisions.md#d-22--a-campaign-thread-carries-the-person-the-campaign-chose)).
+  The sender reads consent through `thread.personId`; with no link it read `UNKNOWN`. A utility
+  campaign would have ignored an opt-out that arrived while its message was queued.
+- **The rollup was never told about a send that failed before Meta** (07 §14.2). A campaign whose
+  whole batch was denied by policy reported `failedCount: 0`.
+
+**Still unproven: anything downstream of a real Meta acceptance** — 8.6's increment,
+`pacingObserved`, the failure-rate breaker, and the delivered/read funnel. Each is unit tested and
+none has met Meta. One campaign to a number the business is willing to message closes all four.
+
+`tier_waiting` and resumability were exercised through their unit tests and the state machine
+only; reaching them live needs an account at its tier ceiling.
 
 ---
 
@@ -355,10 +373,11 @@ Only P-1 has been answered. The rest still gate design decisions:
 | **P-1** | Does Meta accept our GET handshake? | — | ✅ **passed** against real Meta |
 | P-2 | Rate limit on `/s/*` routes | 9.1 polling intervals | raise intervals to 10 s |
 | P-3 | Can the app role write `timelineActivity`? | 4.11 | downgrade FR-TL-1 to the WhatsApp tab |
-| P-4 | Does a soft-deleted row hold a unique index? | 10.4 | purge hard-destroys |
+| P-4 | Does a soft-deleted row hold a unique index? | 10.4 | purge hard-destroys. *No longer gates campaigns: the snapshot upserts, so either answer is correct* |
 | P-5 | Can the Core API filter `additionalPhones`? | 4.8 | derived indexed array field |
 | P-6 | Front-component chat feasibility | 9.2–9.7 | UI tiers 2/3 |
 | P-7 | Row-level permission predicates | SEC-7 enforcement | route-level filtering, limitation documented |
+| P-8 | Does `cronTriggerSettings.pattern` accept a six-field (seconds) pattern? | 07 §10's 30 s freshness | one-minute ticks, ≤ 60 s freshness (as built) |
 
 ---
 
@@ -367,14 +386,15 @@ Only P-1 has been answered. The rest still gate design decisions:
 ```
 Phase 2 tail (2d) → Phase 3 (3d) → Phase 4 (5d) → Phase 5 (6d) ── first observable loop
                                                       ↓
-                                        Phase 6 (5d) → Phase 7 (4d) → Phase 8 (6d)
+                                        Phase 6 ✅ → Phase 7 ✅ → Phase 8 ✅
                                                       ↓
                               Phase 9 (15d, P-6 gated) → Phase 10 (8d) → release gate
 ```
 
-**~54 working days of engineering remaining**, or roughly 11 weeks for one engineer. Phases 6–8
-and 9 parallelise across two engineers to about 7 weeks, which is consistent with the
-delivery plan's 12–16 week estimate for the whole project including the ~3 weeks already spent.
+**~23 working days of engineering remaining** — phase 9 (15d) and phase 10 (8d) — or roughly 5
+weeks for one engineer. Phases 0–8 are done, which is the whole server side: every object, every
+logic function that talks to Meta or to the CRM, and the campaign pipeline. What is left is the
+user interface and the operational tail.
 
 Phase 9 is the schedule risk: it is the largest block, it is gated on an unrun probe, and Twenty
 documents front components as "under active development".

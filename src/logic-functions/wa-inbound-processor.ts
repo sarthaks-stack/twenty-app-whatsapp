@@ -21,6 +21,7 @@ import {
 import { normaliseInboundMessage } from '../domain/inbound-normalise';
 import { computeWindowExpiry } from '../domain/policy/service-window';
 import type { MetaContact, MetaMessage } from '../domain/webhook/types';
+import { noteCampaignChange } from '../server/campaign-deltas';
 import { config } from '../server/config';
 import { enqueue } from '../server/jobs';
 import { describeError, logger } from '../server/logger';
@@ -404,6 +405,15 @@ const runSideEffects = async ({
 
       if (recipient !== null && recipient.status !== RECIPIENT_STATUS.RESPONDED) {
         await patchRecipient(recipient.id, { status: RECIPIENT_STATUS.RESPONDED });
+
+        /**
+         * Without this the reply would not reach `respondedCount` until some
+         * *other* recipient's delivery status happened to wake the rollup —
+         * so the last campaign to finish sending would under-report its
+         * responses indefinitely, which is the number the whole campaign was
+         * run to produce.
+         */
+        await noteCampaignChange(thread.originCampaignId, { responded: 1 });
       }
     } catch (error) {
       log.warn('wa.inbound.campaign_attribution_failed', describeError(error));

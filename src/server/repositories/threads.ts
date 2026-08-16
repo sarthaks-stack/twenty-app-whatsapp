@@ -84,6 +84,45 @@ export const findThread = async (
   return nodesOf<WhatsappThreadRecord>(result.whatsappThreads)[0] ?? null;
 };
 
+/**
+ * Which of these numbers a human has blocked (specs/07 §3.1 rule 5).
+ *
+ * One query per snapshot page rather than one per person: an audience of
+ * 100 000 would otherwise spend its entire Core API budget asking whether each
+ * contact is blocked, and the answer is nearly always no. Returned as a set
+ * because the caller only needs membership.
+ */
+export const findBlockedWaIds = async (
+  accountId: string,
+  waIds: string[],
+): Promise<Set<string>> => {
+  if (waIds.length === 0) return new Set();
+
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappThreads: {
+          __args: {
+            filter: {
+              accountId: { eq: accountId },
+              waId: { in: waIds },
+              isBlocked: { eq: true },
+            },
+            first: waIds.length,
+          },
+          edges: { node: { waId: true } },
+        },
+      }),
+    'threads.findBlocked',
+  );
+
+  return new Set(
+    nodesOf<{ waId?: string | null }>(result.whatsappThreads)
+      .map((thread) => thread.waId)
+      .filter((waId): waId is string => typeof waId === 'string'),
+  );
+};
+
 export const findThreadById = async (id: string): Promise<WhatsappThreadRecord | null> => {
   const result = await query(
     (client) =>

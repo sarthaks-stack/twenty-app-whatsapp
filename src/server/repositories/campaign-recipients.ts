@@ -1,5 +1,5 @@
 import type { ExclusionReason, RecipientStatus } from '../../domain/constants';
-import { inBatches } from '../batching';
+import { inBatches, isUniqueViolation } from '../batching';
 import { nodesOf, query, type JsonObject } from './base';
 
 /**
@@ -8,7 +8,13 @@ import { nodesOf, query, type JsonObject } from './base';
  *
  * Ingestion touches this only to mirror a delivery status back from the
  * message, and to mark a recipient `RESPONDED` when they reply (FR-CAM-13).
- * Snapshot and claim writes belong to the campaign phase.
+ * The snapshot writes the rows; the runner claims them.
+ *
+ * **The claim is one mutation, not two.** Selecting ids and then updating them
+ * would let two runner ticks select the same rows and both believe they own
+ * them. Instead the update carries `status: PENDING` in its own filter and
+ * returns the rows it actually changed, so a tick that lost the race is handed
+ * an empty array rather than a duplicate send (AR-20 guarantee 1).
  */
 
 const RECIPIENT_FIELDS = {
@@ -134,9 +140,351 @@ export const findStaleClaimedRecipients = async (
   return nodesOf<WhatsappCampaignRecipientRecord>(result.whatsappCampaignRecipients);
 };
 
+export type RecipientCreateInput = {
+  campaignId: string;
+  personId: string;
+  status: RecipientStatus;
+  exclusionReason?: ExclusionReason | null;
+  resolvedPhone?: string | null;
+  resolvedParameters?: Record<string, unknown> | null;
+};
+
+const findRecipientByPerson = async (
+  campaignId: string,
+  personId: string,
+): Promise<WhatsappCampaignRecipientRecord | null> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappCampaignRecipients: {
+          __args: {
+            filter: { campaignId: { eq: campaignId }, personId: { eq: personId } },
+            first: 1,
+          },
+          edges: { node: RECIPIENT_FIELDS },
+        },
+      }),
+    'recipients.findByPerson',
+  );
+
+  return nodesOf<WhatsappCampaignRecipientRecord>(result.whatsappCampaignRecipients)[0] ?? null;
+};
+
+/**
+ * Writes a page of snapshot rows, chunked at 60 (NFR-S4).
+ *
+ * The fast path is one bulk create per 60 rows. The interesting path is what
+ * happens when the unique `(campaign, person)` index refuses one: Twenty
+ * reports the collision for the *whole batch*, so the batch is retried row by
+ * row, and a row that still collides is **updated in place** rather than
+ * skipped.
+ *
+ * Updating rather than skipping is what makes a rebuild mean something. The
+ * motivating case is exactly the one FR-CAM-3 describes: a campaign excludes
+ * 412 people for `no_consent`, a consent campaign wins some of them over, and
+ * the admin rebuilds. If the existing rows were merely skipped, those people
+ * would keep their stale exclusion and the rebuild would change nothing —
+ * quietly, which is the worst way for it to be wrong.
+ *
+ * It also makes the resume path idempotent without depending on how Twenty
+ * treats a soft-deleted row's unique index (probe P-4, still unanswered):
+ * whether the old row is visible or not, the outcome is one correct row.
+ */
+export const upsertRecipients = async (
+  rows: RecipientCreateInput[],
+): Promise<{ created: number; updated: number }> => {
+  if (rows.length === 0) return { created: 0, updated: 0 };
+
+  let created = 0;
+  let updated = 0;
+
+  await inBatches(
+    rows,
+    async (batch) => {
+      try {
+        const result = await query(
+          (client) =>
+            client.mutation({
+              createWhatsappCampaignRecipients: { __args: { data: batch }, id: true },
+            }),
+          'recipients.createMany',
+        );
+
+        created += (result.createWhatsappCampaignRecipients ?? []).length;
+
+        return;
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+      }
+
+      for (const row of batch) {
+        try {
+          await query(
+            (client) =>
+              client.mutation({
+                createWhatsappCampaignRecipient: { __args: { data: row }, id: true },
+              }),
+            'recipients.createOne',
+          );
+
+          created += 1;
+        } catch (rowError) {
+          if (!isUniqueViolation(rowError)) throw rowError;
+
+          const existing = await findRecipientByPerson(row.campaignId, row.personId);
+
+          /**
+           * A collision with a row we cannot then find means the index is
+           * holding a *soft-deleted* row. Re-resolving it is impossible and
+           * silently dropping the person would shrink the audience without
+           * saying so, so the failure is raised.
+           */
+          if (existing === null) throw rowError;
+
+          await patchRecipient(existing.id, {
+            status: row.status,
+            exclusionReason: row.exclusionReason ?? null,
+            resolvedPhone: row.resolvedPhone ?? null,
+            resolvedParameters: row.resolvedParameters ?? null,
+            errorCode: null,
+            errorDetail: null,
+            claimedAt: null,
+          });
+
+          updated += 1;
+        }
+      }
+    },
+    { label: 'recipients.upsertMany' },
+  );
+
+  return { created, updated };
+};
+
+/**
+ * Which of these numbers this campaign has already accepted (FR-CAM-3).
+ *
+ * The duplicate detector, and deliberately **not** the `kv` set the spec
+ * sketched. A set in `kv` has to hold every accepted number for the life of
+ * the snapshot, which at 100 000 recipients is a megabyte re-read and
+ * re-written on every page, with no compare-and-swap to make the read-modify-
+ * write safe. The rows already exist and already carry `resolvedPhone`, so
+ * asking them is exact, needs no cleanup, and survives a resume that a lost
+ * `kv` write would not.
+ */
+export const findExistingPhones = async (
+  campaignId: string,
+  phones: string[],
+): Promise<Set<string>> => {
+  if (phones.length === 0) return new Set();
+
+  const found = new Set<string>();
+
+  await inBatches(
+    phones,
+    async (batch) => {
+      const result = await query(
+        (client) =>
+          client.query({
+            whatsappCampaignRecipients: {
+              __args: {
+                filter: {
+                  campaignId: { eq: campaignId },
+                  resolvedPhone: { in: batch },
+                  /**
+                   * Only *accepted* rows occupy a number. An excluded row
+                   * keeps its `resolvedPhone` for the audit trail, and
+                   * counting it here would report the next person on that
+                   * number as a duplicate of someone we never messaged —
+                   * hiding the real reason behind a misleading one.
+                   */
+                  exclusionReason: { is: 'NULL' },
+                },
+                first: batch.length,
+              },
+              edges: { node: { resolvedPhone: true } },
+            },
+          }),
+        'recipients.findExistingPhones',
+      );
+
+      for (const row of nodesOf<{ resolvedPhone?: string | null }>(
+        result.whatsappCampaignRecipients,
+      )) {
+        if (typeof row.resolvedPhone === 'string') found.add(row.resolvedPhone);
+      }
+    },
+    { size: 200, label: 'recipients.findExistingPhones' },
+  );
+
+  return found;
+};
+
+/**
+ * Takes ownership of up to `limit` pending recipients (specs/07 §6 step g).
+ *
+ * Two statements, but the second is the one that decides: its filter still
+ * requires `PENDING`, so the rows it returns are the rows this tick won. A
+ * concurrent tick that selected the same ids gets nothing back and sends
+ * nothing — which is why the caller must use the returned rows and never the
+ * ids it asked for.
+ */
+export const claimPendingRecipients = async (
+  campaignId: string,
+  limit: number,
+  now: Date,
+): Promise<WhatsappCampaignRecipientRecord[]> => {
+  if (limit <= 0) return [];
+
+  const candidates = await query(
+    (client) =>
+      client.query({
+        whatsappCampaignRecipients: {
+          __args: {
+            filter: { campaignId: { eq: campaignId }, status: { eq: 'PENDING' } },
+            orderBy: [{ createdAt: 'AscNullsFirst' }],
+            first: Math.min(limit, 60),
+          },
+          edges: { node: { id: true } },
+        },
+      }),
+    'recipients.selectPending',
+  );
+
+  const ids = nodesOf<{ id: string }>(candidates.whatsappCampaignRecipients).map(
+    (node) => node.id,
+  );
+
+  if (ids.length === 0) return [];
+
+  const claimed = await query(
+    (client) =>
+      client.mutation({
+        updateWhatsappCampaignRecipients: {
+          __args: {
+            data: { status: 'CLAIMED', claimedAt: now.toISOString() },
+            filter: { id: { in: ids }, status: { eq: 'PENDING' } },
+          },
+          ...RECIPIENT_FIELDS,
+        },
+      }),
+    'recipients.claim',
+  );
+
+  return (claimed.updateWhatsappCampaignRecipients ??
+    []) as unknown as WhatsappCampaignRecipientRecord[];
+};
+
+/**
+ * How many recipients a campaign has in a given state.
+ *
+ * Read from the records rather than from a counter, because the counters are
+ * `kv`-derived and approximate by construction — and "are there any pending
+ * left?" decides whether a campaign is finished, which is not a question to
+ * answer approximately.
+ */
+export const countRecipients = async (
+  campaignId: string,
+  statuses: RecipientStatus[],
+): Promise<number> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappCampaignRecipients: {
+          __args: {
+            filter: {
+              campaignId: { eq: campaignId },
+              ...(statuses.length === 0 ? {} : { status: { in: statuses } }),
+            },
+            first: 1,
+          },
+          totalCount: true,
+        },
+      }),
+    'recipients.count',
+  );
+
+  return result.whatsappCampaignRecipients?.totalCount ?? 0;
+};
+
+/**
+ * The most recent terminal outcomes, newest first — the circuit breaker's
+ * window (specs/07 §8, AR-22).
+ *
+ * Read from the rows rather than kept as a running counter, so pausing and
+ * resuming a campaign does not reset the safety net. Recency is measured by
+ * `updatedAt` because a recipient reaches its terminal state by being written
+ * to; that is a proxy, but the alternative — a dedicated timestamp per
+ * outcome — would add a column to say what the row's own history already says.
+ */
+export const listRecentTerminalRecipients = async (
+  campaignId: string,
+  limit: number,
+): Promise<WhatsappCampaignRecipientRecord[]> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappCampaignRecipients: {
+          __args: {
+            filter: {
+              campaignId: { eq: campaignId },
+              status: { in: ['SENT', 'DELIVERED', 'READ', 'RESPONDED', 'FAILED', 'SKIPPED'] },
+            },
+            orderBy: [{ updatedAt: 'DescNullsLast' }],
+            // A *read* has no 60-record ceiling — that limit is for mutations.
+            // Capping here would silently shrink the configured failure window.
+            first: Math.min(limit, 500),
+          },
+          edges: { node: { id: true, status: true } },
+        },
+      }),
+    'recipients.recentTerminal',
+  );
+
+  return nodesOf<WhatsappCampaignRecipientRecord>(result.whatsappCampaignRecipients);
+};
+
+/** A sample of rows for the pre-flight breakdown and the campaign detail view. */
+export const listRecipients = async ({
+  campaignId,
+  statuses = [],
+  exclusionReason,
+  limit = 10,
+}: {
+  campaignId: string;
+  statuses?: RecipientStatus[];
+  exclusionReason?: ExclusionReason;
+  limit?: number;
+}): Promise<WhatsappCampaignRecipientRecord[]> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappCampaignRecipients: {
+          __args: {
+            filter: {
+              campaignId: { eq: campaignId },
+              ...(statuses.length === 0 ? {} : { status: { in: statuses } }),
+              ...(exclusionReason === undefined
+                ? {}
+                : { exclusionReason: { eq: exclusionReason } }),
+            },
+            orderBy: [{ createdAt: 'AscNullsFirst' }],
+            first: Math.min(limit, 60),
+          },
+          edges: { node: RECIPIENT_FIELDS },
+        },
+      }),
+    'recipients.list',
+  );
+
+  return nodesOf<WhatsappCampaignRecipientRecord>(result.whatsappCampaignRecipients);
+};
+
 export type RecipientPatch = {
   status?: RecipientStatus;
   exclusionReason?: ExclusionReason | null;
+  resolvedPhone?: string | null;
+  resolvedParameters?: Record<string, unknown> | null;
   errorCode?: string | null;
   errorDetail?: string | null;
   claimedAt?: string | null;

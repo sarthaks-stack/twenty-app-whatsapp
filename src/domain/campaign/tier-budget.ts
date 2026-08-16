@@ -1,4 +1,4 @@
-import { MESSAGING_TIER, type MessagingTier } from '../constants';
+import { MESSAGING_TIER, TEMPLATE_CATEGORY, type MessagingTier, type TemplateCategory } from '../constants';
 
 /**
  * The messaging-tier ledger (AR-21).
@@ -46,6 +46,32 @@ export const tierBudget = ({
   const reserve = Math.ceil((limit * reservePct) / 100);
 
   return { limit, used, reserve, available: Math.max(0, limit - used - reserve) };
+};
+
+/**
+ * Whether a send consumes tier allowance (AR-21).
+ *
+ * Meta counts *business-initiated* conversations: a template sent outside an
+ * open service window, and any marketing template regardless of the window —
+ * marketing is business-initiated by definition, even to someone who wrote in
+ * five minutes ago.
+ *
+ * A free-form reply inside the window never counts, which is exactly why the
+ * reserve protects it: the tier is spent by campaigns and template sends, and
+ * the traffic it must not starve is the traffic that does not consume it.
+ */
+export const isBusinessInitiated = ({
+  isTemplate,
+  templateCategory,
+  windowOpen,
+}: {
+  isTemplate: boolean;
+  templateCategory?: TemplateCategory | null;
+  windowOpen: boolean;
+}): boolean => {
+  if (!isTemplate) return false;
+
+  return templateCategory === TEMPLATE_CATEGORY.MARKETING || !windowOpen;
 };
 
 /** A rolling window, not a calendar day: it rolls 24h after it started. */

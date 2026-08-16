@@ -231,6 +231,38 @@ describe('destructive writes', () => {
   });
 });
 
+describe('the campaign state machine', () => {
+  /**
+   * Every campaign status change goes through `transitionCampaign`.
+   *
+   * Two functions move campaigns and they run concurrently by design: an admin
+   * can press pause while a runner tick is claiming a batch. Writing the column
+   * directly skips the edge validation, and the edges are what make "cancel is
+   * final" and "a completed campaign cannot resume" true rather than merely
+   * intended.
+   *
+   * This was not hypothetical. The sender paused a campaign on a
+   * `terminal_content` rejection by patching the column, so a rejection
+   * arriving after the last message had been accounted for would write `PAUSED`
+   * over `COMPLETED` — resurrecting a finished campaign into a state an admin
+   * can resume.
+   */
+  const STATUS_WRITERS = ['server/campaign-state.ts'];
+
+  it('writes campaign status only through the transition helper', () => {
+    const candidates = files.filter(
+      (file) =>
+        !isTestFile(file) && !STATUS_WRITERS.some((allowed) => file.endsWith(allowed)),
+    );
+
+    const offending = candidates.filter((file) =>
+      /patchCampaign\s*\([^)]*,\s*\{[^}]*\bstatus\s*:/s.test(contentsOf(file)),
+    );
+
+    expect(offending.map((file) => relative(SRC, file))).toEqual([]);
+  });
+});
+
 describe('logic function discovery', () => {
   /**
    * One function per file, declared on the **default** export.

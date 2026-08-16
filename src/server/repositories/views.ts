@@ -1,0 +1,137 @@
+import type { FieldDescriptor, ViewFilterGroupRow, ViewFilterRow } from '../../domain/campaign/view-filter';
+import { metadataClient } from '../clients';
+import { describeError, logger } from '../logger';
+
+/**
+ * Reading a saved view (FR-CAM-2a).
+ *
+ * Views live in the **Metadata** API, not the Core one: a view is a saved set
+ * of filters over a field metadata id, and the Core API has never heard of it.
+ * So an audience defined by a view is assembled here — the view, its filters,
+ * its filter groups and the field metadata they refer to — and translated by
+ * the pure module before a single Person is read.
+ *
+ * The field map is what makes the translation possible at all: a `viewFilter`
+ * names `fieldMetadataId`, and the Core filter needs `jobTitle`. Without the
+ * map the filter is a UUID pointing at nothing.
+ */
+
+export type ViewSummary = {
+  id: string;
+  name: string;
+  objectMetadataId: string;
+};
+
+export const findView = async (viewId: string): Promise<ViewSummary | null> => {
+  try {
+    const result = await metadataClient().query({
+      getView: {
+        __args: { id: viewId },
+        id: true,
+        name: true,
+        objectMetadataId: true,
+      },
+    });
+
+    const view = result.getView;
+
+    return view === null || view === undefined
+      ? null
+      : {
+          id: view.id as string,
+          name: (view.name as string) ?? '',
+          objectMetadataId: view.objectMetadataId as string,
+        };
+  } catch (error) {
+    logger.warn('views.lookup_failed', { viewId, ...describeError(error) });
+
+    return null;
+  }
+};
+
+export const listViewFilters = async (viewId: string): Promise<ViewFilterRow[]> => {
+  const result = await metadataClient().query({
+    getViewFilters: {
+      __args: { viewId },
+      id: true,
+      fieldMetadataId: true,
+      operand: true,
+      value: true,
+      viewFilterGroupId: true,
+      positionInViewFilterGroup: true,
+      subFieldName: true,
+    },
+  });
+
+  return (result.getViewFilters ?? []).map((filter) => ({
+    id: filter.id as string,
+    fieldMetadataId: filter.fieldMetadataId as string,
+    operand: String(filter.operand),
+    value: filter.value,
+    viewFilterGroupId: filter.viewFilterGroupId ?? null,
+    positionInViewFilterGroup: filter.positionInViewFilterGroup ?? null,
+    subFieldName: filter.subFieldName ?? null,
+  }));
+};
+
+export const listViewFilterGroups = async (
+  viewId: string,
+): Promise<ViewFilterGroupRow[]> => {
+  const result = await metadataClient().query({
+    getViewFilterGroups: {
+      __args: { viewId },
+      id: true,
+      logicalOperator: true,
+      parentViewFilterGroupId: true,
+      positionInViewFilterGroup: true,
+    },
+  });
+
+  return (result.getViewFilterGroups ?? []).map((group) => ({
+    id: group.id as string,
+    logicalOperator: String(group.logicalOperator),
+    parentViewFilterGroupId: group.parentViewFilterGroupId ?? null,
+    positionInViewFilterGroup: group.positionInViewFilterGroup ?? null,
+  }));
+};
+
+/**
+ * Field metadata id → the Core field it names, for one object.
+ *
+ * Not cached. The metadata-id cache exists for identifiers that never change
+ * for an installed app; a workspace's *own* fields change whenever someone
+ * adds one, and a stale map would silently drop the newest filter from an
+ * audience — the failure this whole path is written to avoid.
+ */
+export const fieldsForObject = async (
+  objectMetadataId: string,
+): Promise<Map<string, FieldDescriptor>> => {
+  const result = await metadataClient().query({
+    objects: {
+      __args: { paging: { first: 500 }, filter: {} },
+      edges: {
+        node: {
+          id: true,
+          fields: {
+            __args: { paging: { first: 500 }, filter: {} },
+            edges: { node: { id: true, name: true, type: true } },
+          },
+        },
+      },
+    },
+  });
+
+  const object = (result.objects.edges ?? [])
+    .map((edge) => edge.node)
+    .find((node) => node.id === objectMetadataId);
+
+  return new Map(
+    (object?.fields?.edges ?? [])
+      .map((edge) => edge.node)
+      .filter((node) => typeof node?.id === 'string' && typeof node?.name === 'string')
+      .map((node): [string, FieldDescriptor] => [
+        node.id,
+        { name: node.name, type: String(node.type) },
+      ]),
+  );
+};

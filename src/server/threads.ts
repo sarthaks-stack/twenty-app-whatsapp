@@ -28,6 +28,21 @@ export type UpsertThreadInput = {
   profileName?: string | null;
   /** Inbound resolves identity; an outbound-initiated thread does not. */
   resolveIdentity?: boolean;
+  /**
+   * The contact this conversation is with, when the caller already knows.
+   *
+   * A campaign picked this person out of a CRM audience, so there is nothing to
+   * resolve — and leaving it unset was a defect with two heads. The thread went
+   * unlinked, so the conversation never appeared on the contact's record and a
+   * reply went back through identity matching, which can create a *second*
+   * Person for someone the campaign already had. Worse, the sender's policy
+   * re-check reads consent through `thread.personId`: with no person it read
+   * `UNKNOWN`, and an opt-out that arrived while a **utility** campaign message
+   * sat in the queue would not have been caught. Found live — the denial came
+   * back `NO_CONSENT` for someone who had explicitly opted out, which was the
+   * thread saying it did not know who they were.
+   */
+  personId?: string | null;
   originCampaignId?: string | null;
 };
 
@@ -64,23 +79,37 @@ export const upsertThread = async ({
   waId,
   profileName,
   resolveIdentity = false,
+  personId: knownPersonId = null,
   originCampaignId,
 }: UpsertThreadInput): Promise<UpsertThreadResult> => {
   const existing = await findThread(account.id, waId);
 
   if (existing !== null) {
-    /**
-     * A profile name change is worth one extra write; re-writing an unchanged
-     * name on every message would double the thread write volume for nothing.
-     */
-    if (
+    const nameChanged =
       typeof profileName === 'string' &&
       profileName.length > 0 &&
-      profileName !== existing.profileName
-    ) {
-      await patchThread(existing.id, { profileName });
+      profileName !== existing.profileName;
 
-      return { thread: { ...existing, profileName }, created: false };
+    /**
+     * An existing thread that nobody has linked gets linked. It is never
+     * re-linked: an identity a human has already decided — or that inbound
+     * matching resolved — outranks a caller's assumption, and silently moving a
+     * conversation to a different contact is the one outcome worse than leaving
+     * it unlinked.
+     */
+    const linking =
+      knownPersonId !== null &&
+      (existing.personId === null || existing.personId === undefined);
+
+    if (nameChanged || linking) {
+      const patch = {
+        ...(nameChanged ? { profileName: profileName! } : {}),
+        ...(linking ? { personId: knownPersonId } : {}),
+      };
+
+      await patchThread(existing.id, patch);
+
+      return { thread: { ...existing, ...patch }, created: false };
     }
 
     return { thread: existing, created: false };
@@ -91,7 +120,8 @@ export const upsertThread = async ({
     : null;
 
   const personId =
-    match?.kind === 'matched' || match?.kind === 'created' ? match.person.id : null;
+    knownPersonId ??
+    (match?.kind === 'matched' || match?.kind === 'created' ? match.person.id : null);
 
   const linkCandidates: LinkCandidate[] =
     match?.kind === 'ambiguous' ? match.candidates : [];

@@ -18,7 +18,10 @@ import {
   type ConsentStatus,
   type Lane,
   type Quality,
+  type TemplateCategory,
 } from '../domain/constants';
+import { isBusinessInitiated } from '../domain/campaign/tier-budget';
+import { STATUS_REASON } from '../domain/campaign/transitions';
 import { mediaKindForHeaderFormat, validateOutboundMedia } from '../domain/media-limits';
 import type { SendSpec } from '../domain/send-spec';
 import { backoffDelayMs, recipientSpacingDelayMs } from '../domain/pacing';
@@ -55,7 +58,10 @@ import { config } from '../server/config';
 import { downloadWorkspaceFile, WorkspaceFileError } from '../server/files';
 import { describeError, logger } from '../server/logger';
 import { METRIC, count } from '../server/metrics';
+import { noteCampaignChange } from '../server/campaign-deltas';
+import { transitionCampaign } from '../server/campaign-state';
 import { rescheduleSend } from '../server/schedule';
+import { recordBusinessInitiated } from '../server/tier-ledger';
 import { TIMELINE_EVENT, THREAD_OBJECT_UID, writeTimelineActivity } from '../server/timeline';
 import {
   findAccountById,
@@ -63,7 +69,7 @@ import {
   type WhatsappAccountRecord,
 } from '../server/repositories/accounts';
 import { asJson, toDate, type JsonObject } from '../server/repositories/base';
-import { patchCampaign } from '../server/repositories/campaigns';
+import { findCampaignById } from '../server/repositories/campaigns';
 import {
   findRecipientByMessageId,
   patchRecipient,
@@ -505,6 +511,17 @@ const mirrorToRecipient = async (
 
   await patchRecipient(recipient.id, patch);
 
+  /**
+   * The rollup only recounts campaigns something told it had changed, and a
+   * send that never reached Meta produces no status webhook to do the telling.
+   * Without this note a campaign whose whole batch was denied by policy would
+   * report `failedCount: 0` indefinitely — observed live, and exactly the
+   * number an operator would look at to decide nothing was wrong.
+   */
+  if (typeof recipient.campaignId === 'string') {
+    await noteCampaignChange(recipient.campaignId, { [patch.status.toLowerCase()]: 1 });
+  }
+
   return recipient.campaignId ?? null;
 };
 
@@ -541,11 +558,27 @@ const applyEffects = async ({
     await patchTemplate(templateId, { publishedToCrm: false, isUsableInCrm: false });
   }
 
+  /**
+   * A `terminal_content` error means the mapping is wrong for *every*
+   * recipient, so the run has to stop — but it stops through the state machine,
+   * not by writing the column.
+   *
+   * Doing it directly was the original shape and it was wrong in a way only
+   * timing reveals: a rejection arriving after the last message had been
+   * accounted for would write `PAUSED` over `COMPLETED`, resurrecting a
+   * finished campaign into a state an admin can resume.
+   */
   if (effect.pauseCampaign === true && campaignId !== null) {
-    await patchCampaign(campaignId, {
-      status: CAMPAIGN_STATUS.PAUSED,
-      statusReason: `Template rejected by Meta: ${detail}`.slice(0, 500),
-    });
+    const campaign = await findCampaignById(campaignId);
+
+    if (campaign !== null) {
+      await transitionCampaign({
+        campaign,
+        to: CAMPAIGN_STATUS.PAUSED,
+        reason: STATUS_REASON.TEMPLATE_UNAVAILABLE,
+        details: { detail: detail.slice(0, 500) },
+      });
+    }
   }
 
   if (effect.alertAdmin === true) {
@@ -838,6 +871,24 @@ export const sendOutbound = async (
 
     if (lane === LANE.CAMPAIGN) {
       await mirrorToRecipient(message.id, { status: RECIPIENT_STATUS.QUEUED });
+    }
+
+    /**
+     * The tier ledger is written **after acceptance**, not before (AR-21).
+     *
+     * Meta counts conversations it actually opened, so counting at enqueue
+     * time would charge the allowance for messages that were denied by policy,
+     * failed on a bad number, or never sent at all — and a campaign would sit
+     * in `tier_waiting` for an allowance nobody had spent.
+     */
+    if (
+      isBusinessInitiated({
+        isTemplate: spec.kind === 'template',
+        templateCategory: (message.templateCategory ?? null) as TemplateCategory | null,
+        windowOpen: (toDate(thread.serviceWindowExpiresAt)?.getTime() ?? 0) > now.getTime(),
+      })
+    ) {
+      await recordBusinessInitiated({ account, waId: thread.waId, now });
     }
 
     await writeTimelineActivity({

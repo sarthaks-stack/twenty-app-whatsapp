@@ -147,6 +147,13 @@ export const METRIC = {
   CONSENT_BACKFILLED: 'wa.consent.backfilled',
   ERASURE_COMPLETED: 'wa.erasure.completed',
 
+  CAMPAIGN_QUEUED: 'wa.campaign.queued',
+  CAMPAIGN_STALE_CLAIM_REVERTED: 'wa.campaign.stale_claim_reverted',
+  CAMPAIGN_TIER_WAITING: 'wa.campaign.tier_waiting',
+  CAMPAIGN_PAUSED_BY_GUARDRAIL: 'wa.campaign.paused_by_guardrail',
+  CAMPAIGN_SNAPSHOT_PAGE: 'wa.campaign.snapshot_page',
+  CAMPAIGN_STATS_ROLLED: 'wa.campaign.stats_rolled',
+
   TEMPLATE_SYNCED: 'wa.template.synced',
   TEMPLATE_DISAPPEARED: 'wa.template.disappeared',
   TEMPLATE_RECATEGORISED: 'wa.template.recategorised',

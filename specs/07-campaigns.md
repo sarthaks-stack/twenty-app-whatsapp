@@ -362,3 +362,116 @@ machinery. Recommended as the first post-release increment.
 | SEC-12 admin-only, launch audit | §2, §9 |
 | NFR-S4 100 k audience | §3 |
 | NFR-S5 no 1:1 degradation | 04 §4 dual lanes |
+
+---
+
+## 14. As built
+
+Phase 8 landed on 2026-08-16. Where the implementation departs from the design above, this is
+what it does instead and why.
+
+### 14.1 Duplicate detection reads the rows, not a `kv` set
+
+§3 specified `seenPhones` as a `kv` set under `wa:campaign-seen:{campaignId}`. It is instead a
+query against the recipient rows this campaign has already accepted.
+
+The set was the wrong shape for the job. It has to hold every accepted number for the life of the
+snapshot — a megabyte at 100 000 recipients, re-read and re-written on every page, with no
+compare-and-swap to make the read-modify-write safe. The rows already exist and already carry
+`resolvedPhone`, so asking them is exact, needs no cleanup, and survives a resume that a lost
+`kv` write would not.
+
+One subtlety the row query has to get right: only **accepted** rows occupy a number. An excluded
+row keeps its `resolvedPhone` for the audit trail, and counting it would report the next person
+on that number as a `duplicate` of someone we never messaged — hiding the real reason behind a
+misleading one. The filter is therefore `exclusionReason IS NULL`.
+
+### 14.2 Aggregates are recomputed, and the `kv` delta became a hint
+
+§10 specified `wa-stats-rollup` as folding `kv` deltas into the campaign record. It recomputes
+from the recipient rows instead, and the delta survives in a smaller role: the *signal* that a
+campaign changed at all.
+
+The deltas' purpose was to avoid one Core API write per message, and they do — but so does a
+recomputation, which is still one write per campaign per tick. What the deltas cannot do is be
+correct: an increment lost to concurrency is a number that stays wrong for the life of the
+campaign, and these numbers are what an operator reads to decide whether a send is going well. As
+a hint they cost one `kv` read for an idle campaign and are harmless when lost — the next status
+webhook writes another.
+
+The counters are **cumulative funnel positions**, not current states. A recipient sits in exactly
+one status, so counting `status = SENT` alone would make `sentCount` fall as messages were
+delivered: a chart that goes backwards while everything works. `RESPONDED` counts toward sent and
+delivered — a reply proves both — but not toward `read`, since a contact with read receipts
+disabled can answer a message that never produced a `read` status.
+
+Three writers must note a change, and missing one is invisible: the status processor (delivery
+statuses), the inbound processor (a reply, FR-CAM-13), and **the sender's failure path**. The
+last was missed and found live: a campaign whose whole batch was denied by policy reported
+`failedCount: 0` indefinitely, which is exactly the number an operator would read as "nothing
+went wrong".
+
+### 14.3 The rollup runs every minute, not every 30 seconds
+
+§10 asks for 30-second freshness. `cronTriggerSettings` takes a five-field cron pattern, whose
+finest granularity is one minute. Rather than guess at six-field support — a wrong pattern
+silently never fires, which is the failure mode this project keeps finding — the rollup runs at
+`* * * * *` and the freshness target is **≤ 60 s**, not ≤ 30 s. Tightening it is a one-line
+change once six-field patterns are confirmed on the target version.
+
+### 14.4 Rebuilding an audience updates rows rather than replacing them
+
+§3 did not say what a rebuild does to the rows a previous build wrote. It upserts: a collision on
+the unique `(campaign, person)` index updates the existing row in place.
+
+Skipping would have been simpler and wrong, for the case §3.1 itself describes — a campaign
+excludes 412 people for `no_consent`, a consent campaign wins some of them over, and the admin
+rebuilds. Skipping leaves them with their stale exclusion and the rebuild changes nothing,
+quietly. Updating also makes the resume path idempotent without depending on how Twenty treats a
+soft-deleted row's unique index (probe P-4, still unanswered).
+
+### 14.5 The claim is one mutation
+
+§6.1 guarantee 1 is implemented as a select followed by an update **whose own filter still
+requires `PENDING`**, using the rows that mutation returned. A tick that lost the race is handed
+an empty array rather than a duplicate send. Selecting and then trusting the selection would have
+made the guarantee depend on there being only one runner.
+
+### 14.6 Saved-view audiences translate exactly or refuse
+
+See [D-23](00-architecture-decisions.md#d-23--an-audience-filter-is-translated-exactly-or-refused-by-name).
+`IS_RELATIVE`, `VECTOR_SEARCH` and `NOT` groups are refused by name at build time.
+
+### 14.7 A campaign thread carries its person
+
+See [D-22](00-architecture-decisions.md#d-22--a-campaign-thread-carries-the-person-the-campaign-chose).
+This was a live-found defect in the interaction between the runner and the sender's policy
+re-check, not a design change.
+
+### 14.8 Live verification, 2026-08-16
+
+Against a live Twenty v2.31.0 and the connected WABA. **No message was sent to Meta**: every run
+was arranged so the sender's policy gate denied before the provider call, and the workspace
+finished with zero outbound messages of any kind.
+
+| What | Result |
+|---|---|
+| Exclusion matrix over a manual audience of 8 | all six reasons fired exactly once; `recipientCount: 2`, `excludedCount: 6` |
+| Parameters frozen at snapshot | `body: ["Ana", "a festa da Pixel Infinito"]`, button `abc123` on the row |
+| Pre-flight | cost $0.045 at $0.0225/message, tier 250 with a 25 reserve and 225 available, spread 2/1 day, GREEN gate open, per-reason samples of 10 |
+| Create with an unpublished template | 400 — FR-TPL-2 holds at the campaign boundary too |
+| Launch before building | 409 "no recipients — build the audience first" |
+| Runner tick | fired at `06:12:00.134Z`, claimed 2, created threads and messages on the campaign lane, one `scheduleSend` for the batch |
+| Send-time policy re-check | both denied, **no Meta call, no WAMID** — an opt-out that arrived after the snapshot took effect |
+| Completion | `COMPLETED` on the following tick at `06:13:00.162Z`, `completedAt` set |
+| Saved-view audience | a real view (`name CONTAINS "PROBE8"` AND `optInStatus IS [OPTED_IN]`) selected exactly the 5 opted-in probes out of 8 — the `AND` translated |
+| Untranslatable filter | adding `createdAt IS_RELATIVE PAST_30_DAY` made `build` answer 400 naming that filter |
+| Cancel | `CANCELLED`, pending recipient → `SKIPPED` with `errorCode: CANCELLED`; already-sent messages keep tracking |
+| Cancel again | 200 with `abandoned: 0` — idempotent, not an error (FR-CAM-8) |
+| Resume a cancelled / pause a completed campaign | 409 "is terminal: a campaign cannot leave it" |
+| Edit a cancelled campaign | 409 |
+| Unknown campaign / missing id / unknown action | 404 / 400 / 400 |
+
+Not proven live, and honestly so: **a real Meta send**, and therefore the tier ledger's
+increment, `pacingObserved`, the failure-rate breaker and the delivered/read funnel. All are unit
+tested; none has met Meta. They need one campaign to a number the business is willing to message.

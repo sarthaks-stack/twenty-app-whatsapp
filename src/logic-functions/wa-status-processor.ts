@@ -1,5 +1,4 @@
 import { defineLogicFunction } from 'twenty-sdk/define';
-import { kv } from 'twenty-sdk/logic-function';
 
 import { LF_STATUS_PROCESSOR } from '../constants/universal-identifiers';
 import {
@@ -12,8 +11,9 @@ import { advanceStatus } from '../domain/status-machine';
 import { rateFor } from '../domain/campaign/guardrails';
 import type { MetaError, MetaStatus } from '../domain/webhook/types';
 import { ERROR_CLASS, MetaApiError, classify } from '../providers/whatsapp/errors';
+import { noteCampaignChange } from '../server/campaign-deltas';
 import { config } from '../server/config';
-import { describeError, logger } from '../server/logger';
+import { logger } from '../server/logger';
 import { METRIC, count } from '../server/metrics';
 import { asJson } from '../server/repositories/base';
 import {
@@ -68,9 +68,6 @@ const RECIPIENT_MIRROR: Partial<Record<MessageStatus, RecipientStatus>> = {
   [MESSAGE_STATUS.PLAYED]: RECIPIENT_STATUS.READ,
   [MESSAGE_STATUS.FAILED]: RECIPIENT_STATUS.FAILED,
 };
-
-/** Campaign counter deltas, folded into the record by `wa-stats-rollup`. */
-const campaignDeltaKey = (campaignId: string): string => `wa:campaign-delta:${campaignId}`;
 
 /**
  * A status arriving before its own message is a legitimate race: Meta's webhook
@@ -286,33 +283,17 @@ const mirrorToRecipients = async (
 /**
  * Campaign counters are **not** incremented per status.
  *
- * At campaign scale that would be one write per message per counter. Deltas go
- * to `kv` and `wa-stats-rollup` folds them into the record every 30 s — one
- * write per campaign per tick instead of one per message, which is what makes
- * "live stats ≤ 30 s p95" affordable (specs/03 §5.2).
+ * At campaign scale that would be one write per message per counter. Instead a
+ * note goes to `kv` saying the campaign moved, and `wa-stats-rollup` recounts
+ * it from the recipient rows on its next tick — one write per campaign per
+ * tick instead of one per message, and a number that is right rather than one
+ * that drifts by however many increments concurrency lost (specs/03 §5.2).
  */
 const writeCampaignDeltas = async (
   deltas: Map<string, Record<string, number>>,
 ): Promise<void> => {
   for (const [campaignId, delta] of deltas) {
-    try {
-      const key = campaignDeltaKey(campaignId);
-      const current = (await kv.get<Record<string, number>>(key, { scope: 'WORKSPACE' })) ?? {};
-
-      const merged = { ...current };
-      for (const [field, value] of Object.entries(delta)) {
-        merged[field] = (merged[field] ?? 0) + value;
-      }
-
-      await kv.set(key, merged, { scope: 'WORKSPACE' });
-    } catch (error) {
-      // Counters are approximate by construction; losing one must never fail
-      // the status write that is the source of truth.
-      logger.debug('wa.status.delta_write_failed', {
-        campaignId,
-        ...describeError(error),
-      });
-    }
+    await noteCampaignChange(campaignId, delta);
   }
 };
 

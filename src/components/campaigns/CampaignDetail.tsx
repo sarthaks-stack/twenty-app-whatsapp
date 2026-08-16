@@ -150,7 +150,18 @@ export const CampaignDetail = ({
         <StatusPill status={status} />
         <span style={{ flex: '1 1 auto' }} />
 
-        {canManage && status === 'READY' ? (
+        {/*
+          Launch is gated on the preflight having *arrived*, not merely on the
+          status being READY. Without that the confirmation offers "0
+          recipients, $0.00" — numbers that belong to no campaign — and the
+          operator confirms a send whose size they were never shown.
+
+          A refused quality gate removes this button entirely rather than
+          disabling it: there is a deliberate path for that case further down,
+          behind an acknowledgement, and two ways to do the same dangerous thing
+          is one too many.
+        */}
+        {canManage && status === 'READY' && preflight !== null && preflight.quality.gate.allowed ? (
           <ActionButton
             label={t('campaign.launch')}
             tone="primary"
@@ -159,8 +170,8 @@ export const CampaignDetail = ({
               void confirmThen(
                 t('campaign.launch'),
                 t('campaign.launchSubtitle', {
-                  count: preflight?.recipients.total ?? 0,
-                  cost: (preflight?.cost.estimatedUsd ?? 0).toFixed(2),
+                  count: preflight.recipients.total,
+                  cost: preflight.cost.estimatedUsd.toFixed(2),
                 }),
                 'launch',
               )
@@ -206,6 +217,10 @@ export const CampaignDetail = ({
       </div>
 
       {error === null ? null : <Banner tone="danger">{error}</Banner>}
+
+      {canManage && status === 'READY' && preflight === null && error === null ? (
+        <Banner>{t('campaign.launchNeedsPreflight')}</Banner>
+      ) : null}
 
       {campaign.statusReason === null || campaign.statusReason === undefined ? null : (
         <Banner>

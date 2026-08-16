@@ -16,6 +16,7 @@ import { getProvider } from '../providers/whatsapp';
 import { MetaApiError } from '../providers/whatsapp/errors';
 import { AUDIT_ACTION, audit } from '../server/audit';
 import { authErrorResponse, requireCaller, requireRole } from '../server/auth';
+import { listVariables, setVariable } from '../server/variables';
 import { config } from '../server/config';
 import { describeError, logger } from '../server/logger';
 import { budgetForAccount, tierFor } from '../server/tier-ledger';
@@ -53,7 +54,9 @@ export type AccountAction =
   | 'disconnect'
   | 'list'
   | 'syncTemplates'
-  | 'diagnostics';
+  | 'diagnostics'
+  | 'variables'
+  | 'setVariable';
 
 export type AccountRouteBody = {
   action?: AccountAction;
@@ -67,6 +70,9 @@ export type AccountRouteBody = {
   sendThrottlePerSecond?: number;
   /** Ask Meta to start delivering this WABA's events to us (appendix A §1). */
   subscribeApp?: boolean;
+  /** `setVariable` only. */
+  key?: string;
+  value?: string;
 };
 
 const QUALITY_FROM_META: Record<string, Quality> = {
@@ -403,6 +409,34 @@ export const handler = async (
       case 'diagnostics':
         return new Response(await diagnostics(), { status: 200 });
 
+      /**
+       * The app's own application variables (FR-CON-3, NFR-M1).
+       *
+       * A settings front component replaces Twenty's variable editor rather
+       * than sitting beside it, so without these two actions the confirmation
+       * wording — the one thing specified as changeable without a deploy — had
+       * become unchangeable by anyone.
+       */
+      case 'variables':
+        return new Response({ variables: await listVariables() }, { status: 200 });
+
+      case 'setVariable': {
+        const key = (body.key ?? '').trim();
+        const value = body.value;
+
+        if (key.length === 0 || typeof value !== 'string') {
+          return new Response({ error: 'key and value are required' }, { status: 400 });
+        }
+
+        const outcome = await setVariable(key, value);
+
+        if (!outcome.ok) return new Response({ error: outcome.error }, { status: 400 });
+
+        log.info('wa.account.variable_set', { key });
+
+        return new Response({ variables: await listVariables() }, { status: 200 });
+      }
+
       case 'connect': {
         const phoneNumberId = (body.phoneNumberId ?? '').trim();
         const wabaId = (body.wabaId ?? '').trim();
@@ -626,6 +660,24 @@ export const handler = async (
 
     if (authFailure !== null) {
       return new Response(authFailure.body, { status: authFailure.status });
+    }
+
+    /**
+     * A permission refusal from the platform is the operator's answer, not a
+     * bug. It reaches here when someone without workspace-settings rights opens
+     * the Variables tab, and "Internal error" would send them to the logs for
+     * something the platform decided on purpose.
+     */
+    if (
+      error instanceof Error &&
+      error.message === 'Entity performing the request does not have permission'
+    ) {
+      log.info('wa.account.permission_denied', { action: String(event.body?.action) });
+
+      return new Response(
+        { error: 'Your Twenty role does not allow this action' },
+        { status: 403 },
+      );
     }
 
     log.error('wa.account.route_failed', describeError(error));

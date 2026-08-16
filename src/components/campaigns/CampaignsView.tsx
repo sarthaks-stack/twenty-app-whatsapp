@@ -140,6 +140,13 @@ export const CampaignsView = () => {
 
       {list.isStale ? <Banner tone="danger">{t('chat.offline')}</Banner> : null}
 
+      {/* Nothing loaded at all is a different thing from no campaigns yet. */}
+      {list.isUnavailable ? (
+        <Banner tone="danger">
+          {t('common.unavailable')} {list.error}
+        </Banner>
+      ) : null}
+
       {anyRunning ? (
         <Banner>{t('campaign.running')}</Banner>
       ) : null}
@@ -179,7 +186,11 @@ export const CampaignsView = () => {
                       color: theme.font.color.tertiary,
                     }}
                   >
-                    {t('campaign.none')}
+                    {list.isUnavailable
+                      ? t('common.unavailable')
+                      : list.isLoading && list.data === null
+                        ? t('common.loading')
+                        : t('campaign.none')}
                   </td>
                 </tr>
               ) : null}

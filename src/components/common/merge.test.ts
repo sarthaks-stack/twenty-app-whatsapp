@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { MessageProjection } from '../../domain/feed/projection';
-import { mergeMessages } from './merge';
+import { mergeMessages, settleOptimisticMessages } from './merge';
 
 const message = (overrides: Partial<MessageProjection>): MessageProjection =>
   ({
@@ -119,5 +119,67 @@ describe('mergeMessages', () => {
     const two = message({ id: 'm2', clientToken: null });
 
     expect(mergeMessages([one], [two])).toHaveLength(2);
+  });
+});
+
+/**
+ * The bubble that outlives the send.
+ *
+ * A refusal creates no server row, so nothing a later poll returns replaces the
+ * optimistic message — it sat in the conversation saying "queued" for as long
+ * as the tab stayed open, describing a message that was never sent.
+ */
+describe('settleOptimisticMessages', () => {
+  it('marks the refused bubble failed and puts the reason on it', () => {
+    const settled = settleOptimisticMessages(
+      [message({ id: 'local-tok', clientToken: 'tok', body: 'Olá' })],
+      'tok',
+      { error: 'The 24-hour window has closed.' },
+    );
+
+    expect(settled[0]).toMatchObject({
+      status: 'FAILED',
+      errorDetail: 'The 24-hour window has closed.',
+      isRetryable: true,
+    });
+  });
+
+  it('leaves every other message alone', () => {
+    const settled = settleOptimisticMessages(
+      [
+        message({ id: 'local-a', clientToken: 'a', body: 'mine' }),
+        message({ id: 'local-b', clientToken: 'b', body: 'someone else', status: 'QUEUED' }),
+      ],
+      'a',
+      { error: 'nope' },
+    );
+
+    expect(settled[1]).toMatchObject({ status: 'QUEUED', errorDetail: null });
+  });
+
+  /**
+   * The race that matters: the send failed *after* a poll already brought back
+   * the server's row for the same token. The server knows what happened; a late
+   * client-side error must not overwrite it.
+   */
+  it('never overwrites a server row that already arrived for the same token', () => {
+    const settled = settleOptimisticMessages(
+      [message({ id: 'srv-1', clientToken: 'tok', status: 'SENT', body: 'Olá' })],
+      'tok',
+      { error: 'timeout' },
+    );
+
+    expect(settled[0]).toMatchObject({ status: 'SENT', errorDetail: null });
+  });
+
+  /** Nothing to retry when there is no text — a template needs its parameters again. */
+  it('does not offer retry for a bubble with no body', () => {
+    const settled = settleOptimisticMessages(
+      [message({ id: 'local-t', clientToken: 't', body: null, templateName: 'convite' })],
+      't',
+      { error: 'nope' },
+    );
+
+    expect(settled[0]?.isRetryable).toBe(false);
   });
 });

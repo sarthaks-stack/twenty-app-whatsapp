@@ -1100,6 +1100,7 @@ came from the platform documentation and are wrong.
 | `ResizeObserver` / `IntersectionObserver` / `matchMedia` | not defined | ✗ throws — correct |
 | `canvas.getContext` | not a function | ✗ — correct |
 | `twenty-ui` component *styling* | renders unstyled — emotion classes do not apply | — |
+| `node.focus()` | **silently does nothing** — no throw, `document.activeElement` unchanged | ✗ throws |
 | `/s/*` logic-function routes | **403** — see below | — |
 
 ### The two findings that changed the design
@@ -1147,6 +1148,25 @@ has no workspace membership, so `requireCaller` returns a machine caller and *re
 role lookup*. The role map had therefore never been read in the life of this app. The first
 request from a signed-in human was the one that revealed it — which is exactly what a probe is
 for, and an argument for running one earlier than the plan did.
+
+### The settings surface removed the only way to configure the app
+
+`defineSettingsFrontComponent` **replaces** Twenty's application-variable editor
+rather than sitting beside it. There is no `#variables` route on the app page and
+no other surface, so from the day this app shipped a settings component every
+variable it declares was a constant — including `WA_OPT_OUT_CONFIRMATION_PT`,
+which exists as a variable precisely so counsel can reword it without a deploy
+(FR-CON-3). The Diagnostics tab told the operator to go to a "Variables" tab that
+had stopped existing.
+
+The app therefore ships its own editor, and pays for it with
+`SystemPermissionFlag.APPLICATIONS`. That was not the first choice: the caller's
+own bearer token was tried and refused, even though the same token reads
+`findOneApplication` happily from the browser — so the platform authorises this
+call against the *executing application*, not the bearer, and the flag is the
+only key. It is wider than one would like, so the narrowing happens in code
+instead: the route is `admin`-gated, and `setVariable` refuses any key this app
+did not declare.
 
 ### Resolved: the caller's own token makes the join
 

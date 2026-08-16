@@ -5,8 +5,18 @@ import { useTheme } from 'twenty-ui/theme-constants';
 
 import { useCopy } from '../common/copy';
 import { relativeTime } from '../common/format';
-import { ActionButton, Banner, Card, Field, StatusPill, Tabs, useInputStyle } from '../common/ui';
+import {
+  ActionButton,
+  Banner,
+  Card,
+  Field,
+  StatusPill,
+  TabPanel,
+  Tabs,
+  useInputStyle,
+} from '../common/ui';
 import { describeHealth } from './health-detail';
+import { VariablesPanel, type EditableVariable } from './VariablesPanel';
 
 /**
  * *Settings → Applications → WhatsApp* (FR-ACC-1 … FR-ACC-5, NFR-O3).
@@ -97,6 +107,7 @@ export const SettingsView = () => {
   const [tab, setTab] = useState('connection');
   const [data, setData] = useState<Diagnostics | null>(null);
   const [templates, setTemplates] = useState<Record<string, any>[]>([]);
+  const [variables, setVariables] = useState<EditableVariable[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -113,10 +124,21 @@ export const SettingsView = () => {
   const account = data?.accounts[0] ?? null;
   const now = new Date();
 
+  /**
+   * Returns `null` **and only null** when the request failed, having already
+   * put the reason on screen. Every caller must check it before claiming
+   * anything happened: the Test and Sync buttons used to announce success
+   * unconditionally, so a refused request showed the operator a red error and a
+   * green confirmation of the same click.
+   *
+   * It clears the previous notice too. A success message left over from the
+   * last action is indistinguishable from one about this one.
+   */
   const post = useCallback(
     async <T,>(path: string, body: Record<string, unknown>): Promise<T | null> => {
       setBusy(true);
       setError(null);
+      setNotice(null);
 
       try {
         return await client.post<T>(path, body);
@@ -161,6 +183,18 @@ export const SettingsView = () => {
     if (tab === 'templates') void loadTemplates();
   }, [tab, loadTemplates]);
 
+  const loadVariables = useCallback(async () => {
+    const result = await post<{ variables: EditableVariable[] }>('/s/whatsapp/account', {
+      action: 'variables',
+    });
+
+    if (result !== null) setVariables(result.variables);
+  }, [post]);
+
+  useEffect(() => {
+    if (tab === 'variables') void loadVariables();
+  }, [tab, loadVariables]);
+
   const rowsFor = (key: string): HealthRow[] =>
     (data?.rows ?? []).filter((row) => row.key === key);
 
@@ -178,12 +212,15 @@ export const SettingsView = () => {
       }}
     >
       <Tabs
+        group="settings"
+        label={t('settings.tab.connection')}
         active={tab}
         onSelect={setTab}
         tabs={[
           { key: 'connection', label: t('settings.tab.connection') },
           { key: 'health', label: t('settings.tab.health') },
           { key: 'templates', label: t('settings.tab.templates') },
+          { key: 'variables', label: t('settings.tab.variables') },
           { key: 'diagnostics', label: t('settings.tab.diagnostics') },
         ]}
       />
@@ -192,7 +229,7 @@ export const SettingsView = () => {
       {notice === null ? null : <Banner tone="success">{notice}</Banner>}
 
       {tab === 'connection' ? (
-        <>
+        <TabPanel group="settings" tabKey="connection">
           {(data?.accounts ?? []).map((connected) => (
             <Card
               key={connected.id}
@@ -223,10 +260,13 @@ export const SettingsView = () => {
                   label={t('settings.test')}
                   busy={busy}
                   onClick={async () => {
-                    await post('/s/whatsapp/account', {
+                    const tested = await post('/s/whatsapp/account', {
                       action: 'test',
                       accountId: connected.id,
                     });
+
+                    if (tested === null) return;
+
                     setNotice(t('settings.tested'));
                     void load();
                   }}
@@ -235,10 +275,13 @@ export const SettingsView = () => {
                   label={t('settings.syncTemplates')}
                   busy={busy}
                   onClick={async () => {
-                    await post('/s/whatsapp/account', {
+                    const requested = await post('/s/whatsapp/account', {
                       action: 'syncTemplates',
                       accountId: connected.id,
                     });
+
+                    if (requested === null) return;
+
                     setNotice(t('settings.syncRequested'));
                   }}
                 />
@@ -247,11 +290,15 @@ export const SettingsView = () => {
                   tone="danger"
                   busy={busy}
                   onClick={async () => {
-                    await post('/s/whatsapp/account', {
+                    const disconnected = await post('/s/whatsapp/account', {
                       action: 'disconnect',
                       accountId: connected.id,
                     });
-                    void load();
+
+                    // Reloading after a failure would immediately clear the
+                    // error the failure just wrote — the operator sees a flash
+                    // and nothing else.
+                    if (disconnected !== null) void load();
                   }}
                 />
               </div>
@@ -314,8 +361,12 @@ export const SettingsView = () => {
               busy={busy}
               disabled={form.phoneNumberId === '' || form.wabaId === ''}
               onClick={async () => {
-                await post('/s/whatsapp/account', { action: 'connect', ...form });
-                void load();
+                const created = await post('/s/whatsapp/account', {
+                  action: 'connect',
+                  ...form,
+                });
+
+                if (created !== null) void load();
               }}
             />
           </Card>
@@ -352,10 +403,11 @@ export const SettingsView = () => {
               }
             />
           </Card>
-        </>
+        </TabPanel>
       ) : null}
 
       {tab === 'health' ? (
+        <TabPanel group="settings" tabKey="health">
         <Card title={t('settings.tab.health')}>
           {(data?.rows ?? []).length === 0 ? <Banner>{t('common.loading')}</Banner> : null}
 
@@ -413,9 +465,11 @@ export const SettingsView = () => {
 
           <ActionButton label={t('common.refresh')} busy={busy} onClick={() => void load()} />
         </Card>
+        </TabPanel>
       ) : null}
 
       {tab === 'templates' ? (
+        <TabPanel group="settings" tabKey="templates">
         <Card
           title={t('settings.tab.templates')}
           actions={
@@ -476,11 +530,12 @@ export const SettingsView = () => {
                   label={t('settings.unpublish')}
                   busy={busy}
                   onClick={async () => {
-                    await post('/s/whatsapp/template', {
+                    const unpublished = await post('/s/whatsapp/template', {
                       action: 'unpublish',
                       templateId: template.id,
                     });
-                    void loadTemplates();
+
+                    if (unpublished !== null) void loadTemplates();
                   }}
                 />
               ) : (
@@ -490,11 +545,12 @@ export const SettingsView = () => {
                   busy={busy}
                   disabled={template.publishRefusal !== null}
                   onClick={async () => {
-                    await post('/s/whatsapp/template', {
+                    const published = await post('/s/whatsapp/template', {
                       action: 'publish',
                       templateId: template.id,
                     });
-                    void loadTemplates();
+
+                    if (published !== null) void loadTemplates();
                   }}
                 />
               )}
@@ -513,10 +569,34 @@ export const SettingsView = () => {
             </div>
           ))}
         </Card>
+        </TabPanel>
+      ) : null}
+
+      {tab === 'variables' ? (
+        <TabPanel group="settings" tabKey="variables">
+          <VariablesPanel
+            variables={variables}
+            busy={busy}
+            t={t}
+            onSave={async (key, value) => {
+              const saved = await post<{ variables: EditableVariable[] }>(
+                '/s/whatsapp/account',
+                { action: 'setVariable', key, value },
+              );
+
+              if (saved === null) return false;
+
+              setVariables(saved.variables);
+              setNotice(t('settings.variableSaved', { key }));
+
+              return true;
+            }}
+          />
+        </TabPanel>
       ) : null}
 
       {tab === 'diagnostics' ? (
-        <>
+        <TabPanel group="settings" tabKey="diagnostics">
           <Card title={t('settings.failedEvents')}>
             {(data?.failedEvents ?? []).length === 0 ? (
               <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
@@ -563,7 +643,7 @@ export const SettingsView = () => {
               {t('settings.consentNote')}
             </span>
           </Card>
-        </>
+        </TabPanel>
       ) : null}
 
       <span style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>

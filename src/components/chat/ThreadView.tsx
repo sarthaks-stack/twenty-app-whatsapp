@@ -98,8 +98,16 @@ export const ThreadView = ({
    */
   const now = useMemo(() => new Date(feed.data?.serverTime ?? Date.now()), [feed.data]);
 
+  /**
+   * Every send ends here, and every send must end the optimistic bubble.
+   *
+   * A refused send creates no server row, so nothing a later poll returns will
+   * ever replace the bubble — leaving a message that reads "queued" forever and
+   * a conversation that shows something which was never sent. The bubble is
+   * therefore settled explicitly on both failure paths, with the reason on it.
+   */
   const handleOutcome = useCallback(
-    (outcome: SendOutcome) => {
+    (outcome: SendOutcome, clientToken: string) => {
       if (outcome.ok) {
         setRefusal(null);
         // Ask immediately rather than waiting for the next tick, so the bubble
@@ -111,13 +119,15 @@ export const ThreadView = ({
 
       if (outcome.kind === 'denied') {
         setRefusal(outcome.code);
+        feed.settleOptimistic(clientToken, { error: t(`policy.${outcome.code}`) });
 
         return;
       }
 
       setRefusal(null);
+      feed.settleOptimistic(clientToken, { error: outcome.message });
     },
-    [feed],
+    [feed, t],
   );
 
   const sendText = useCallback(
@@ -130,12 +140,21 @@ export const ThreadView = ({
       feed.addOptimistic(optimisticMessage(thread.id, clientToken, body, null));
 
       try {
-        handleOutcome(await actions.sendText({ threadId: thread.id, body, clientToken }));
+        handleOutcome(
+          await actions.sendText({ threadId: thread.id, body, clientToken }),
+          clientToken,
+        );
+      } catch (error) {
+        // A network failure is not an outcome the route reported; the bubble
+        // still has to stop claiming it is on its way.
+        feed.settleOptimistic(clientToken, {
+          error: error instanceof Error ? error.message : t('error.unknown'),
+        });
       } finally {
         setIsSending(false);
       }
     },
-    [actions, feed, handleOutcome, thread],
+    [actions, feed, handleOutcome, t, thread],
   );
 
   const sendTemplate = useCallback(
@@ -156,12 +175,17 @@ export const ThreadView = ({
             parameters,
             clientToken,
           }),
+          clientToken,
         );
+      } catch (error) {
+        feed.settleOptimistic(clientToken, {
+          error: error instanceof Error ? error.message : t('error.unknown'),
+        });
       } finally {
         setIsSending(false);
       }
     },
-    [actions, feed, handleOutcome, templates, thread],
+    [actions, feed, handleOutcome, t, templates, thread],
   );
 
   /**
@@ -213,6 +237,51 @@ export const ThreadView = ({
     fontFamily: theme.font.family,
     overflow: 'hidden',
   };
+
+  /**
+   * Nothing loaded, and a reason. Rendering the ordinary shell here would show
+   * "no messages in this conversation yet" over a conversation the app simply
+   * could not read — which is what a 403 looked like before D-53.
+   */
+  if (feed.isUnavailable) {
+    return (
+      <div className="wa-thread-view" style={{ ...shell, justifyContent: 'center' }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: theme.spacing[2],
+            textAlign: 'center',
+            padding: theme.spacing[4],
+          }}
+        >
+          <span style={{ color: theme.font.color.danger, fontSize: theme.font.size.sm }}>
+            {t('common.unavailable')}
+          </span>
+          <span style={{ color: theme.font.color.tertiary, fontSize: theme.font.size.xs }}>
+            {feed.error}
+          </span>
+          <button
+            type="button"
+            onClick={feed.refresh}
+            style={{
+              border: `1px solid ${theme.border.color.medium}`,
+              borderRadius: theme.border.radius.sm,
+              background: 'transparent',
+              color: theme.font.color.secondary,
+              cursor: 'pointer',
+              fontFamily: theme.font.family,
+              fontSize: theme.font.size.xs,
+              padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
+            }}
+          >
+            {t('common.retry')}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (feed.data !== null && thread === null) {
     return (

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTheme } from 'twenty-ui/theme-constants';
 
 import type { ThreadProjection } from '../../domain/feed/projection';
@@ -157,36 +157,34 @@ export const InboxView = () => {
   const [wide, setWide] = useState(true);
 
   const measured = useRef<boolean | null>(null);
+  const node = useRef<HTMLDivElement | null>(null);
 
   const feed = useFeed({ scope: 'inbox', filter });
 
   /**
-   * A callback ref rather than an effect: it runs whenever the node is attached
-   * or the component re-renders with a new closure, which the poll guarantees.
-   * The bucket is compared before setting state, so a measurement that changed
-   * nothing does not cause a render that measures again.
+   * Decides the layout from the widget's own width.
+   *
+   * `clientWidth`, not `getBoundingClientRect()`. Probe P-6 found the rect API
+   * returns **0×0** here — it exists, it does not throw, and it lies — while
+   * `scrollHeight` and `clientHeight` on the same node return real numbers. So
+   * the layout box is there and only that one API is unimplemented; measuring
+   * through it meant every inbox, at every width, silently took the narrow
+   * branch.
+   *
+   * `window.innerWidth` is the backstop rather than the primary: it answers for
+   * the whole browser window (1680 where the widget was 1030), which is right
+   * only because this surface is a full-width standalone page. If the node can
+   * speak for itself, it does.
    */
-  const measure = useCallback((node: HTMLDivElement | null) => {
-    if (node === null) return;
+  const measure = useCallback(() => {
+    const element = node.current;
+
+    if (element === null) return;
 
     try {
-      /**
-       * `clientWidth`, not `getBoundingClientRect()`.
-       *
-       * Probe P-6 found the rect API returns **0×0** here — it exists, it does
-       * not throw, and it lies — while `scrollHeight` and `clientHeight` on the
-       * same node return real numbers. So the layout box is there and only that
-       * one API is unimplemented; measuring through it meant every inbox, at
-       * every width, silently took the narrow branch.
-       *
-       * `window.innerWidth` is the backstop rather than the primary: it answers
-       * for the whole browser window (1680 where the widget was 1030), which is
-       * right only because this surface is a full-width standalone page. If the
-       * node can speak for itself, it does.
-       */
       const width =
-        node.clientWidth > 0
-          ? node.clientWidth
+        element.clientWidth > 0
+          ? element.clientWidth
           : typeof window === 'undefined'
             ? 0
             : (window.innerWidth ?? 0);
@@ -207,6 +205,37 @@ export const InboxView = () => {
     }
   }, []);
 
+  /**
+   * Re-measured after **every** render, which the poll guarantees at least
+   * every few seconds, and again on `resize` if that event reaches the sandbox.
+   *
+   * The previous version was a `useCallback(…, [])` ref callback, which React
+   * invokes only when the node is attached — so the inbox measured itself once
+   * and never again, and dragging the window did nothing until a reload.
+   * `ResizeObserver` is the right tool and is undefined here (P-6), so the
+   * listener is attempted and its absence tolerated: `window.blur` is known not
+   * to fire in this sandbox, and `resize` may well be the same. The
+   * every-render pass is what actually holds the guarantee; the listener only
+   * removes the lag when it works.
+   */
+  useEffect(() => {
+    measure();
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
+      return;
+    }
+
+    try {
+      window.addEventListener('resize', measure);
+
+      return () => window.removeEventListener('resize', measure);
+    } catch {
+      return;
+    }
+  }, [measure]);
+
   const threads = feed.data?.threads ?? [];
   const account = feed.data?.account ?? null;
   const now = new Date(feed.data?.serverTime ?? Date.now());
@@ -217,7 +246,7 @@ export const InboxView = () => {
   return (
     <div
       className="wa-inbox"
-      ref={measure}
+      ref={node}
       {...feed.rootProps}
       style={{
         display: 'flex',
@@ -329,7 +358,60 @@ export const InboxView = () => {
               minHeight: 0,
             }}
           >
-            {threads.length === 0 && !feed.isLoading ? (
+            {/*
+              "No conversations in this filter" is a claim about the data, and
+              a surface that could not read anything is not entitled to make
+              it. The three states are kept apart: unreadable, still reading,
+              and genuinely empty.
+            */}
+            {feed.isUnavailable ? (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: theme.spacing[2],
+                  padding: theme.spacing[4],
+                  textAlign: 'center',
+                }}
+              >
+                <span style={{ color: theme.font.color.danger, fontSize: theme.font.size.sm }}>
+                  {t('common.unavailable')}
+                </span>
+                <span
+                  style={{ color: theme.font.color.tertiary, fontSize: theme.font.size.xxs }}
+                >
+                  {feed.error}
+                </span>
+                <button
+                  type="button"
+                  onClick={feed.refresh}
+                  style={{
+                    border: `1px solid ${theme.border.color.medium}`,
+                    borderRadius: theme.border.radius.sm,
+                    background: 'transparent',
+                    color: theme.font.color.secondary,
+                    cursor: 'pointer',
+                    fontFamily: theme.font.family,
+                    fontSize: theme.font.size.xs,
+                    padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
+                  }}
+                >
+                  {t('common.retry')}
+                </button>
+              </div>
+            ) : feed.isLoading && feed.data === null ? (
+              <div
+                style={{
+                  padding: theme.spacing[4],
+                  textAlign: 'center',
+                  color: theme.font.color.tertiary,
+                  fontSize: theme.font.size.sm,
+                }}
+              >
+                {t('common.loading')}
+              </div>
+            ) : threads.length === 0 && !feed.isLoading ? (
               <div
                 style={{
                   padding: theme.spacing[4],

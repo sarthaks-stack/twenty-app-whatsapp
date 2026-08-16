@@ -7,7 +7,7 @@ import type {
   MessageProjection,
   ThreadProjection,
 } from '../../domain/feed/projection';
-import { mergeMessages } from './merge';
+import { mergeMessages, settleOptimisticMessages } from './merge';
 
 /**
  * The one thing that talks to the server (specs/08 §2.1, D-6).
@@ -97,6 +97,16 @@ export type UseFeedResult = {
   error: string | null;
   /** True once a poll has failed and the data on screen predates it. */
   isStale: boolean;
+  /**
+   * The first load failed: there is nothing to show and a reason why.
+   *
+   * Distinct from empty on purpose. Without it a surface that could not read
+   * anything renders its empty state — "no conversations in this filter", "no
+   * messages yet" — which is a claim about the data, made at the moment the
+   * app is least entitled to make one. It is how a 403 looked like an empty
+   * chat for the whole life of this app (D-53).
+   */
+  isUnavailable: boolean;
   /** True after fifteen quiet minutes; nothing is fetched until `resume`. */
   isSuspended: boolean;
   isLoading: boolean;
@@ -109,6 +119,14 @@ export type UseFeedResult = {
    * server's row replaces it rather than doubling it.
    */
   addOptimistic: (message: MessageProjection) => void;
+  /**
+   * Settles a bubble the server refused.
+   *
+   * Without it a refused send leaves a permanent "queued" bubble: the server
+   * never created a row, so no poll ever replaces it, and the conversation
+   * shows a message that was never sent and never will be.
+   */
+  settleOptimistic: (clientToken: string, outcome: { error: string | null }) => void;
   /** Spread onto the surface's root element to keep the "watching" signal fed. */
   rootProps: {
     onPointerDown: () => void;
@@ -266,6 +284,13 @@ export const useFeed = ({
     setMessages((current) => mergeMessages(current, [message]));
   }, []);
 
+  const settleOptimistic = useCallback(
+    (clientToken: string, outcome: { error: string | null }) => {
+      setMessages((current) => settleOptimisticMessages(current, clientToken, outcome));
+    },
+    [],
+  );
+
   // A change of subject starts over: new cursor, empty list, and any reply
   // still in flight is discarded rather than merged into the wrong thread.
   useEffect(() => {
@@ -336,6 +361,7 @@ export const useFeed = ({
     messages,
     error,
     isStale: error !== null && data !== null,
+    isUnavailable: error !== null && data === null,
     isSuspended,
     isLoading,
     hasOlder,
@@ -343,6 +369,7 @@ export const useFeed = ({
     resume,
     loadOlder,
     addOptimistic,
+    settleOptimistic,
     rootProps,
   };
 };

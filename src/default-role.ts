@@ -44,6 +44,21 @@ import { APP_DISPLAY_NAME, DEFAULT_ROLE_UNIVERSAL_IDENTIFIER } from 'src/constan
  *
  * It is a read of who holds which role. That is the minimum an app needs to
  * enforce its own permissions, and much less than `canUpdateAllSettings`.
+ *
+ * **`APPLICATIONS` is granted so the app's own settings are reachable.**
+ * `defineSettingsFrontComponent` replaces Twenty's application-variable editor
+ * rather than sitting beside it, so the moment this app shipped a settings
+ * surface every variable it declares became unchangeable — including the
+ * opt-out confirmation wording, which is a variable precisely so that counsel
+ * can reword it without a deploy (FR-CON-3). There is no other route to them:
+ * `/settings/applications/:id#variables` does not exist.
+ *
+ * The caller's own token was tried first and does not work — `findOneApplication`
+ * is refused with the same token that reads it from the browser, so the platform
+ * authorises against the executing application rather than the bearer. The flag
+ * is wider than one would like (it covers managing applications generally), and
+ * the narrowing that is available is applied instead in code: the route is
+ * `admin`-gated, and `setVariable` refuses any key this app did not declare.
  */
 export default defineApplicationRole({
   universalIdentifier: DEFAULT_ROLE_UNIVERSAL_IDENTIFIER,
@@ -58,5 +73,6 @@ export default defineApplicationRole({
     SystemPermissionFlag.UPLOAD_FILE,
     SystemPermissionFlag.DOWNLOAD_FILE,
     SystemPermissionFlag.ROLES,
+    SystemPermissionFlag.APPLICATIONS,
   ],
 });

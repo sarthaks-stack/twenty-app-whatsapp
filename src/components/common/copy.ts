@@ -167,9 +167,15 @@ const COPY = {
 
   // ─── Shared verbs ─────────────────────────────────────────────────────────
   'common.cancel': { pt: 'Cancelar', en: 'Cancel' },
+  'common.save': { pt: 'Guardar', en: 'Save' },
   'common.back': { pt: 'Voltar', en: 'Back' },
   'common.continue': { pt: 'Continuar', en: 'Continue' },
   'common.refresh': { pt: 'Actualizar', en: 'Refresh' },
+  'common.retry': { pt: 'Tentar de novo', en: 'Try again' },
+  'common.unavailable': {
+    pt: 'Não foi possível ler os dados.',
+    en: 'The data could not be read.',
+  },
   'common.copy': { pt: 'Copiar', en: 'Copy' },
   'common.loading': { pt: 'A carregar…', en: 'Loading…' },
   'common.none': { pt: 'Nenhuma', en: 'None' },
@@ -319,6 +325,10 @@ const COPY = {
   'campaign.pause': { pt: 'Pausar', en: 'Pause' },
   'campaign.resume': { pt: 'Retomar', en: 'Resume' },
   'campaign.cancel': { pt: 'Cancelar', en: 'Cancel' },
+  'campaign.launchNeedsPreflight': {
+    pt: 'A verificar destinatários e custo. O botão de lançamento aparece quando os números estiverem prontos.',
+    en: 'Checking recipients and cost. The launch button appears once the numbers are ready.',
+  },
   'campaign.launchSubtitle': {
     pt: '{count} destinatários, ~${cost}',
     en: '{count} recipients, ~${cost}',
@@ -371,7 +381,13 @@ const COPY = {
   'settings.tab.connection': { pt: 'Ligação', en: 'Connection' },
   'settings.tab.health': { pt: 'Saúde', en: 'Health' },
   'settings.tab.templates': { pt: 'Modelos', en: 'Templates' },
+  'settings.tab.variables': { pt: 'Variáveis', en: 'Variables' },
   'settings.tab.diagnostics': { pt: 'Diagnóstico', en: 'Diagnostics' },
+  'settings.variablesNote': {
+    pt: 'Definições da aplicação. As palavras-chave e o texto das confirmações estão aqui de propósito: mudá-los é uma edição, nunca um deploy.',
+    en: 'Application settings. The keywords and the confirmation wording live here on purpose: changing them is an edit, never a deploy.',
+  },
+  'settings.variableSaved': { pt: '{key} guardada', en: '{key} saved' },
 
   'settings.summary': {
     pt: '{displayName} · qualidade {quality} · escalão {tier}',
@@ -487,8 +503,8 @@ const COPY = {
   'settings.attempts': { pt: 'tentativas', en: 'attempts' },
   'settings.consent': { pt: 'Consentimento', en: 'Consent' },
   'settings.consentNote': {
-    pt: 'As palavras-chave de subscrição e cancelamento, e o texto da confirmação, são variáveis da aplicação — edite-as em Definições → Aplicações → WhatsApp → Variáveis. Estão fora deste ecrã de propósito: o texto é revisto por aconselhamento jurídico e uma alteração não deve exigir um deploy.',
-    en: 'The opt-in and opt-out keywords, and the confirmation wording, are application variables — edit them under Settings → Applications → WhatsApp → Variables. They are deliberately not on this screen: the wording is reviewed by counsel, and a change must never require a deploy.',
+    pt: 'As palavras-chave de subscrição e cancelamento, e o texto da confirmação, são variáveis da aplicação — edite-as no separador Variáveis, aqui ao lado. Não são código de propósito: o texto é revisto por aconselhamento jurídico e uma alteração não deve exigir um deploy.',
+    en: 'The opt-in and opt-out keywords, and the confirmation wording, are application variables — edit them in the Variables tab, next to this one. They are deliberately not code: the wording is reviewed by counsel, and a change must never require a deploy.',
   },
 } satisfies Record<string, Entry>;
 

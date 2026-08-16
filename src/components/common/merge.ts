@@ -54,3 +54,38 @@ export const mergeMessages = (
     return a < b ? 1 : a > b ? -1 : 0;
   });
 };
+
+/**
+ * Turns an optimistic bubble the server refused into a failed one.
+ *
+ * A refused send creates no row, so no delta will ever supersede the bubble by
+ * `clientToken` — it would sit in the conversation saying "queued" for as long
+ * as the tab stayed open, describing a message that was never sent. Marking it
+ * failed is what makes the refusal visible where the message is, rather than
+ * only in a banner the reader may have already dismissed.
+ *
+ * Only the local row is touched. `id.startsWith('local-')` is the guard: if a
+ * server row for the same token has already arrived, the server's version of
+ * events is the true one and a late error must not overwrite it.
+ */
+export const settleOptimisticMessages = (
+  messages: MessageProjection[],
+  clientToken: string,
+  outcome: { error: string | null },
+): MessageProjection[] =>
+  messages.map((message) =>
+    message.clientToken === clientToken && message.id.startsWith('local-')
+      ? {
+          ...message,
+          status: 'FAILED',
+          errorCode: null,
+          errorDetail: outcome.error,
+          /**
+           * Retryable in the plain sense: the text is still there and "retry"
+           * sends it again as a new message. It is not a claim that Meta said
+           * it was retryable — nothing reached Meta.
+           */
+          isRetryable: message.body !== null,
+        }
+      : message,
+  );

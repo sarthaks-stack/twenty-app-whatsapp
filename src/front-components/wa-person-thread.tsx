@@ -1,5 +1,5 @@
 import { defineFrontComponent } from 'twenty-sdk/define';
-import { useRecordId } from 'twenty-sdk/front-component';
+import { useFrontComponentExecutionContext } from 'twenty-sdk/front-component';
 
 import { ThreadView } from '../components/chat/ThreadView';
 import { FC_PERSON_THREAD } from '../constants/universal-identifiers';
@@ -13,12 +13,23 @@ import { FC_PERSON_THREAD } from '../constants/universal-identifiers';
  * out to be the wrong place for a chat, this file goes away and the side panel
  * renders the identical view.
  *
- * `useRecordId()` is the Person, not the thread. The feed resolves the contact's
- * most recent conversation, and answers an empty state rather than a 404 when
- * there is none — a contact who has never messaged is normal, not an error.
+ * The id it reads is the **Person**, not the thread. The feed resolves the
+ * contact's most recent conversation, and answers an empty state rather than a
+ * 404 when there is none — a contact who has never messaged is normal, not an
+ * error.
+ *
+ * `useRecordId()` is deprecated, and so is the `recordId` field it reads;
+ * `selectedRecordIds` is the current shape. The fallback stays because a record
+ * page is not a selection: if a host ever mounts this widget without seeding
+ * the selection, the deprecated field is still the one that answers, and a
+ * blank chat would be a silent failure.
  */
 const WaPersonThread = () => {
-  const personId = useRecordId();
+  const personId = useFrontComponentExecutionContext((context) =>
+    context.selectedRecordIds.length === 1
+      ? context.selectedRecordIds[0]
+      : (context.recordId ?? null),
+  );
 
   return <ThreadView personId={personId} variant="tab" />;
 };

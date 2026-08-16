@@ -41,6 +41,7 @@ const CAMPAIGN_FIELDS = {
   templateId: true,
   accountId: true,
   ownerId: true,
+  createdAt: true,
 } as const;
 
 export type WhatsappCampaignRecord = {
@@ -72,6 +73,7 @@ export type WhatsappCampaignRecord = {
   templateId?: string | null;
   accountId?: string | null;
   ownerId?: string | null;
+  createdAt?: string | null;
 };
 
 export const findCampaignById = async (

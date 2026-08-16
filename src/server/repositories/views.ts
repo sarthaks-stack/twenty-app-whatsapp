@@ -135,3 +135,65 @@ export const fieldsForObject = async (
       ]),
   );
 };
+
+/**
+ * The saved Person views a campaign can target (FR-CAM-2a, specs/07 §2 step 3).
+ *
+ * `getViews` returns more than a person would call a view: Twenty stores a
+ * record page's field layout as one too — `FIELDS_WIDGET` — and offering
+ * "Person Record Page Fields" as an audience would be offering a layout as a
+ * list of people.
+ *
+ * The filter is an **allow-list**, so a view type Twenty adds later is left out
+ * until someone decides it belongs. The two failure directions are not
+ * symmetric: omitting a real view means an admin cannot pick it, while
+ * including a layout means sending a campaign to whatever it happens to
+ * translate into.
+ *
+ * The index view ("All People") is deliberately included: everyone is a
+ * legitimate audience, chosen deliberately, and the pre-flight panel is where
+ * that choice is confronted with its own size.
+ */
+export const AUDIENCE_VIEW_TYPES = new Set(['TABLE', 'KANBAN', 'CALENDAR']);
+
+export const listPersonViews = async (
+  personObjectMetadataId: string,
+): Promise<ViewSummary[]> => {
+  try {
+    const result = await metadataClient().query({
+      getViews: {
+        __args: { objectMetadataId: personObjectMetadataId },
+        id: true,
+        name: true,
+        objectMetadataId: true,
+        type: true,
+        key: true,
+      },
+    });
+
+    const views = (result.getViews ?? []) as {
+      id?: string;
+      name?: string;
+      objectMetadataId?: string;
+      type?: string | null;
+    }[];
+
+    return views
+      .filter(
+        (view) =>
+          typeof view.id === 'string' &&
+          view.objectMetadataId === personObjectMetadataId &&
+          typeof view.type === 'string' &&
+          AUDIENCE_VIEW_TYPES.has(view.type),
+      )
+      .map((view) => ({
+        id: view.id!,
+        name: view.name ?? '',
+        objectMetadataId: view.objectMetadataId!,
+      }));
+  } catch (error) {
+    logger.warn('views.list_failed', describeError(error));
+
+    return [];
+  }
+};

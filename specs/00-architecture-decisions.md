@@ -998,3 +998,38 @@ one that replaces an exception is not.
   `ACTIVE` and publishable, and the campaign that chose it failed at Meta for everyone. It now
   pages to exhaustion — and if it *cannot* finish, it disables nothing, because a partial read is
   indistinguishable from "deleted" to the comparison that follows.
+
+### D-50 — Publishing a template needed a writer, and had none
+
+`publishedToCrm` is the flag FR-TPL-2 hangs on: the picker, the send path and
+`campaign create` all refuse a template without it. Every writer in the app set
+it to **false** — sync un-publishes on degradation, the webhook un-publishes on
+rejection or a changed variable count, the sender un-publishes when Meta refuses
+the mapping. Nothing ever set it to true.
+
+So a workspace with five approved templates had an empty picker and could not
+create a campaign at all, and no error anywhere said why: the flag was simply
+always false, which is indistinguishable from "an admin has not published these
+yet". Found by building the settings tab that was supposed to toggle it.
+
+`POST /s/whatsapp/template { action: 'publish' | 'unpublish' | 'list' }`,
+admin-only, audited under the `template.publish` action that had been defined
+since phase 4 and never emitted. `publishRefusal` re-checks the two conditions
+the send path checks — approved at Meta, renderable by the app — because
+publishing an unrenderable template puts a row in the picker that fails at Meta
+for every recipient.
+
+### D-51 — `twenty-sdk/define` is not readable at runtime, and the failure is silent
+
+The logic-function bundler replaces everything imported from `twenty-sdk/define`
+with a stub, which `server/metadata-ids.ts` documents. The campaign builder's
+view list still walked into it:
+`resolveObjectMetadataId(STANDARD_OBJECT.person.universalIdentifier)` type-checks,
+builds, applies, and resolves `undefined` at runtime — so the lookup returned
+nothing and the audience step offered an empty dropdown, with no error in any
+log.
+
+`PERSON_OBJECT_UID` is now a literal in `constants/universal-identifiers.ts`,
+and a unit test asserts it equals `STANDARD_OBJECT.person.universalIdentifier`.
+The test runs in Node, where the stub does not apply, so the copy cannot drift
+from the SDK without failing.

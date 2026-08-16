@@ -15,7 +15,12 @@ import { config } from '../server/config';
 import { describeError, logger } from '../server/logger';
 import { METRIC, count } from '../server/metrics';
 import { findAccountById } from '../server/repositories/accounts';
-import { createTemplateRecord } from '../server/repositories/templates';
+import {
+  createTemplateRecord,
+  findTemplateById,
+  listTemplatesForAccount,
+  patchTemplate,
+} from '../server/repositories/templates';
 import { templateCategoryFor, templateStatusFor } from './wa-template-sync';
 
 /**
@@ -29,12 +34,47 @@ import { templateCategoryFor, templateStatusFor } from './wa-template-sync';
  * explaining why. Found by reading a plan that was missing a function.
  */
 
+export type TemplateAction = 'submit' | 'publish' | 'unpublish' | 'list';
+
 export type TemplateSubmitBody = {
+  /** Absent means `submit`, which is what this route did before publishing existed. */
+  action?: TemplateAction;
   accountId?: string;
+  /** `publish` / `unpublish`. */
+  templateId?: string;
   name?: string;
   language?: string;
   category?: string;
   components?: MetaTemplateComponent[];
+};
+
+/**
+ * Why a template may not be published (FR-TPL-2).
+ *
+ * Publishing is the deliberate human act that makes a template selectable by a
+ * rep or a campaign, and until now nothing in the app could perform it — every
+ * other writer of `publishedToCrm` only ever sets it to `false`. So a template
+ * synced from Meta was permanently invisible, and the flag that the send path,
+ * the picker and the campaign gate all read had no way of ever becoming true.
+ *
+ * The two conditions are the same ones the send path re-checks. Publishing an
+ * unapproved or unrenderable template would put a row in the picker that fails
+ * at Meta for every recipient.
+ */
+export const publishRefusal = (template: {
+  status?: string | null;
+  isUsableInCrm?: boolean | null;
+  unsupportedReason?: string | null;
+}): string | null => {
+  if (template.status !== 'APPROVED') {
+    return `Only an approved template can be published; this one is ${template.status ?? 'unknown'}`;
+  }
+
+  if (template.isUsableInCrm !== true) {
+    return `This template cannot be rendered by the app: ${template.unsupportedReason ?? 'unsupported'}`;
+  }
+
+  return null;
 };
 
 
@@ -89,6 +129,69 @@ export const handler = async (
     requireRole(caller, 'admin');
 
     const body = event.body ?? {};
+    const action = body.action ?? 'submit';
+
+    if (action === 'list') {
+      if (typeof body.accountId !== 'string') {
+        return new Response({ error: 'accountId is required' }, { status: 400 });
+      }
+
+      /**
+       * The settings tab's list, which is *not* the picker's. It carries every
+       * template whatever its state, because the whole point of the tab is
+       * seeing the rejected and unsupported ones and being told why.
+       */
+      const templates = await listTemplatesForAccount(body.accountId, 200);
+
+      return new Response(
+        {
+          templates: templates.map((template) => ({
+            ...template,
+            publishRefusal: publishRefusal(template),
+          })),
+        },
+        { status: 200 },
+      );
+    }
+
+    if (action === 'publish' || action === 'unpublish') {
+      if (typeof body.templateId !== 'string') {
+        return new Response({ error: 'templateId is required' }, { status: 400 });
+      }
+
+      const template = await findTemplateById(body.templateId);
+
+      if (template === null) {
+        return new Response({ error: 'Unknown template' }, { status: 404 });
+      }
+
+      const refusal = action === 'publish' ? publishRefusal(template) : null;
+
+      if (refusal !== null) return new Response({ error: refusal }, { status: 409 });
+
+      await patchTemplate(template.id, { publishedToCrm: action === 'publish' });
+
+      audit({
+        action:
+          action === 'publish'
+            ? AUDIT_ACTION.TEMPLATE_PUBLISH
+            : AUDIT_ACTION.TEMPLATE_UNPUBLISH,
+        actorId: caller.workspaceMemberId,
+        subject: { templateId: template.id },
+        details: { name: template.name ?? null, status: template.status ?? null },
+      });
+
+      log.info('wa.template.publish_changed', {
+        correlationId: template.id,
+        publishedToCrm: action === 'publish',
+      });
+
+      return new Response(
+        { templateId: template.id, publishedToCrm: action === 'publish' },
+        { status: 200 },
+      );
+    }
+
     const name = (body.name ?? '').trim().toLowerCase();
 
     if (!TEMPLATE_NAME_PATTERN.test(name)) {

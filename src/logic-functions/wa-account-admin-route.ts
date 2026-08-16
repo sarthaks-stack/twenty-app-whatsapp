@@ -1,7 +1,10 @@
 import { defineLogicFunction } from 'twenty-sdk/define';
 import { Response, kv, type RoutePayload } from 'twenty-sdk/logic-function';
 
-import { LF_ACCOUNT_ADMIN_ROUTE } from '../constants/universal-identifiers';
+import {
+  LF_ACCOUNT_ADMIN_ROUTE,
+  LF_WEBHOOK_RESOLVER,
+} from '../constants/universal-identifiers';
 import {
   ACCOUNT_STATUS,
   MESSAGING_TIER,
@@ -13,7 +16,9 @@ import { getProvider } from '../providers/whatsapp';
 import { MetaApiError } from '../providers/whatsapp/errors';
 import { AUDIT_ACTION, audit } from '../server/audit';
 import { authErrorResponse, requireCaller, requireRole } from '../server/auth';
+import { config } from '../server/config';
 import { describeError, logger } from '../server/logger';
+import { budgetForAccount, tierFor } from '../server/tier-ledger';
 import { currentWorkspaceId } from '../server/workspace';
 import { syncAccount } from './wa-template-sync';
 import { nodesOf, query } from '../server/repositories/base';
@@ -23,6 +28,9 @@ import {
   patchAccount,
   type WhatsappAccountRecord,
 } from '../server/repositories/accounts';
+import { findStuckQueuedMessages } from '../server/repositories/messages';
+import { findFailedWebhookEvents } from '../server/repositories/webhook-events';
+import { STUCK_MESSAGE_MS } from './wa-health-check';
 
 /**
  * Account connect / test / disconnect (FR-ACC-1, FR-ACC-6, D-3, SEC-5).
@@ -39,7 +47,13 @@ import {
  * impossible.
  */
 
-export type AccountAction = 'connect' | 'test' | 'disconnect' | 'list' | 'syncTemplates';
+export type AccountAction =
+  | 'connect'
+  | 'test'
+  | 'disconnect'
+  | 'list'
+  | 'syncTemplates'
+  | 'diagnostics';
 
 export type AccountRouteBody = {
   action?: AccountAction;
@@ -131,6 +145,162 @@ const ACCOUNT_SUMMARY = {
   tokenLastCheckedAt: true,
   isTestAccount: true,
 } as const;
+
+/** Two hours without a successful token check is the health panel's amber. */
+const TOKEN_FRESH_MS = 2 * 3_600_000;
+const DAY_MS = 24 * 3_600_000;
+
+export type HealthRow = {
+  key: string;
+  ok: boolean;
+  /** A machine value, never a sentence — the settings tab owns the wording. */
+  detail: Record<string, unknown>;
+};
+
+/**
+ * The health panel's rows and the callback card's URLs (NFR-O3, FR-ACC-2/4).
+ *
+ * Every row answers a question an operator asks when something is wrong, and
+ * each is computed from a record rather than from a cached verdict, so a panel
+ * that says "green" is saying something about the data and not about the last
+ * time a cron happened to run.
+ *
+ * The verify token is deliberately absent. It is a secret, so the card says
+ * whether it is *configured* and never what it is — a settings page that
+ * displayed it would put it in every screenshot of a support ticket.
+ */
+const diagnostics = async () => {
+  const now = Date.now();
+
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappAccounts: {
+          __args: { first: 60 },
+          edges: {
+            node: {
+              ...ACCOUNT_SUMMARY,
+              tierUniqueUsersUsed: true,
+              tierWindowStartedAt: true,
+              sendThrottlePerSecond: true,
+              throughputPerSecond: true,
+              defaultCountryCallingCode: true,
+              contactAutoCreationEnabled: true,
+            },
+          },
+        },
+      }),
+    'accounts.diagnostics',
+  );
+
+  const accounts = nodesOf<WhatsappAccountRecord>(result.whatsappAccounts);
+
+  const [failedEvents, stuck] = await Promise.all([
+    findFailedWebhookEvents(60),
+    findStuckQueuedMessages(new Date(now - STUCK_MESSAGE_MS), 60),
+  ]);
+
+  const recentFailures = failedEvents.filter((event) => {
+    const at = event.receivedAt;
+
+    return typeof at !== 'string' || now - new Date(at).getTime() < DAY_MS;
+  });
+
+  const stalenessMs = config.webhookStalenessHours() * 3_600_000;
+  const base = (process.env.TWENTY_API_URL ?? '').replace(/\/+$/, '');
+
+  const rows: HealthRow[] = accounts.flatMap((account): HealthRow[] => {
+    const checked = account.tokenLastCheckedAt;
+    const lastEvent = account.webhookLastEventAt;
+
+    return [
+      {
+        key: 'token',
+        ok:
+          typeof checked === 'string' && now - new Date(checked).getTime() < TOKEN_FRESH_MS,
+        detail: { accountId: account.id, tokenLastCheckedAt: checked ?? null },
+      },
+      {
+        /**
+         * A number that has *never* received an event is not stale — it is new.
+         * Reporting a freshly connected quiet number as broken is how a health
+         * panel teaches people to ignore it.
+         */
+        key: 'webhook',
+        ok:
+          typeof lastEvent !== 'string' ||
+          now - new Date(lastEvent).getTime() < stalenessMs,
+        detail: {
+          accountId: account.id,
+          webhookLastEventAt: lastEvent ?? null,
+          stalenessHours: config.webhookStalenessHours(),
+        },
+      },
+      {
+        key: 'quality',
+        ok: account.qualityRating === QUALITY.GREEN,
+        detail: { accountId: account.id, qualityRating: account.qualityRating ?? null },
+      },
+      {
+        /**
+         * Green while a campaign could still start today. `available` is what
+         * is left *after* the reserve held back for 1:1 traffic (AR-21), which
+         * is the number that decides whether tonight's campaign runs — not the
+         * raw limit, and not the raw usage.
+         */
+        key: 'tier',
+        ok: budgetForAccount(account).available > 0,
+        detail: {
+          accountId: account.id,
+          tier: tierFor(account),
+          ...budgetForAccount(account),
+          windowStartedAt: account.tierWindowStartedAt ?? null,
+        },
+      },
+    ];
+  });
+
+  rows.push(
+    {
+      key: 'failedWebhookEvents',
+      ok: recentFailures.length === 0,
+      detail: { count: recentFailures.length },
+    },
+    {
+      key: 'stuckOutbound',
+      ok: stuck.length === 0,
+      detail: { count: stuck.length, olderThanMinutes: STUCK_MESSAGE_MS / 60_000 },
+    },
+  );
+
+  return {
+    accounts,
+    rows,
+    webhook: {
+      /** The alias to paste into Meta. */
+      callbackUrl: base === '' ? null : `${base}/s/whatsapp/webhook`,
+      /** The direct form, for when the alias is not configured. */
+      directUrl: base === '' ? null : `${base}/webhooks/server/${LF_WEBHOOK_RESOLVER}`,
+      verifyUrl: base === '' ? null : `${base}/s/whatsapp/verify`,
+      verifyTokenConfigured: (process.env.META_VERIFY_TOKEN ?? '').length > 0,
+      requiredFields: [
+        'messages',
+        'message_template_status_update',
+        'message_template_quality_update',
+        'message_template_components_update',
+        'account_update',
+        'phone_number_quality_update',
+        'business_capability_update',
+      ],
+    },
+    failedEvents: recentFailures.slice(0, 20),
+    stuckOutbound: stuck.slice(0, 20).map((message) => ({
+      id: message.id,
+      threadId: message.threadId ?? null,
+      createdAt: message.createdAt ?? null,
+    })),
+  };
+};
 
 const countOtherAccountsOnWaba = async (
   wabaId: string,
@@ -229,6 +399,9 @@ export const handler = async (
           { status: 200 },
         );
       }
+
+      case 'diagnostics':
+        return new Response(await diagnostics(), { status: 200 });
 
       case 'connect': {
         const phoneNumberId = (body.phoneNumberId ?? '').trim();

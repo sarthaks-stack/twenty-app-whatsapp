@@ -1,7 +1,11 @@
 import { defineLogicFunction } from 'twenty-sdk/define';
 import { Response, type RoutePayload } from 'twenty-sdk/logic-function';
 
-import { LF_CAMPAIGN_SNAPSHOT, LF_CAMPAIGN_CONTROL } from '../constants/universal-identifiers';
+import {
+  LF_CAMPAIGN_SNAPSHOT,
+  LF_CAMPAIGN_CONTROL,
+  PERSON_OBJECT_UID,
+} from '../constants/universal-identifiers';
 import {
   describeAudience,
   parseAudienceDefinition,
@@ -11,6 +15,7 @@ import { estimateCampaignCostUsd, rateFor } from '../domain/campaign/guardrails'
 import { projectDailySpread } from '../domain/campaign/tier-budget';
 import { STATUS_REASON, canTransition } from '../domain/campaign/transitions';
 import {
+  ALLOWED_BINDING_PATHS,
   resolveParameters,
   type VariableMapping,
 } from '../domain/campaign/variable-resolution';
@@ -52,6 +57,8 @@ import {
   type WhatsappCampaignRecord,
 } from '../server/repositories/campaigns';
 import { findTemplateById, type WhatsappTemplateRecord } from '../server/repositories/templates';
+import { resolveObjectMetadataId } from '../server/metadata-ids';
+import { listPersonViews } from '../server/repositories/views';
 import { budgetForAccount, tierFor } from '../server/tier-ledger';
 import { upsertThread } from '../server/threads';
 import { EMPTY_VARIABLE_SPEC } from './wa-outbound-sender';
@@ -71,6 +78,7 @@ import { EMPTY_VARIABLE_SPEC } from './wa-outbound-sender';
  */
 
 export type CampaignAction =
+  | 'audienceOptions'
   | 'create'
   | 'update'
   | 'build'
@@ -497,6 +505,28 @@ export const handler = async (
      * done once. A route that repeated them per branch is a route where one
      * branch eventually answers 500 for a deleted campaign.
      */
+    /**
+     * `audienceOptions` names no campaign — it is what the builder asks
+     * *before* there is one, so the audience step can offer real views instead
+     * of a UUID box.
+     */
+    if (action === 'audienceOptions') {
+      requireRole(caller, 'agent');
+
+      const personObjectMetadataId = await resolveObjectMetadataId(PERSON_OBJECT_UID);
+
+      return new Response(
+        {
+          views:
+            personObjectMetadataId === null
+              ? []
+              : await listPersonViews(personObjectMetadataId),
+          bindingPaths: ALLOWED_BINDING_PATHS,
+        },
+        { status: 200 },
+      );
+    }
+
     const loaded =
       action === 'create'
         ? null

@@ -83,6 +83,19 @@ export const NAV_INBOX = '40dac02c-cdcb-4d72-8235-b0d2d45ad578';
 export const NAV_CAMPAIGNS = '24b7fa8a-1e64-4b55-8fa0-eaddf2aa9514';
 export const CMI_OPEN_CHAT = '60230d67-8b27-4fa7-af25-f482f0215615';
 
+// ─── Twenty's own objects, as literals ──────────────────────────────────────
+/**
+ * `person`, copied from `STANDARD_OBJECT.person.universalIdentifier`.
+ *
+ * The same value, deliberately duplicated: the logic-function bundler replaces
+ * everything imported from `twenty-sdk/define` with a stub, so reading it from
+ * there inside a running function yields `undefined` — and nothing warns. The
+ * symptom is a lookup that quietly returns nothing, which is exactly how the
+ * campaign builder's view list came back empty. A test asserts the two stay
+ * equal (specs/00 D-11, server/metadata-ids.ts).
+ */
+export const PERSON_OBJECT_UID = '20202020-e674-48e5-a542-72570eee7213';
+
 // ─── Roles ──────────────────────────────────────────────────────────────────
 export const ROLE_AGENT = '8a466b1b-a44e-48fb-9864-63af63b3edc3';
 export const ROLE_ADMIN = 'b97f72bf-83f7-4327-9024-c6b625de3f38';

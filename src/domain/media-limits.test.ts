@@ -101,6 +101,21 @@ describe('outbound media limits', () => {
     expect(result.ok === false && result.reason).toBe(MEDIA_REJECTION.UNKNOWN_KIND);
   });
 
+  /**
+   * D-36. The kind arrives in a request body, and every object inherits
+   * `constructor`, `toString` and friends — so a bare lookup answered with a
+   * function instead of `undefined`, walked past the unknown-kind branch, and
+   * threw on `limit.mimeTypes.length`.
+   */
+  it.each(['constructor', 'toString', 'valueOf', '__proto__', 'hasOwnProperty'])(
+    'rejects %s as a media kind instead of throwing',
+    (kind) => {
+      const result = validateOutboundMedia({ kind, mimeType: 'image/jpeg', sizeBytes: 10 });
+
+      expect(result.ok === false && result.reason).toBe(MEDIA_REJECTION.UNKNOWN_KIND);
+    },
+  );
+
   it('states each limit exactly once', () => {
     expect(MEDIA_LIMITS.image.maxBytes).toBe(5 * MB);
     expect(MEDIA_LIMITS.audio.maxBytes).toBe(16 * MB);

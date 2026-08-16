@@ -820,3 +820,43 @@ reaches that limit returns `truncated: true`, counts a metric and logs a warning
 because a 60-second budget is a real constraint; what changes is that hitting it is *visible*.
 This is the general rule the review kept finding exceptions to: **a bounded operation must say
 when the bound was reached.**
+
+---
+
+## D-34 … D-39 — The second pass over the review
+
+**Status: DECIDED** · 2026-08-16
+
+Six smaller findings from the same review, each verified against the code before being fixed and
+each carrying a test that fails against what it replaces. They are grouped because they share one
+sentence: **a value we did not recognise was treated as one we did.**
+
+- **D-34 — an unknown header format is not a text header.** `headerFormatOf` coerced any
+  unrecognised `format` to `TEXT`. Meta adds component formats; the first template carrying a new
+  one would have been derived as text, marked usable, and failed at Meta for every recipient of
+  whatever campaign chose it. It now yields `null` and `assessSupport` refuses the template with
+  `UNKNOWN_HEADER_FORMAT`, which is what FR-TPL-4 asks the mechanism to do.
+- **D-35 — a blank numeric filter is not zero.** `Number(null)` and `Number('')` are both `0` and
+  perfectly finite, so a numeric view filter with no value translated into `= 0` and selected a
+  different audience. Blank is now refused before the conversion, in keeping with D-23.
+- **D-36 — `constructor` is not a media kind.** `MEDIA_LIMITS[kind]` answered with an inherited
+  function rather than `undefined`, so a request body naming `constructor` or `toString` walked
+  past the unknown-kind branch and threw on `limit.mimeTypes.length`. Own-property check.
+- **D-37 — a miss on a full page is not "not there".** The metadata id resolvers took the first
+  500 objects and 200 fields and answered `null` when the target was not among them, which is the
+  same answer they give for something that genuinely does not exist. They still answer `null` —
+  guessing would be worse — but they now log when the page they searched was full.
+- **D-38 — blocking a conversation is audited.** Block and unblock changed the one flag that makes
+  the policy gate refuse every send and the snapshot exclude the contact, and left only a log
+  line. Assign and relink were already audited; so is this now.
+- **D-39 — the rollup hint is cleared only if it did not change.** A recount takes several round
+  trips, and a status landing mid-recount wrote a delta the recount had not seen; clearing
+  unconditionally discarded it, leaving the campaign's numbers one event behind until something
+  else moved them — which, for a finished campaign's last delivery, is never.
+
+Two further findings in the same batch were fixed for the same reason as D-32: bookkeeping was
+sharing a failure boundary with work that must not fail. The round-robin assignment cursor moved
+out of the create's race-handling `try`, where a failure was either misread as a create race or
+rejected an upsert whose conversation already existed; and `listDueCampaigns` gained an
+`orderBy scheduledAt` so a workspace with more due campaigns than one page cannot starve the
+oldest.

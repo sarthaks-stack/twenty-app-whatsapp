@@ -205,6 +205,25 @@ describe('assessSupport', () => {
     );
   });
 
+  /**
+   * D-34. An unrecognised header format used to be coerced to `TEXT`, so the
+   * first template carrying a format Meta added later would have been derived
+   * as text, declared usable, and failed at Meta for every recipient of
+   * whatever campaign picked it.
+   */
+  it('refuses a header format it does not recognise', () => {
+    const verdict = assessSupport([{ type: 'HEADER', format: 'PRODUCT' }]);
+
+    expect(verdict.isUsableInCrm).toBe(false);
+    expect(verdict.unsupportedReason).toBe(UNSUPPORTED_REASON.UNKNOWN_HEADER_FORMAT);
+  });
+
+  it('leaves the known formats usable', () => {
+    for (const format of ['TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT']) {
+      expect(assessSupport([{ type: 'HEADER', format }]).isUsableInCrm, format).toBe(true);
+    }
+  });
+
   it('refuses a template mixing {{1}} and {{name}}', () => {
     expect(assessSupport([body('Olá {{nome}}, ref {{1}}')]).unsupportedReason).toBe(
       UNSUPPORTED_REASON.MIXED_PARAMETER_STYLES,

@@ -195,6 +195,20 @@ export const handler = async (
 
         await patchThread(thread.id, { isBlocked });
 
+        /**
+         * Audited like assign and relink. Blocking is the strongest thing a rep
+         * can do to a conversation — the policy gate refuses every send to a
+         * blocked thread and the snapshot excludes it from campaigns — so
+         * "who stopped us messaging this customer, and when?" must have an
+         * answer that is not a log line (D-38).
+         */
+        audit({
+          action: AUDIT_ACTION.THREAD_BLOCK,
+          actorId: caller.workspaceMemberId,
+          subject: { threadId: thread.id, personId: thread.personId ?? null },
+          details: { from: thread.isBlocked === true, to: isBlocked },
+        });
+
         log.info('wa.thread.block_changed', { correlationId: thread.id, isBlocked });
 
         return new Response({ threadId: thread.id, isBlocked }, { status: 200 });

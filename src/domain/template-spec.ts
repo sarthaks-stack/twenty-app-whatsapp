@@ -93,6 +93,7 @@ export const UNSUPPORTED_REASON = {
   OTP_BUTTON: 'OTP_BUTTON',
   VOICE_CALL_BUTTON: 'VOICE_CALL_BUTTON',
   LOCATION_HEADER: 'LOCATION_HEADER',
+  UNKNOWN_HEADER_FORMAT: 'UNKNOWN_HEADER_FORMAT',
   MIXED_PARAMETER_STYLES: 'MIXED_PARAMETER_STYLES',
 } as const;
 export type UnsupportedReason = (typeof UNSUPPORTED_REASON)[keyof typeof UNSUPPORTED_REASON];
@@ -135,12 +136,24 @@ const componentOf = (
 
 const HEADER_FORMATS = new Set<HeaderFormat>(['TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT', 'LOCATION']);
 
+/**
+ * A header format we do not recognise is **not** a text header.
+ *
+ * Coercing it to `TEXT` was a guess with a send behind it: Meta adds component
+ * formats, and the first template carrying a new one would have been derived as
+ * text, declared usable, and failed at Meta for every recipient of whatever
+ * campaign chose it. `assessSupport` refuses the template instead, which is what
+ * FR-TPL-4 asks the mechanism to do (D-34).
+ */
 const headerFormatOf = (component: MetaTemplateComponent | undefined): HeaderFormat | null => {
   if (component === undefined) return null;
   const format = (component.format ?? 'TEXT').toUpperCase() as HeaderFormat;
 
-  return HEADER_FORMATS.has(format) ? format : 'TEXT';
+  return HEADER_FORMATS.has(format) ? format : null;
 };
+
+const hasUnknownHeaderFormat = (component: MetaTemplateComponent): boolean =>
+  (component.type ?? '').toUpperCase() === 'HEADER' && headerFormatOf(component) === null;
 
 const namedExamples = (
   params: { param_name?: string; example?: string }[] | undefined,
@@ -266,6 +279,8 @@ export const assessSupport = (
        */
       add(UNSUPPORTED_REASON.LOCATION_HEADER);
     }
+
+    if (hasUnknownHeaderFormat(component)) add(UNSUPPORTED_REASON.UNKNOWN_HEADER_FORMAT);
 
     for (const button of component.buttons ?? []) {
       const reason = BUTTON_REASONS[(button.type ?? '').toUpperCase()];

@@ -55,14 +55,19 @@ export const resolveObjectMetadataId = async (
         objects: {
           __args: { paging: { first: 500 }, filter: {} },
           edges: { node: { id: true, universalIdentifier: true } },
+          pageInfo: { hasNextPage: true },
         },
       });
 
-      return (
-        (result.objects.edges ?? [])
-          .map((edge) => edge.node)
-          .find((node) => node.universalIdentifier === objectUniversalIdentifier)?.id ?? null
-      );
+      const found = (result.objects.edges ?? [])
+        .map((edge) => edge.node)
+        .find((node) => node.universalIdentifier === objectUniversalIdentifier)?.id;
+
+      if (found === undefined && result.objects.pageInfo?.hasNextPage === true) {
+        logger.warn('metadata.lookup_truncated', { objectUniversalIdentifier });
+      }
+
+      return found ?? null;
     } catch (error) {
       logger.warn('metadata.object_lookup_failed', {
         objectUniversalIdentifier,
@@ -94,23 +99,47 @@ export const resolveFieldUniversalIdentifier = async (
             node: {
               universalIdentifier: true,
               fields: {
-                __args: { paging: { first: 200 }, filter: {} },
+                __args: { paging: { first: 500 }, filter: {} },
                 edges: { node: { name: true, universalIdentifier: true } },
+                pageInfo: { hasNextPage: true },
               },
             },
           },
+          pageInfo: { hasNextPage: true },
         },
       });
 
-      const object = (result.objects.edges ?? [])
-        .map((edge) => edge.node)
-        .find((node) => node.universalIdentifier === objectUniversalIdentifier);
-
-      return (
-        (object?.fields?.edges ?? [])
-          .map((edge) => edge.node)
-          .find((node) => node.name === fieldName)?.universalIdentifier ?? null
+      const objects = (result.objects.edges ?? []).map((edge) => edge.node);
+      const object = objects.find(
+        (node) => node.universalIdentifier === objectUniversalIdentifier,
       );
+
+      const found = (object?.fields?.edges ?? [])
+        .map((edge) => edge.node)
+        .find((node) => node.name === fieldName)?.universalIdentifier;
+
+      /**
+       * A miss on a page that was full is not the same answer as a miss on a
+       * complete list — the first means "we did not look far enough" and used
+       * to be indistinguishable from "it is not there" (D-37). It still
+       * answers null, because a guess would be worse, but it says so.
+       */
+      if (found === undefined) {
+        const truncated =
+          (object === undefined && result.objects.pageInfo?.hasNextPage === true) ||
+          object?.fields?.pageInfo?.hasNextPage === true;
+
+        if (truncated) {
+          logger.warn('metadata.lookup_truncated', {
+            objectUniversalIdentifier,
+            fieldName,
+            objects: objects.length,
+            fields: object?.fields?.edges?.length ?? 0,
+          });
+        }
+      }
+
+      return found ?? null;
     } catch (error) {
       logger.warn('metadata.field_lookup_failed', {
         objectUniversalIdentifier,

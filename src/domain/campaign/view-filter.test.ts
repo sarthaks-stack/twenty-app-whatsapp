@@ -257,6 +257,31 @@ describe('refusals', () => {
       }),
     ).toContain('is not a number');
   });
+
+  /**
+   * D-35. `Number(null)` and `Number('')` are 0 — a perfectly finite number —
+   * so a numeric filter left blank translated into `= 0` and selected a
+   * different set of people, with nothing about the result looking wrong.
+   */
+  it.each([null, '', '   '])('refuses a numeric filter whose value is %p', (value) => {
+    expect(
+      translateFilter({
+        filter: row({ operand: 'IS', value }),
+        field: field('position', 'NUMBER'),
+        now: NOW,
+      }),
+    ).toContain('is not a number');
+  });
+
+  it('still accepts a genuine zero', () => {
+    expect(
+      translateFilter({
+        filter: row({ operand: 'IS', value: '0' }),
+        field: field('position', 'NUMBER'),
+        now: NOW,
+      }),
+    ).toEqual({ position: { eq: 0 } });
+  });
 });
 
 describe('translateViewFilters', () => {

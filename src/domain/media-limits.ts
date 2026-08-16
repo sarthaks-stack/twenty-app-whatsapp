@@ -75,7 +75,15 @@ export const validateOutboundMedia = ({
   sizeBytes: number;
   isAnimatedSticker?: boolean;
 }): MediaValidation => {
-  const limit = MEDIA_LIMITS[kind as OutboundMediaKind];
+  /**
+   * `Object.hasOwn`, not a bare lookup: `MEDIA_LIMITS['constructor']` answers
+   * with a function rather than `undefined`, so a media kind of `constructor`
+   * or `toString` — and the kind arrives from a request body — sailed past the
+   * unknown-kind branch and threw on `limit.mimeTypes.length` (D-36).
+   */
+  const limit = Object.prototype.hasOwnProperty.call(MEDIA_LIMITS, kind)
+    ? MEDIA_LIMITS[kind as OutboundMediaKind]
+    : undefined;
 
   if (limit === undefined) {
     return {

@@ -279,7 +279,16 @@ export const translateFilter = ({
   }
 
   if (NUMBER_TYPES.has(field.type)) {
-    const numeric = Number(typeof value === 'string' ? value : (value as number));
+    /**
+     * `Number(null)` and `Number('')` are both **0**, a perfectly finite number
+     * — so a numeric filter with no value used to translate into `= 0` and
+     * quietly select a different set of people (D-35). Blank is refused before
+     * the conversion, not after it.
+     */
+    const blank =
+      value === null || value === undefined || (typeof value === 'string' && value.trim() === '');
+
+    const numeric = blank ? Number.NaN : Number(typeof value === 'string' ? value : (value as number));
 
     if (
       !Number.isFinite(numeric) &&

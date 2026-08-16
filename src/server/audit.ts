@@ -20,6 +20,7 @@ export const AUDIT_ACTION = {
   CONSENT_CHANGE: 'consent.change',
   THREAD_ASSIGN: 'thread.assign',
   THREAD_RELINK: 'thread.relink',
+  THREAD_BLOCK: 'thread.block',
   TEMPLATE_PUBLISH: 'template.publish',
   TEMPLATE_UNPUBLISH: 'template.unpublish',
   ACCOUNT_CONNECT: 'account.connect',

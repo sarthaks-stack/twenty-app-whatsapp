@@ -2,7 +2,7 @@ import { THREAD_STATUS, WINDOW_KIND, WINDOW_STATE } from '../domain/constants';
 import { waIdToE164 } from '../domain/phone/normalise';
 import { isUniqueViolation } from './batching';
 import { matchPerson, type LinkCandidate } from './matching';
-import { logger } from './logger';
+import { describeError, logger } from './logger';
 import type { WhatsappAccountRecord } from './repositories/accounts';
 import { patchAccount } from './repositories/accounts';
 import {
@@ -128,8 +128,10 @@ export const upsertThread = async ({
 
   const assignment = nextAssignee(account);
 
+  let thread;
+
   try {
-    const thread = await createThread({
+    thread = await createThread({
       accountId: account.id,
       waId,
       dialablePhone: waIdToE164(waId),
@@ -143,12 +145,6 @@ export const upsertThread = async ({
       ...(originCampaignId === undefined ? {} : { originCampaignId }),
       ...(linkCandidates.length === 0 ? {} : { linkCandidates: { candidates: linkCandidates } }),
     });
-
-    if (assignment !== null) {
-      await patchAccount(account.id, { lastAssignedIndex: assignment.nextIndex });
-    }
-
-    return { thread, created: true, matchKind: match?.kind };
   } catch (error) {
     /**
      * Two inbound messages from a new number can arrive at once. The unique
@@ -165,6 +161,28 @@ export const upsertThread = async ({
 
     return { thread: raced, created: false };
   }
+
+  /**
+   * The round-robin cursor is bookkeeping, and it lives outside the create's
+   * `try` for two reasons: inside it, a failure here was read as a *create*
+   * race — the thread that had just been created would be re-read and reported
+   * as pre-existing — and a non-race error rejected the whole upsert after the
+   * conversation already existed, losing the inbound message that made it.
+   * A conversation with a stale assignment cursor is a far smaller problem.
+   */
+  if (assignment !== null) {
+    try {
+      await patchAccount(account.id, { lastAssignedIndex: assignment.nextIndex });
+    } catch (error) {
+      logger.warn('threads.assignment_cursor_failed', {
+        accountId: account.id,
+        threadId: thread.id,
+        ...describeError(error),
+      });
+    }
+  }
+
+  return { thread, created: true, matchKind: match?.kind };
 };
 
 /**

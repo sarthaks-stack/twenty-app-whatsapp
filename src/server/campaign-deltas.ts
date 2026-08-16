@@ -65,3 +65,40 @@ export const clearCampaignChange = async (campaignId: string): Promise<void> => 
     logger.debug('wa.campaign.delta_clear_failed', { campaignId, ...describeError(error) });
   }
 };
+
+/** A stable string for a delta, so two of them can be compared for sameness. */
+export const deltaFingerprint = (delta: Record<string, number> | null): string =>
+  delta === null
+    ? ''
+    : JSON.stringify(
+        Object.keys(delta)
+          .sort()
+          .map((key) => [key, delta[key]]),
+      );
+
+/**
+ * Clears the hint only if nothing has been added to it since it was read.
+ *
+ * A recount takes several round trips, and a delivery status landing in the
+ * middle of one writes a delta the recount did not see. An unconditional clear
+ * threw that away, so the campaign's numbers stayed one event behind until
+ * something else happened to move them — which, for the last delivery of a
+ * finished campaign, is never (D-39).
+ *
+ * `kv` has no compare-and-swap, so this is a read-then-delete and a delta
+ * written *between* those two calls is still lost. That window is a fraction of
+ * the one it replaces, and the failure it leaves is the harmless direction: a
+ * recount that runs again next tick.
+ */
+export const clearCampaignChangeIfUnchanged = async (
+  campaignId: string,
+  expected: Record<string, number> | null,
+): Promise<boolean> => {
+  const current = await readCampaignChange(campaignId);
+
+  if (deltaFingerprint(current) !== deltaFingerprint(expected)) return false;
+
+  await clearCampaignChange(campaignId);
+
+  return true;
+};

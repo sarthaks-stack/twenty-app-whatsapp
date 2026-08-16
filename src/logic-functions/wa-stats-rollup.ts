@@ -8,7 +8,10 @@ import {
   TEMPLATE_CATEGORY,
   type TemplateCategory,
 } from '../domain/constants';
-import { clearCampaignChange, readCampaignChange } from '../server/campaign-deltas';
+import {
+  clearCampaignChangeIfUnchanged,
+  readCampaignChange,
+} from '../server/campaign-deltas';
 import { config } from '../server/config';
 import { describeError, logger } from '../server/logger';
 import { METRIC, count } from '../server/metrics';
@@ -101,8 +104,12 @@ const ACTIVE_STATUSES = [
 export const hasPendingDelta = async (campaignId: string): Promise<boolean> => {
   const delta = await readCampaignChange(campaignId);
 
-  return delta !== null && Object.keys(delta).length > 0;
+  return isPending(delta);
 };
+
+/** The same test, on a delta already in hand. */
+export const isPending = (delta: Record<string, number> | null): boolean =>
+  delta !== null && Object.keys(delta).length > 0;
 
 export const rollupCampaign = async (
   campaign: WhatsappCampaignRecord,
@@ -178,18 +185,22 @@ export const rollup = async (now: Date = new Date()): Promise<RollupResult> => {
 
   for (const campaign of campaigns) {
     try {
-      if (!(await hasPendingDelta(campaign.id))) continue;
+      const delta = await readCampaignChange(campaign.id);
+
+      if (!isPending(delta)) continue;
 
       const patch = await rollupCampaign(campaign, now);
 
       await patchCampaign(campaign.id, patch);
 
       /**
-       * Cleared *after* the write. Clearing first would lose the signal if the
-       * write failed, and the campaign's numbers would then sit stale until
-       * the next status webhook happened to arrive.
+       * Cleared *after* the write, and only if nothing was added to the hint
+       * while the recount was running. Clearing first would lose the signal if
+       * the write failed; clearing unconditionally would lose a status that
+       * landed mid-recount, and the campaign's numbers would sit stale until
+       * something else moved them (D-39).
        */
-      await clearCampaignChange(campaign.id);
+      await clearCampaignChangeIfUnchanged(campaign.id, delta);
 
       result.rolled += 1;
 

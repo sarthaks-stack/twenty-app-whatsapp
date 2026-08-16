@@ -137,6 +137,13 @@ export const listDueCampaigns = async (
               status: { eq: 'SCHEDULED' },
               scheduledAt: { lte: now.toISOString() },
             },
+            /**
+             * Oldest first. Without an order the page is whatever the database
+             * returns, so a workspace with more due campaigns than `limit`
+             * could start the same recent ones every tick and leave a campaign
+             * scheduled for this morning waiting indefinitely.
+             */
+            orderBy: [{ scheduledAt: 'AscNullsFirst' }],
             first: limit,
           },
           edges: { node: CAMPAIGN_FIELDS },

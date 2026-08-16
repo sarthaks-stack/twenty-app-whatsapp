@@ -15,6 +15,7 @@ import { AUDIT_ACTION, audit } from '../server/audit';
 import { authErrorResponse, requireCaller, requireRole } from '../server/auth';
 import { describeError, logger } from '../server/logger';
 import { currentWorkspaceId } from '../server/workspace';
+import { syncAccount } from './wa-template-sync';
 import { nodesOf, query } from '../server/repositories/base';
 import {
   findAccountByPhoneNumberId,
@@ -38,7 +39,7 @@ import {
  * impossible.
  */
 
-export type AccountAction = 'connect' | 'test' | 'disconnect' | 'list';
+export type AccountAction = 'connect' | 'test' | 'disconnect' | 'list' | 'syncTemplates';
 
 export type AccountRouteBody = {
   action?: AccountAction;
@@ -393,6 +394,28 @@ export const handler = async (
         });
 
         return new Response({ accountId: account.id, wabaClaimKept: others > 0 }, { status: 200 });
+      }
+
+      /**
+       * The settings panel's "Sync now" (specs/06 §1).
+       *
+       * It lives here rather than as a second trigger on `wa-template-sync`
+       * because that function is a cron worker returning a result object, and
+       * an HTTP route has to return a `Response` — one function cannot sensibly
+       * be both. The settings page is already talking to this route about this
+       * account, so the action belongs where the operator already is.
+       */
+      case 'syncTemplates': {
+        const account =
+          body.accountId === undefined ? null : await findAccountById(body.accountId);
+
+        if (account === null) {
+          return new Response({ error: 'Unknown account' }, { status: 404 });
+        }
+
+        const result = await syncAccount(account);
+
+        return new Response(result, { status: result.error === undefined ? 200 : 502 });
       }
 
       default:

@@ -20,6 +20,7 @@ import {
   type Quality,
 } from '../domain/constants';
 import { mediaKindForHeaderFormat, validateOutboundMedia } from '../domain/media-limits';
+import type { SendSpec } from '../domain/send-spec';
 import { backoffDelayMs, recipientSpacingDelayMs } from '../domain/pacing';
 import {
   DENIAL,
@@ -112,38 +113,6 @@ export type OutboundResult = {
   wamid?: string;
   reason?: string;
 };
-
-/**
- * What the enqueuing side stored on `whatsappMessage.payload`.
- *
- * The wire payload is *not* stored — it is rebuilt at send time from this, so
- * that a message queued at 09:00 and sent at 09:03 picks up a media id
- * resolved in between and a template whose spec was re-synced meanwhile.
- */
-export type SendSpec =
-  | { kind: 'text'; body: string; previewUrl?: boolean; contextWamid?: string | null }
-  | {
-      kind: 'media';
-      mediaKind: MediaKind;
-      fileId?: string | null;
-      fileUrl?: string | null;
-      filePath?: string | null;
-      filename?: string | null;
-      caption?: string | null;
-      contextWamid?: string | null;
-    }
-  | { kind: 'template'; templateId: string }
-  | { kind: 'interactive'; interactive: JsonObject; contextWamid?: string | null }
-  | { kind: 'reaction'; targetWamid: string; emoji: string }
-  | {
-      kind: 'location';
-      latitude: number;
-      longitude: number;
-      name?: string | null;
-      address?: string | null;
-      contextWamid?: string | null;
-    }
-  | { kind: 'contacts'; contacts: unknown[]; contextWamid?: string | null };
 
 export const MAX_SEND_ATTEMPTS = 5;
 

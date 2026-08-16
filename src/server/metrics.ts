@@ -139,6 +139,20 @@ export const METRIC = {
   HEALTH_STUCK_FAILED: 'wa.health.stuck_failed',
   HEALTH_TIER_WINDOW_ROLLED: 'wa.health.tier_window_rolled',
 
+  CONSENT_OPTED_IN: 'wa.consent.opted_in',
+  CONSENT_OPTED_OUT: 'wa.consent.opted_out',
+  /** A repeat STOP that changed nothing, and so answered nothing (FR-CON-3). */
+  CONSENT_CONFIRMATION_SUPPRESSED: 'wa.consent.confirmation_suppressed',
+  CONSENT_IMPORTED: 'wa.consent.imported',
+  CONSENT_BACKFILLED: 'wa.consent.backfilled',
+  ERASURE_COMPLETED: 'wa.erasure.completed',
+
+  TEMPLATE_SYNCED: 'wa.template.synced',
+  TEMPLATE_DISAPPEARED: 'wa.template.disappeared',
+  TEMPLATE_RECATEGORISED: 'wa.template.recategorised',
+  TEMPLATE_SUBMITTED: 'wa.template.submitted',
+  TEMPLATE_SUBMIT_THROTTLED: 'wa.template.submit_throttled',
+
   TEMPLATE_EVENT: 'wa.template.event',
   TEMPLATE_UNPUBLISHED_ON_DEGRADATION: 'wa.template.unpublished_on_degradation',
 

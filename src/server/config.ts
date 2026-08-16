@@ -88,6 +88,14 @@ export const DEFAULTS = {
   sendReadReceipts: false,
   webhookStalenessHours: 24,
   autoCloseDays: 0,
+  confirmationLocale: 'pt',
+  optOutConfirmationPt:
+    'Não voltará a receber mensagens nossas. Para voltar a receber, responda INICIAR.',
+  optOutConfirmationEn: 'You will not receive further messages from us. Reply START to resume.',
+  optInConfirmationPt:
+    'Obrigado! Voltará a receber as nossas mensagens. Para parar, responda SAIR.',
+  optInConfirmationEn: 'Thank you! You will receive our messages again. Reply STOP to unsubscribe.',
+  templateSubmitHourlyCap: 90,
   rateMarketingUsd: 0.0225,
   rateUtilityUsd: 0.004,
   rateAuthenticationUsd: 0.004,
@@ -147,6 +155,30 @@ export const config = {
     numberVar('WA_WEBHOOK_STALENESS_HOURS', DEFAULTS.webhookStalenessHours),
   /** `0` disables auto-close entirely (Q-3 is still open, specs/05 §3.2). */
   autoCloseDays: () => intVar('WA_AUTO_CLOSE_DAYS', DEFAULTS.autoCloseDays),
+  /**
+   * Which wording a consent confirmation uses. Not inferred from the keyword the
+   * contact typed: the lists are operator-editable, so "STOP" says nothing
+   * reliable about the language the person reads.
+   */
+  confirmationLocale: () =>
+    stringVar('WA_CONFIRMATION_LOCALE', DEFAULTS.confirmationLocale).toLowerCase() === 'en'
+      ? 'en'
+      : 'pt',
+  optOutConfirmationPt: () =>
+    stringVar('WA_OPT_OUT_CONFIRMATION_PT', DEFAULTS.optOutConfirmationPt),
+  optOutConfirmationEn: () =>
+    stringVar('WA_OPT_OUT_CONFIRMATION_EN', DEFAULTS.optOutConfirmationEn),
+  optInConfirmationPt: () =>
+    stringVar('WA_OPT_IN_CONFIRMATION_PT', DEFAULTS.optInConfirmationPt),
+  optInConfirmationEn: () =>
+    stringVar('WA_OPT_IN_CONFIRMATION_EN', DEFAULTS.optInConfirmationEn),
+  /**
+   * Meta allows 100 template creations per WABA per hour and answers the 101st
+   * with an opaque error. Refusing locally at 90 leaves headroom and produces a
+   * message that says what to do.
+   */
+  templateSubmitHourlyCap: () =>
+    intVar('WA_TEMPLATE_SUBMIT_HOURLY_CAP', DEFAULTS.templateSubmitHourlyCap),
   rates: () => ({
     marketingUsd: numberVar('WA_RATE_MARKETING_USD', DEFAULTS.rateMarketingUsd),
     utilityUsd: numberVar('WA_RATE_UTILITY_USD', DEFAULTS.rateUtilityUsd),

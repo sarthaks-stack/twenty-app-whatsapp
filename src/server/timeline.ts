@@ -30,6 +30,8 @@ export const TIMELINE_EVENT = {
   THREAD_ASSIGNED: 'whatsapp.thread.assigned',
   THREAD_RELINKED: 'whatsapp.thread.relinked',
   CAMPAIGN_SENT: 'whatsapp.campaign.sent',
+  /** An erasure, recorded with counts and an actor and no content (SEC-8). */
+  DATA_ERASED: 'whatsapp.data.erased',
 } as const;
 export type TimelineEvent = (typeof TIMELINE_EVENT)[keyof typeof TIMELINE_EVENT];
 
@@ -49,6 +51,7 @@ const ALWAYS_IN_SUMMARY = new Set<string>([
   TIMELINE_EVENT.THREAD_ASSIGNED,
   TIMELINE_EVENT.THREAD_RELINKED,
   TIMELINE_EVENT.CAMPAIGN_SENT,
+  TIMELINE_EVENT.DATA_ERASED,
 ]);
 
 export const shouldWriteActivity = (

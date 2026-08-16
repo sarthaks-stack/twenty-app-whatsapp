@@ -13,6 +13,7 @@ import { nodesOf, query } from './base';
 
 const CONSENT_FIELDS = {
   id: true,
+  isTombstone: true,
   newStatus: true,
   previousStatus: true,
   method: true,
@@ -26,6 +27,7 @@ const CONSENT_FIELDS = {
 
 export type WhatsappConsentEventRecord = {
   id: string;
+  isTombstone?: boolean | null;
   newStatus?: string | null;
   previousStatus?: string | null;
   method?: string | null;
@@ -39,9 +41,11 @@ export type WhatsappConsentEventRecord = {
 
 export const createConsentEvent = async (input: {
   personId: string;
-  newStatus: Exclude<ConsentStatus, 'UNKNOWN'>;
-  previousStatus: ConsentStatus;
+  /** Null only for an erasure tombstone, which records a removal, not a decision. */
+  newStatus: Exclude<ConsentStatus, 'UNKNOWN'> | null;
+  previousStatus: ConsentStatus | null;
   method: ConsentMethod;
+  isTombstone?: boolean;
   wordingShown?: string | null;
   sourceReference?: string | null;
   notes?: string | null;
@@ -59,6 +63,7 @@ export const createConsentEvent = async (input: {
               previousStatus: input.previousStatus,
               method: input.method,
               occurredAt: input.occurredAt.toISOString(),
+              ...(input.isTombstone === true ? { isTombstone: true } : {}),
               ...(input.wordingShown === undefined ? {} : { wordingShown: input.wordingShown }),
               ...(input.sourceReference === undefined
                 ? {}

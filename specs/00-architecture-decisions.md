@@ -542,3 +542,43 @@ not in our code's shape. It was found by asking a live route for a thread id tha
 
 Every finder now uses the plural query with an id filter and `first: 1`, which answers an empty
 connection. An architecture test bans the singular form in `src/server/repositories`.
+
+---
+
+## D-20 — One logic function per file, declared on the default export
+
+**Status: OBSERVED** · 2026-08-16
+
+The SDK discovers logic functions by reading each file's **default** export. A second
+`defineLogicFunction` assigned to a named export type-checks, builds, uploads — and is silently
+absent from the manifest.
+
+06 §6 suggested folding `wa-template-submit` into `wa-template-sync`'s file "as a second exported
+handler with its own `defineLogicFunction`". Done exactly as written, the submit route simply did
+not exist: no error, no warning, and a `404` at the path the spec documents. It was caught by
+reading a plan and noticing a function missing from it, which is not a way to find things.
+
+Each function now has its own file, and an architecture test fails the build on any file
+containing more than one `defineLogicFunction` or declaring one anywhere but the default export.
+
+---
+
+## D-21 — Destroy permission belongs to a test, not to the role
+
+**Status: DECIDED** · 2026-08-16
+
+The app role withheld `canDestroyAllObjectRecords` on the reasoning that erasure should be an
+explicit, audited routine rather than something a handler does by accident. The reasoning was
+right and the mechanism was wrong: **a role is app-wide and cannot tell one handler from
+another**, so the flag did not distinguish accidental deletion from the deliberate one — it
+prevented both.
+
+The symptom was precise and misleading. `POST /whatsapp/consent { action: 'erase' }` returned a
+correct dry run — counts and all, because counting only reads — and then `500` on the real call.
+The feature SEC-8 requires was unimplementable by a setting intended to protect it.
+
+The flag is now granted and the control is expressed where it can be: an architecture test
+confines every `destroy*` mutation to `src/server/erasure.ts`. That is stronger than the role
+was — it names the module, fails the build, and states the reason — and it does not break the
+feature it protects. Anything else that must destroy records (the retention purge, SEC-9) joins
+the list deliberately, with its own justification.

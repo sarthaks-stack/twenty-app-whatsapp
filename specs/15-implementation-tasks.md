@@ -255,17 +255,37 @@ specs/04 §10.
 
 ---
 
-## Phase 7 — Templates and consent ⬜
+## Phase 7 — Templates and consent ✅
 
 | # | Function / module | Status | Requirements |
 |---|---|---|---|
-| 7.1 | `wa-template-sync` — paginated, deletion detection | ⬜ | FR-TPL-1 |
-| 7.2 | `wa-template-submit` — with the 90/hour local cap | ⬜ | FR-TPL-6 |
-| 7.3 | `wa-consent-route` — set, import, erase | ⬜ | FR-CON-1, SEC-8 |
-| 7.4 | `wa-consent-keyword` — one confirmation only | ⬜ | FR-CON-3 |
-| 7.5 | Person `updated` trigger back-filling manual consent edits | ⬜ | specs/06 §11 |
+| 7.1 | `wa-template-sync` — paginated, deletion detection | ✅ | FR-TPL-1 |
+| 7.2 | `wa-template-submit` — with the 90/hour local cap | ✅ | FR-TPL-6 |
+| 7.3 | `wa-consent-route` — set, import, erase | ✅ | FR-CON-1, SEC-8 |
+| 7.4 | `wa-consent-keyword` — one confirmation only | ✅ | FR-CON-3 |
+| 7.5 | Person `updated` trigger back-filling manual consent edits | ✅ | specs/06 §11 |
 
-**~4 days.**
+**~4 days.** Supporting modules: `src/server/outbound.ts` (the shared queue-and-schedule step,
+now used by the composer and the keyword handler), `src/server/erasure.ts` (SEC-8), and
+`src/domain/send-spec.ts` (the send spec moved out of the sender so the server can queue without
+importing from a logic function).
+
+**Verified live.** The template catalogue synced from the real WABA — 5 templates over 2 pages,
+variable specs derived correctly from Meta's own component arrays (an `IMAGE` header with six body
+variables and a URL button read as seven), all left `publishedToCrm: false` because publishing is
+a human act. A second pass reported `created: 0, updated: 5, disappeared: 0`, so the deletion
+detector does not fire on a healthy catalogue. Submission validation refuses a bad name and
+missing examples before touching Meta.
+
+Consent was exercised on throwaway contacts, then erased by the routine under test: idempotent
+`set` (the second identical call reported `changed: false`, which is what suppresses the second
+confirmation), the `person.updated` trigger back-filling a hand-edited field with the correct
+`OPTED_IN → OPTED_OUT` transition, no duplicate event from `setConsent`'s own write, a dry run
+that counted 1 thread / 3 messages / 1 event and deleted nothing, and a real erasure leaving a
+single tombstone with no wording, no status and the counts.
+
+Not exercised: submitting a real template to Meta, which creates a permanent artefact in the WABA
+awaiting review.
 
 ---
 

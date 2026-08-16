@@ -9,9 +9,21 @@ import { APP_DISPLAY_NAME, DEFAULT_ROLE_UNIVERSAL_IDENTIFIER } from 'src/constan
  * own objects, read and update Person (contact auto-creation and the consent
  * field), read workspace members, and write timeline activities.
  *
- * Deliberately withheld: `canDestroyAllObjectRecords` — GDPR erasure (SEC-8) is
- * an explicit, audited routine, not something any handler can do by accident —
- * and `canUpdateAllSettings`.
+ * Deliberately withheld: `canUpdateAllSettings`.
+ *
+ * **`canDestroyAllObjectRecords` was withheld and had to be granted.** The
+ * reasoning for withholding it was sound — erasure should be an explicit,
+ * audited routine rather than something a handler does by accident — but a role
+ * is app-wide and cannot tell one handler from another. With the flag off,
+ * SEC-8's erasure is a required feature that silently cannot run: the route
+ * answered `500` while reporting a correct dry run, because a role setting made
+ * to prevent accidental deletion also prevented the deliberate one.
+ *
+ * So the control moved from the role, where it could not be expressed, to the
+ * code, where it can: an architecture test confines every `destroy*` mutation
+ * to `server/erasure.ts`. That is a stronger guarantee than the flag gave —
+ * it names the module, fails the build, and says why — and unlike the flag it
+ * does not break the feature it was protecting.
  *
  * **`UPLOAD_FILE` / `DOWNLOAD_FILE` are granted individually.** The media
  * worker attaches inbound WhatsApp media to `whatsappMessage.mediaFile`, and
@@ -29,7 +41,7 @@ export default defineApplicationRole({
   canReadAllObjectRecords: true,
   canUpdateAllObjectRecords: true,
   canSoftDeleteAllObjectRecords: true,
-  canDestroyAllObjectRecords: false,
+  canDestroyAllObjectRecords: true,
   canUpdateAllSettings: false,
   permissionFlagUniversalIdentifiers: [
     SystemPermissionFlag.UPLOAD_FILE,

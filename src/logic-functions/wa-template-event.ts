@@ -1,6 +1,9 @@
 import { defineLogicFunction } from 'twenty-sdk/define';
 
-import { LF_TEMPLATE_EVENT } from '../constants/universal-identifiers';
+import {
+  LF_TEMPLATE_EVENT,
+  LF_TEMPLATE_SYNC,
+} from '../constants/universal-identifiers';
 import {
   QUALITY,
   TEMPLATE_STATUS,
@@ -10,6 +13,7 @@ import {
 } from '../domain/constants';
 import { assessSupport, deriveVariableSpec } from '../domain/template-spec';
 import type { MetaChangeValue } from '../domain/webhook/types';
+import { enqueue } from '../server/jobs';
 import { logger } from '../server/logger';
 import { METRIC, count } from '../server/metrics';
 import { asJson } from '../server/repositories/base';
@@ -136,6 +140,12 @@ export const processTemplateEvent = async (
    */
   if (template === null) {
     log.info('wa.template.unknown', { field: payload.field, metaTemplateId });
+
+    await enqueue({
+      logicFunctionUniversalIdentifier: LF_TEMPLATE_SYNC,
+      payload: { accountId: payload.accountId, reason: 'unknown template on webhook' },
+      correlationId: metaTemplateId,
+    });
 
     if (payload.webhookEventId !== undefined) {
       await markWebhookEvent(payload.webhookEventId, 'PROCESSED', 'template not synced');

@@ -12,6 +12,7 @@ import {
 } from '../domain/constants';
 import { computeSlots, laneRate } from '../domain/pacing';
 import { DENIAL, evaluateSendPermission } from '../domain/policy/send-permission';
+import type { SendSpec } from '../domain/send-spec';
 import type { ResolvedParameters } from '../domain/template-render';
 import type { VariableSpec } from '../domain/template-spec';
 import { ERROR_CLASS, INTERNAL_ERROR, MetaApiError, classify } from '../providers/whatsapp/errors';
@@ -26,7 +27,6 @@ import {
   previewFor,
   retryDecision,
   sendGuard,
-  type SendSpec,
 } from './wa-outbound-sender';
 import {
   MAX_TEXT_LENGTH,

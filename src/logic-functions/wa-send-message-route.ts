@@ -5,9 +5,7 @@ import { LF_SEND_MESSAGE_ROUTE } from '../constants/universal-identifiers';
 import {
   ACCOUNT_STATUS,
   CONSENT_STATUS,
-  DIRECTION,
   LANE,
-  MESSAGE_STATUS,
   MESSAGE_TYPE,
   QUALITY,
   SOURCE_KIND,
@@ -28,11 +26,12 @@ import {
   validateParameters,
   type ResolvedParameters,
 } from '../domain/template-render';
+import type { SendSpec } from '../domain/send-spec';
 import type { VariableSpec } from '../domain/template-spec';
 import { AUDIT_ACTION, audit } from '../server/audit';
 import { authErrorResponse, requireCaller, requireRole } from '../server/auth';
 import { describeError, logger } from '../server/logger';
-import { scheduleSend } from '../server/schedule';
+import { queueOutbound } from '../server/outbound';
 import { upsertThread } from '../server/threads';
 import {
   findAccountById,
@@ -41,11 +40,11 @@ import {
   type WhatsappAccountRecord,
 } from '../server/repositories/accounts';
 import { asJson, toDate } from '../server/repositories/base';
-import { createMessage, findMessageByClientToken } from '../server/repositories/messages';
+import { findMessageByClientToken } from '../server/repositories/messages';
 import { findPersonById } from '../server/repositories/people';
 import { findTemplateById } from '../server/repositories/templates';
 import { findThreadById, type WhatsappThreadRecord } from '../server/repositories/threads';
-import { EMPTY_VARIABLE_SPEC, type SendSpec } from './wa-outbound-sender';
+import { EMPTY_VARIABLE_SPEC } from './wa-outbound-sender';
 
 /**
  * The composer's entry point (FR-OUT-1 … FR-OUT-3, specs/04 §2).
@@ -494,39 +493,27 @@ export const handler = async (
             ? (parsed.message.caption ?? null)
             : null;
 
-    const message = await createMessage({
-      threadId: thread.id,
-      direction: DIRECTION.OUTBOUND,
-      messageType: messageTypeFor(parsed.message),
+    const message = await queueOutbound({
+      thread,
+      account,
+      spec: toSendSpec(parsed.message),
       body: renderedBody,
-      payload: toSendSpec(parsed.message) as unknown as Record<string, unknown>,
-      status: MESSAGE_STATUS.QUEUED,
       lane: LANE.INTERACTIVE,
       sourceKind: SOURCE_KIND.AGENT,
-      waTimestamp: new Date().toISOString(),
       sentById: caller.workspaceMemberId,
-      ...(clientToken.length === 0 ? {} : { clientToken }),
-      ...(parsed.message.kind === 'reaction'
-        ? { reactionTargetWamid: parsed.message.targetWamid }
-        : {}),
-      ...('contextWamid' in parsed.message && parsed.message.contextWamid !== null
-        ? { contextWamid: parsed.message.contextWamid }
-        : {}),
-      ...(template === null
-        ? {}
-        : {
-            templateId: template.id,
-            templateName: template.name,
-            templateLanguage: template.language,
-            templateCategory: (template.category ?? null) as TemplateCategory | null,
-            templateParameters:
-              parsed.message.kind === 'template'
-                ? (parsed.message.parameters as unknown as Record<string, unknown>)
-                : null,
-          }),
+      clientToken: clientToken.length === 0 ? null : clientToken,
+      template:
+        template === null
+          ? null
+          : {
+              id: template.id,
+              name: template.name,
+              language: template.language,
+              category: template.category,
+              parameters:
+                parsed.message.kind === 'template' ? parsed.message.parameters : null,
+            },
     });
-
-    await scheduleSend({ messageIds: [message.id], lane: LANE.INTERACTIVE, account });
 
     if (template !== null) {
       audit({

@@ -35,6 +35,9 @@ export default defineObject({
       label: 'New status',
       icon: 'IconCheck',
       type: FieldType.SELECT,
+      // Nullable for the erasure tombstone, which records a removal rather
+      // than a decision and must not claim the person opted anywhere.
+      isNullable: true,
       defaultValue: "'OPTED_IN'",
       options: [
         { value: 'OPTED_IN', label: 'Opted in', position: 0, color: 'green' },
@@ -103,6 +106,26 @@ export default defineObject({
       icon: 'IconNote',
       type: FieldType.TEXT,
       isNullable: true,
+    },
+    /**
+     * Marks the single row an erasure leaves behind (SEC-8, specs/10 §4.1).
+     *
+     * A tombstone is not a consent decision and must not be read as one. It
+     * records that content was removed, by whom and how much — with no wording,
+     * no number and no message — which is the compromise between "erase
+     * everything" and "prove the erasure happened". A flag rather than a
+     * convention in `notes`, because an auditor filters on it and a substring
+     * match on prose is not something to build a compliance answer on.
+     */
+    {
+      universalIdentifier: f('isTombstone'),
+      name: 'isTombstone',
+      label: 'Erasure tombstone',
+      description:
+        'This row records a data erasure, not a consent decision: the events it replaced are gone',
+      icon: 'IconGrave',
+      type: FieldType.BOOLEAN,
+      defaultValue: false,
     },
   ],
 });

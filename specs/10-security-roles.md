@@ -166,6 +166,18 @@ erasure happened", which is what an auditor asks for.
 The route offers a dry-run mode returning the counts that would be deleted, so an operator sees
 the blast radius before confirming.
 
+**As built (2026-08-16).** Implemented in `src/server/erasure.ts`, reached through
+`POST /whatsapp/consent { action: 'erase', personId }`. `dryRun` defaults to **true**: erasing
+requires `dryRun: false` explicitly, so the destructive call cannot be the one you make by
+forgetting a parameter.
+
+Two things this required. `canDestroyAllObjectRecords` had to be granted to the app role (D-21) —
+withheld, it made SEC-8 unimplementable while the dry run kept reporting correctly, because
+counting only reads. And `whatsappConsentEvent` gained an `isTombstone` flag with a nullable
+`newStatus`, so the surviving row is filterable as what it is rather than identifiable by a
+substring in its notes. Verified end to end: 1 thread, 3 messages and 1 consent event destroyed,
+one tombstone left carrying the counts, no wording and no status.
+
 ### 4.2 Retention (SEC-9)
 
 `wa-retention-purge` (cron, daily at 03:00):

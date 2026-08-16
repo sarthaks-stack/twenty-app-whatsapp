@@ -270,3 +270,43 @@ this requirement asserts that a workflow targeting an `opted_out` person complet
 | FR-CON-4 workflows respect suppression | §12 |
 | SEC-6 no override from any role | §9, 04 §1 |
 | SEC-10 audit of consent changes | §8, §11 |
+
+---
+
+## 14. As built (2026-08-16)
+
+**§6's "second exported handler" does not work.** The SDK reads one logic function per file, from
+the default export; a named `defineLogicFunction` is ignored without a warning, so
+`wa-template-submit` folded into the sync file simply did not exist. It has its own file, and an
+architecture test now fails the build on a second declaration (D-20).
+
+**"Sync now" lives on the account route, not on a second trigger.** `wa-template-sync` is a cron
+worker returning a result object; an HTTP route must return a `Response`, and one function cannot
+sensibly be both. `POST /whatsapp/account { action: 'syncTemplates', accountId }` is the settings
+entry point, which is where the operator already is. The webhook path also works now: an unknown
+template on `message_template_status_update` enqueues a full sync, which §1 described and no code
+did.
+
+**A truncated page walk disables nothing.** Absence is Meta's only deletion signal, so a listing
+cut short by the page cap or an API error is indistinguishable from a WABA whose templates were
+all deleted. The pass is marked `truncated` and the disappearance sweep is skipped — withdrawing a
+working template set from every rep because page 51 timed out is the worse failure by far.
+
+**Consent confirmations pick their language from a variable, not from the keyword.** The keyword
+lists are operator-editable, so "STOP" says nothing reliable about what language the contact
+reads; `WA_CONFIRMATION_LOCALE` decides, and all four wordings are variables so counsel can revise
+them without a deploy (Q-4).
+
+**An opt-out from an unlinked conversation blocks the thread.** With no Person there is nothing to
+attach evidence to, but the request must still be honoured — so `thread.isBlocked` is set, which
+suppresses every send through the policy gate's second rule. The alternative is a contact who
+asked to stop and keeps receiving messages because nobody had matched them to a record yet.
+
+**The back-fill trigger must not fight `setConsent`.** `setConsent` writes the event first and the
+field second, so the `person.updated` trigger always fires with an event already present; writing
+another would double every keyword opt-out in the evidence trail. The guard is a matching event
+within 30 seconds. It errs towards writing: a duplicate is confusing, a missing one is a
+compliance gap, and only one of those can be reconstructed later.
+
+**Erasure needed a permission the role deliberately withheld** — see D-21. The dry run worked and
+the real call returned `500`, because counting only reads.

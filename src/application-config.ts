@@ -209,6 +209,49 @@ export default defineApplication({
       value: '0.0040',
       type: FieldType.NUMBER,
     },
+    WA_CONFIRMATION_LOCALE: {
+      universalIdentifier: 'ccab3fbb-40a7-4042-bbfb-f4df1f135588',
+      description:
+        'Language of the automatic opt-in/opt-out confirmation. Not inferred from the keyword the contact typed — the keyword lists are editable, so “STOP” says nothing reliable about the language someone reads (FR-CON-3).',
+      value: 'pt',
+      type: FieldType.SELECT,
+      options: [
+        { label: 'Português', value: 'pt' },
+        { label: 'English', value: 'en' },
+      ],
+    },
+    WA_OPT_OUT_CONFIRMATION_PT: {
+      universalIdentifier: '6ee7ee18-74ad-4843-bab6-1b66f5eded6f',
+      description:
+        'The single reply sent when a contact opts out in Portuguese. Wording is configurable because counsel reviews it (Q-4) and a legal review must never require a deploy; whatever was sent is stored on the consent event as evidence.',
+      value: 'Não voltará a receber mensagens nossas. Para voltar a receber, responda INICIAR.',
+      type: FieldType.TEXT,
+    },
+    WA_OPT_OUT_CONFIRMATION_EN: {
+      universalIdentifier: 'c9140776-6f7c-4882-a624-5437bc56ca97',
+      description: 'The same reply in English.',
+      value: 'You will not receive further messages from us. Reply START to resume.',
+      type: FieldType.TEXT,
+    },
+    WA_OPT_IN_CONFIRMATION_PT: {
+      universalIdentifier: '90115df8-3b79-46a5-8bf2-ad2a92197f8a',
+      description: 'The single reply sent when a contact opts back in, in Portuguese.',
+      value: 'Obrigado! Voltará a receber as nossas mensagens. Para parar, responda SAIR.',
+      type: FieldType.TEXT,
+    },
+    WA_OPT_IN_CONFIRMATION_EN: {
+      universalIdentifier: '18fd442a-a5f7-46d6-9263-8838cff2408a',
+      description: 'The same reply in English.',
+      value: 'Thank you! You will receive our messages again. Reply STOP to unsubscribe.',
+      type: FieldType.TEXT,
+    },
+    WA_TEMPLATE_SUBMIT_HOURLY_CAP: {
+      universalIdentifier: '25ef2ce1-73ca-40bc-b68b-b099f252d705',
+      description:
+        'Local ceiling on template submissions per hour. Meta allows 100 per WABA and answers the 101st with an opaque error, so refusing at 90 leaves headroom and produces a message that says what to do (FR-TPL-6).',
+      value: '90',
+      type: FieldType.NUMBER,
+    },
     WA_SEND_READ_RECEIPTS: {
       universalIdentifier: 'baba913a-fb16-4bd2-bfd2-e005bdecbf99',
       description:

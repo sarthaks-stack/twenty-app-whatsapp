@@ -35,9 +35,15 @@ const outsideProvider = files.filter((file) => !file.startsWith(PROVIDER_DIR));
  * Production modules only. Tests legitimately name Meta's hosts and stub
  * `fetch`; the rule is about what ships, and a guard that flagged its own
  * suite would be turned off within a week.
+ *
+ * `.integration-test.ts` counts as a test too — it ends in `-test.ts` rather
+ * than `.test.ts`, which is exactly the kind of near-miss a suffix check gets
+ * wrong, so the predicate is shared rather than repeated.
  */
+const isTestFile = (file: string): boolean =>
+  /\.(test|integration-test)\.tsx?$/.test(file) || file.includes('__tests__');
 const productionOutsideProvider = outsideProvider.filter(
-  (file) => !file.endsWith('.test.ts') && !file.includes('__tests__'),
+  (file) => !isTestFile(file),
 );
 
 /**
@@ -137,9 +143,7 @@ describe('the Meta seam', () => {
   it('keeps console output to the logger', () => {
     const candidates = files.filter(
       (file) =>
-        !file.endsWith('.test.ts') &&
-        !file.includes('__tests__') &&
-        !file.endsWith('server/logger.ts'),
+        !isTestFile(file) && !file.endsWith('server/logger.ts'),
     );
 
     expect(offenders(/\bconsole\.(log|warn|error|info|debug)\s*\(/, candidates)).toEqual([]);
@@ -161,8 +165,7 @@ describe('the single send path', () => {
   const logicFunctions = files.filter(
     (file) =>
       file.startsWith(join(SRC, 'logic-functions')) &&
-      !file.endsWith('.test.ts') &&
-      !file.includes('__tests__'),
+      !isTestFile(file),
   );
 
   it('lets exactly one logic function call sendMessage', () => {
@@ -199,6 +202,71 @@ describe('provider construction', () => {
   });
 });
 
+describe('destructive writes', () => {
+  /**
+   * Every hard delete goes through `server/erasure.ts`.
+   *
+   * The app role holds `canDestroyAllObjectRecords`, and it has to: SEC-8's
+   * subject erasure must remove content rather than flag it, since a
+   * soft-deleted row still holds the message it was supposed to erase. With the
+   * flag off the erasure route answered `500` while its dry run reported
+   * correctly — a role setting meant to prevent accidental deletion preventing
+   * the deliberate one instead.
+   *
+   * A role cannot tell one handler from another, so the control lives here
+   * instead, where it names the module and fails the build. Anything else that
+   * needs to destroy records — the retention purge, when it lands — is a
+   * deliberate addition to this list with its own reason, not an accident.
+   */
+  const DESTROY_CALLERS = ['server/erasure.ts'];
+
+  it('confines hard deletes to the erasure routine', () => {
+    const candidates = files.filter(
+      (file) =>
+        !isTestFile(file) &&
+        !DESTROY_CALLERS.some((allowed) => file.endsWith(allowed)),
+    );
+
+    expect(offenders(/\bdestroy[A-Z]\w*\s*:/, candidates)).toEqual([]);
+  });
+});
+
+describe('logic function discovery', () => {
+  /**
+   * One function per file, declared on the **default** export.
+   *
+   * The SDK discovers logic functions by reading each file's default export.
+   * A second `defineLogicFunction` assigned to a named export type-checks,
+   * builds, and is then silently absent from the manifest — the route 404s and
+   * nothing anywhere says why. `wa-template-submit` was written that way
+   * because the spec suggested folding it in beside `wa-template-sync`; it was
+   * caught by noticing a plan that was missing a function, which is not a thing
+   * anyone should have to notice twice.
+   */
+  const logicFunctionFiles = files.filter(
+    (file) => file.startsWith(join(SRC, 'logic-functions')) && !isTestFile(file),
+  );
+
+  it('declares every logic function on the default export', () => {
+    const offending: string[] = [];
+
+    for (const file of logicFunctionFiles) {
+      const source = contentsOf(file);
+      const declarations = source.match(/defineLogicFunction\s*\(/g)?.length ?? 0;
+
+      if (declarations === 0) continue;
+
+      const isDefault = /export\s+default\s+defineLogicFunction\s*\(/.test(source);
+
+      if (declarations > 1 || !isDefault) {
+        offending.push(`${relative(SRC, file)}: ${declarations} declaration(s)`);
+      }
+    }
+
+    expect(offending).toEqual([]);
+  });
+});
+
 describe('repository reads', () => {
   /**
    * Twenty's *singular* record query answers a missing record with a GraphQL
@@ -213,7 +281,7 @@ describe('repository reads', () => {
    */
   const repositoryFiles = files.filter(
     (file) =>
-      file.startsWith(join(SRC, 'server', 'repositories')) && !file.endsWith('.test.ts'),
+      file.startsWith(join(SRC, 'server', 'repositories')) && !isTestFile(file),
   );
 
   const SINGULAR_QUERIES = [
@@ -275,9 +343,7 @@ describe('build-time versus runtime modules', () => {
 
   const runtimeFiles = files.filter(
     (file) =>
-      runtimeDirs.some((dir) => file.startsWith(dir)) &&
-      !file.endsWith('.test.ts') &&
-      !file.includes('__tests__'),
+      runtimeDirs.some((dir) => file.startsWith(dir)) && !isTestFile(file),
   );
 
   it('scanned the runtime tree', () => {

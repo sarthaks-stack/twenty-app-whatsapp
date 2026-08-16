@@ -1,3 +1,5 @@
+import { CAMPAIGN_TIME_ZONE } from './variable-resolution';
+
 /**
  * Translating a saved Twenty view into a Core API filter (FR-CAM-2a).
  *
@@ -134,8 +136,59 @@ const asStringList = (value: unknown): string[] => {
   return typeof value === 'string' && value.length > 0 ? [value] : [];
 };
 
-const startOfDay = (at: Date): Date =>
-  new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()));
+/**
+ * How far the campaign time zone is from UTC at a given instant.
+ *
+ * Read from `Intl` rather than hard-coded, so the day boundary stays right if
+ * the zone is ever changed to one that observes daylight saving.
+ */
+const zoneOffsetMs = (at: Date): number => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: CAMPAIGN_TIME_ZONE,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(at);
+
+  const field = (type: string): number =>
+    Number(parts.find((part) => part.type === type)?.value ?? '0');
+
+  const local = Date.UTC(
+    field('year'),
+    field('month') - 1,
+    field('day'),
+    field('hour') % 24,
+    field('minute'),
+    field('second'),
+  );
+
+  return local - Math.floor(at.getTime() / 1000) * 1000;
+};
+
+/**
+ * Midnight **in the campaign's time zone**, expressed as an instant.
+ *
+ * A day filter used to be expanded against UTC midnight while every date the
+ * campaign *renders* uses `CAMPAIGN_TIME_ZONE` — so "created today" meant
+ * 01:00 to 01:00 local, and a contact added at half past midnight fell into
+ * yesterday's audience (D-44). One hour of skew for Angola, more elsewhere,
+ * and invisible either way: the audience simply comes back a little different
+ * from the one the admin saw in the view.
+ */
+const startOfDay = (at: Date): Date => {
+  const shifted = new Date(at.getTime() + zoneOffsetMs(at));
+  const localMidnight = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate(),
+  );
+
+  return new Date(localMidnight - zoneOffsetMs(new Date(localMidnight)));
+};
 
 const addDays = (at: Date, days: number): Date =>
   new Date(at.getTime() + days * 86_400_000);

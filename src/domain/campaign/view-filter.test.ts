@@ -175,8 +175,13 @@ describe('date filters', () => {
    * A column storing 14:32 never equals a filter written as midnight, so an
    * exact comparison would produce an empty audience that looks like a data
    * problem rather than a translation one.
+   *
+   * The day is the campaign's day (D-44): 23:00Z to 23:00Z is midnight to
+   * midnight in Africa/Luanda, the zone every date the campaign renders uses.
+   * Expanding against UTC instead put a contact added at 00:30 local into the
+   * previous day's audience.
    */
-  it('reads IS on a date as the whole day', () => {
+  it('reads IS on a date as the whole local day', () => {
     expect(
       translateFilter({
         filter: row({ operand: 'IS', value: '2026-03-04T11:00:00.000Z' }),
@@ -184,11 +189,12 @@ describe('date filters', () => {
         now: NOW,
       }),
     ).toEqual({
-      createdAt: { gte: '2026-03-04T00:00:00.000Z', lt: '2026-03-05T00:00:00.000Z' },
+      createdAt: { gte: '2026-03-03T23:00:00.000Z', lt: '2026-03-04T23:00:00.000Z' },
     });
   });
 
-  it('resolves IS_TODAY against the injected clock', () => {
+  /** 09:30Z on the 16th is 10:30 in Luanda, so "today" is the 16th there. */
+  it('resolves IS_TODAY against the injected clock, in the campaign zone', () => {
     expect(
       translateFilter({
         filter: row({ operand: 'IS_TODAY' }),
@@ -196,8 +202,32 @@ describe('date filters', () => {
         now: NOW,
       }),
     ).toEqual({
-      createdAt: { gte: '2026-08-16T00:00:00.000Z', lt: '2026-08-17T00:00:00.000Z' },
+      createdAt: { gte: '2026-08-15T23:00:00.000Z', lt: '2026-08-16T23:00:00.000Z' },
     });
+  });
+
+  /**
+   * The boundary itself, which a round-number test walks straight past: a
+   * contact created at 00:30 in Luanda is 23:30Z the day before, and belongs
+   * to *that* local day's audience.
+   */
+  it('puts a just-after-midnight instant in the local day it belongs to', () => {
+    const filter = translateFilter({
+      filter: row({ operand: 'IS', value: '2026-03-03T23:30:00.000Z' }),
+      field: field('createdAt', 'DATE_TIME'),
+      now: NOW,
+    }) as { createdAt: { gte: string; lt: string } };
+
+    const at = new Date('2026-03-03T23:30:00.000Z').getTime();
+
+    expect(new Date(filter.createdAt.gte).getTime()).toBeLessThanOrEqual(at);
+    expect(new Date(filter.createdAt.lt).getTime()).toBeGreaterThan(at);
+    // The window is one whole day, not a shifted fragment of one.
+    expect(
+      new Date(filter.createdAt.lt).getTime() - new Date(filter.createdAt.gte).getTime(),
+    ).toBe(86_400_000);
+    // And it is the 4th of March in Luanda, not the 3rd.
+    expect(filter.createdAt.gte).toBe('2026-03-03T23:00:00.000Z');
   });
 
   it('translates IS_BEFORE and IS_AFTER', () => {

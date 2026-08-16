@@ -37,14 +37,22 @@ export type TransitionResult =
 export const transitionCampaign = async ({
   campaign,
   to,
-  reason = null,
+  reason,
   actorId = null,
   patch = {},
   details = {},
 }: {
   campaign: WhatsappCampaignRecord;
   to: CampaignStatus;
-  /** What goes in `statusReason`; null clears it. */
+  /**
+   * What goes in `statusReason`: a string sets it, `null` clears it, and
+   * **omitting it leaves whatever is there**.
+   *
+   * There is no default. A `= null` default made the third case unreachable —
+   * every transition cleared the reason — so a campaign paused for
+   * `quality_red` lost the explanation the moment any caller that had nothing
+   * to say about it moved it on (D-43).
+   */
   reason?: string | null;
   actorId?: string | null;
   /** Fields written in the same call — counts, timestamps, the audience. */
@@ -84,7 +92,7 @@ export const transitionCampaign = async ({
       action: auditAction,
       actorId,
       subject: { campaignId: campaign.id, templateId: campaign.templateId ?? null, accountId: campaign.accountId ?? null },
-      details: { from, to, reason, name: campaign.name ?? null, ...details },
+      details: { from, to, reason: reason ?? null, name: campaign.name ?? null, ...details },
     });
   }
 

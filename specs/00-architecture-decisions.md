@@ -914,3 +914,36 @@ and hiding the cause, arriving one send at a time.
 It now throws where the cause is, which is the rule the media *send* path has followed from the
 start. With D-26 excluding those recipients at snapshot time, this is the second line: the one
 that catches a header that became unfillable between the snapshot and the send.
+
+---
+
+## D-43 — Omitting a status reason leaves it alone
+
+**Status: DECIDED (forced by a review finding)** · 2026-08-16
+
+`transitionCampaign` documented three behaviours for `reason`: a string sets `statusReason`,
+`null` clears it, and omitting it leaves whatever is there. The parameter defaulted to `null`, so
+the third was unreachable — the `reason === undefined` guard could never fire and **every**
+transition cleared the reason.
+
+`statusReason` is the sentence an operator reads to find out why a campaign stopped —
+`quality_red`, `tier_exhausted`, `circuit_breaker`. It survived only until the next caller that
+had nothing to say about it moved the campaign on. The default is gone; the documented behaviour
+is now the actual one, with tests that fail if the default comes back.
+
+---
+
+## D-44 — A campaign's day is the campaign's day
+
+**Status: DECIDED (forced by a review finding)** · 2026-08-16
+
+The date operands expand an instant into "the whole day" — `IS` on a date, `IS_TODAY` — and did it
+against **UTC midnight**, while every date a campaign *renders* is formatted in
+`CAMPAIGN_TIME_ZONE` (`Africa/Luanda`). So "created today" meant 01:00 to 01:00 local, and a
+contact added at half past midnight fell into the previous day's audience.
+
+The offset is read from `Intl` rather than hard-coded, so a zone with daylight saving would still
+get the right boundary. One hour of skew for Angola, more elsewhere — and invisible either way,
+because the audience simply comes back slightly different from the one the admin saw in the view.
+That is the same class of error D-23 exists to prevent, arriving through arithmetic instead of a
+missing operand.

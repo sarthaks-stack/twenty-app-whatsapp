@@ -878,3 +878,39 @@ filter", it means **every contact in the CRM**.
 
 The translation now reconciles: every filter row and every group must have been visited, or the
 whole view is refused by name, like every other thing this module cannot reproduce exactly.
+
+---
+
+## D-41 — The access token goes to Meta's hosts, and nowhere else
+
+**Status: DECIDED (forced by a review finding)** · 2026-08-16
+
+`downloadMedia` is the one call in this app whose URL arrives in a *payload* instead of being
+built here, and it attaches the Bearer token — so the URL decides who receives the credential.
+The webhook signature makes a hostile URL unlikely, not impossible: one Meta-side open redirect,
+or one signature check lost in a future refactor, and the token leaves with the request.
+
+The host is now checked against an allow-list (`graph.facebook.com`, `lookaside.fbsbx.com`,
+`*.fbcdn.net`, `*.fbsbx.com`, `*.facebook.com`, `*.whatsapp.net`) over HTTPS only, before `fetch`
+is called at all. Note that `lookaside.fbsbx.com.evil.example` fails it — the suffix test is on
+dot-prefixed suffixes, not `includes`.
+
+The same review found the download's timeout being cleared in a `finally` around the `fetch`,
+which left `response.arrayBuffer()` outside it: a connection that stalled mid-body was no longer
+being aborted by anything of ours, and held the worker until the platform's own timeout. The body
+read is now inside the timeout.
+
+---
+
+## D-42 — A header that cannot be filled fails here, not at Meta
+
+**Status: DECIDED (forced by a review finding)** · 2026-08-16
+
+`buildTemplatePayload` dropped a declared header from the payload when it could not produce a
+parameter — a media header with no resolved id, or a format the CRM cannot fill. Meta answers that
+request with 132000, "parameter count mismatch", for every recipient: an error naming the symptom
+and hiding the cause, arriving one send at a time.
+
+It now throws where the cause is, which is the rule the media *send* path has followed from the
+start. With D-26 excluding those recipients at snapshot time, this is the second line: the one
+that catches a header that became unfillable between the snapshot and the send.

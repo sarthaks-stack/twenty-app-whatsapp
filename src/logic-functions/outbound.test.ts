@@ -296,6 +296,42 @@ describe('building the wire payload', () => {
     });
   });
 
+  /**
+   * D-42. A declared header that produces no parameter used to be dropped from
+   * the payload, and Meta answered 132000 — "parameter count mismatch" — for
+   * every recipient: an error naming the symptom and hiding the cause.
+   */
+  it('refuses to build a template whose media header has no id', () => {
+    const withHeader: VariableSpec = {
+      ...templateSpec,
+      header: {
+        format: 'IMAGE',
+        variableCount: 0,
+        indices: [],
+        names: [],
+        text: null,
+        example: [],
+      },
+    };
+
+    expect(() =>
+      buildOutboundPayload({
+        spec: { kind: 'template', templateId: 't1' },
+        waId: WA_ID,
+        template: {
+          name: 't',
+          languageCode: 'pt_PT',
+          spec: withHeader,
+          parameters: {
+            header: { kind: 'media', mediaId: null, fileId: null },
+            body: ['Marcos', 'Pixel'],
+            buttons: [],
+          },
+        },
+      }),
+    ).toThrow(/no resolved media id/);
+  });
+
   it('refuses to build a template send with no template', () => {
     expect(() =>
       buildOutboundPayload({ spec: { kind: 'template', templateId: 't1' }, waId: WA_ID }),

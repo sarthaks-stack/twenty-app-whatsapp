@@ -228,19 +228,37 @@ export const buildTemplateComponents = (
 
   const header = parameters.header;
   if (spec.header !== null && header !== undefined) {
-    if (header.kind === 'media' && header.mediaId !== null) {
+    if (header.kind === 'media') {
       const format = spec.header.format;
+
+      /**
+       * A declared header that cannot produce a parameter throws here rather
+       * than being dropped from the payload.
+       *
+       * Silently omitting it built a request Meta answers with 132000 —
+       * "parameter count mismatch" — for every recipient of the campaign, an
+       * error that names the symptom and hides the cause. The media send path
+       * has refused an absent media id from the start; this is the same rule
+       * for a template's header (D-42).
+       */
       const mediaParameter = ((): TemplateParameter | null => {
-        if (format === 'IMAGE') return { type: 'image', image: { id: header.mediaId! } };
-        if (format === 'VIDEO') return { type: 'video', video: { id: header.mediaId! } };
-        if (format === 'DOCUMENT') return { type: 'document', document: { id: header.mediaId! } };
+        if (header.mediaId === null) return null;
+        if (format === 'IMAGE') return { type: 'image', image: { id: header.mediaId } };
+        if (format === 'VIDEO') return { type: 'video', video: { id: header.mediaId } };
+        if (format === 'DOCUMENT') return { type: 'document', document: { id: header.mediaId } };
 
         return null;
       })();
 
-      if (mediaParameter !== null) {
-        components.push({ type: 'header', parameters: [mediaParameter] });
+      if (mediaParameter === null) {
+        throw new RangeError(
+          header.mediaId === null
+            ? `The template's ${format.toLowerCase()} header has no resolved media id`
+            : `A ${format} header cannot be filled from the CRM`,
+        );
       }
+
+      components.push({ type: 'header', parameters: [mediaParameter] });
     } else if (header.kind === 'text' && header.values.length > 0) {
       components.push({
         type: 'header',

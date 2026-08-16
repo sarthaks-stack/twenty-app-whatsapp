@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createCloudApiProvider } from './cloud-api.provider';
+import { createCloudApiProvider, isAllowedMediaHost } from './cloud-api.provider';
 import { MissingConfigError, requireSecret } from './config';
 import { ERROR_CLASS, MetaApiError, classify } from './errors';
 import { DEFAULT_PROVIDER, getProvider, resetProviderCache } from './index';
@@ -221,8 +221,43 @@ describe('media', () => {
   it('surfaces an expired URL as a 410 the caller can act on', async () => {
     fetchMock.mockResolvedValue(new Response('', { status: 410 }));
 
-    await expect(provider().downloadMedia('https://x/y')).rejects.toMatchObject({
-      httpStatus: 410,
+    await expect(
+      provider().downloadMedia('https://lookaside.fbsbx.com/attachments/?mid=expired'),
+    ).rejects.toMatchObject({ httpStatus: 410 });
+  });
+
+  /**
+   * D-41. This is the one call whose URL comes from a payload rather than being
+   * built here, and it attaches the access token — so the URL decides who
+   * receives the credential.
+   */
+  describe('where the access token may be sent', () => {
+    it.each([
+      'https://lookaside.fbsbx.com/attachments/?mid=1',
+      'https://graph.facebook.com/v23.0/1234/media',
+      'https://scontent.xx.fbcdn.net/v/t62.1/file.jpg',
+      'https://mmg.whatsapp.net/d/f/abc.enc',
+    ])('allows %s', (url) => {
+      expect(isAllowedMediaHost(url)).toBe(true);
+    });
+
+    it.each([
+      'https://evil.example.com/steal',
+      'http://lookaside.fbsbx.com/attachments/?mid=1',
+      'https://lookaside.fbsbx.com.evil.example/x',
+      'https://fbcdn.net.attacker.io/x',
+      'not a url',
+    ])('refuses %s', (url) => {
+      expect(isAllowedMediaHost(url)).toBe(false);
+    });
+
+    it('does not call fetch at all for a host it refuses', async () => {
+      fetchMock.mockClear();
+
+      await expect(provider().downloadMedia('https://evil.example.com/steal')).rejects.toThrow(
+        /unrecognised media host/,
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 

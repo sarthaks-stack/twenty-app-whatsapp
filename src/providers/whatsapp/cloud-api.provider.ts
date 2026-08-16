@@ -23,6 +23,45 @@ import type {
 const DEFAULT_TIMEOUT_MS = 20_000;
 const MEDIA_TIMEOUT_MS = 90_000;
 
+/**
+ * The only hosts the access token is ever sent to.
+ *
+ * A media download is the one call in this app that takes its URL from a
+ * payload rather than building it, and it attaches the Bearer token — so the
+ * URL decides who receives the credential. The webhook signature makes a
+ * hostile URL unlikely, not impossible: one Meta-side open redirect, or one
+ * signature check skipped in a future refactor, and the token walks out with
+ * the request. An allow-list makes that a rejection instead of a leak (D-41).
+ */
+const MEDIA_HOSTS = ['graph.facebook.com', 'lookaside.fbsbx.com'];
+const MEDIA_HOST_SUFFIXES = ['.fbcdn.net', '.fbsbx.com', '.facebook.com', '.whatsapp.net'];
+
+export const isAllowedMediaHost = (url: string): boolean => {
+  let host: string;
+
+  try {
+    const parsed = new URL(url);
+
+    if (parsed.protocol !== 'https:') return false;
+
+    host = parsed.hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+
+  return (
+    MEDIA_HOSTS.includes(host) || MEDIA_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))
+  );
+};
+
+const assertMediaHost = (url: string): void => {
+  if (isAllowedMediaHost(url)) return;
+
+  throw new MetaApiError('Refusing to send the access token to an unrecognised media host', {
+    details: url.slice(0, 200),
+  });
+};
+
 type RequestInput = {
   method: 'GET' | 'POST';
   path: string;
@@ -209,34 +248,44 @@ export const createCloudApiProvider = (): WhatsAppProvider => ({
    * URL against the Graph base.
    */
   async downloadMedia(url): Promise<{ buffer: Buffer; mimeType: string }> {
+    assertMediaHost(url);
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), MEDIA_TIMEOUT_MS);
 
-    let response: Response;
-
     try {
-      response = await fetch(url, {
-        headers: { authorization: `Bearer ${requireSecret('META_ACCESS_TOKEN')}` },
-        signal: controller.signal,
-      });
-    } catch (cause) {
-      throw networkError(cause);
+      let response: Response;
+
+      try {
+        response = await fetch(url, {
+          headers: { authorization: `Bearer ${requireSecret('META_ACCESS_TOKEN')}` },
+          signal: controller.signal,
+        });
+      } catch (cause) {
+        throw networkError(cause);
+      }
+
+      if (!response.ok) {
+        // 404/410 means the short-lived URL expired; the caller re-resolves from
+        // the media id, which stays valid for 7 days (specs/03 §8).
+        throw new MetaApiError(`Media download failed with HTTP ${response.status}`, {
+          httpStatus: response.status,
+        });
+      }
+
+      /**
+       * The body read stays inside the timeout. It used to sit after the
+       * `finally` that cleared the timer, so a connection that stalled
+       * mid-download was no longer being aborted by anything of ours — it held
+       * the worker until the platform's own timeout (D-41).
+       */
+      return {
+        buffer: Buffer.from(await response.arrayBuffer()),
+        mimeType: response.headers.get('content-type') ?? 'application/octet-stream',
+      };
     } finally {
       clearTimeout(timer);
     }
-
-    if (!response.ok) {
-      // 404/410 means the short-lived URL expired; the caller re-resolves from
-      // the media id, which stays valid for 7 days (specs/03 §8).
-      throw new MetaApiError(`Media download failed with HTTP ${response.status}`, {
-        httpStatus: response.status,
-      });
-    }
-
-    return {
-      buffer: Buffer.from(await response.arrayBuffer()),
-      mimeType: response.headers.get('content-type') ?? 'application/octet-stream',
-    };
   },
 
   async listTemplates(wabaId, cursor): Promise<{ templates: MetaTemplate[]; nextCursor?: string }> {

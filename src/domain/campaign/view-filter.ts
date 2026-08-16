@@ -418,7 +418,12 @@ export const translateViewFilters = ({
         (left.positionInViewFilterGroup ?? 0) - (right.positionInViewFilterGroup ?? 0),
     );
 
+  const visitedGroups = new Set<string>();
+  const visitedFilters = new Set<string>();
+
   const build = (groupId: string | null, depth: number): CoreFilter | null => {
+    if (groupId !== null) visitedGroups.add(groupId);
+
     if (depth > maxDepth) {
       reasons.push('the view filter groups nest too deeply, or refer to each other');
 
@@ -435,6 +440,8 @@ export const translateViewFilters = ({
     const parts: CoreFilter[] = [];
 
     for (const filter of own) {
+      visitedFilters.add(filter.id);
+
       const field = fields.get(filter.fieldMetadataId);
 
       if (field === undefined) {
@@ -477,6 +484,31 @@ export const translateViewFilters = ({
   };
 
   const filter = build(null, 0);
+
+  /**
+   * Everything the view holds must have been *reached*.
+   *
+   * The walk descends from the root through `parentViewFilterGroupId`, so a
+   * filter pointing at a group that no longer exists — or a group whose parent
+   * chain is broken or circular — was never visited and simply vanished from
+   * the translation. A dropped condition **widens** an audience, which is the
+   * one failure mode this module exists to prevent, and it left no trace at all
+   * (D-40).
+   */
+  const orphanFilters = filters.filter((entry) => !visitedFilters.has(entry.id));
+  const orphanGroups = groups.filter((entry) => !visitedGroups.has(entry.id));
+
+  if (orphanFilters.length > 0) {
+    reasons.push(
+      `${orphanFilters.length} filter(s) in this view sit in a group that cannot be reached from the top level`,
+    );
+  }
+
+  if (orphanGroups.length > 0) {
+    reasons.push(
+      `${orphanGroups.length} filter group(s) in this view cannot be reached from the top level`,
+    );
+  }
 
   return reasons.length > 0 ? { ok: false, reasons } : { ok: true, filter };
 };

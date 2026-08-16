@@ -398,6 +398,11 @@ describe('translateViewFilters', () => {
   });
 
   /** A cyclic parent reference must fail, not hang. */
+  /**
+   * D-40. This used to answer `{ ok: true, filter: null }` — the two groups
+   * were simply never reached, and a view that translates to *no filter* is an
+   * audience of every contact in the CRM. Unreachable is refused, not ignored.
+   */
   it('refuses groups that refer to each other', () => {
     const result = translateViewFilters({
       filters: [],
@@ -410,6 +415,47 @@ describe('translateViewFilters', () => {
       maxDepth: 3,
     });
 
-    expect(result).toEqual({ ok: true, filter: null });
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reasons.join(' ')).toContain('cannot be reached');
+  });
+
+  it('refuses a filter whose group no longer exists', () => {
+    const result = translateViewFilters({
+      filters: [
+        row({
+          id: 'f1',
+          fieldMetadataId: 'field-city',
+          operand: 'CONTAINS',
+          value: 'Ana',
+          viewFilterGroupId: 'gone',
+        }),
+      ],
+      groups: [],
+      fields,
+      now: NOW,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reasons.join(' ')).toContain('cannot be reached');
+  });
+
+  it('says nothing about a view whose groups all hang off the root', () => {
+    const result = translateViewFilters({
+      filters: [
+        row({ id: 'f1', fieldMetadataId: 'field-city', operand: 'CONTAINS', value: 'Ana' }),
+        row({
+          id: 'f2',
+          fieldMetadataId: 'field-city',
+          operand: 'CONTAINS',
+          value: 'Luanda',
+          viewFilterGroupId: 'g1',
+        }),
+      ],
+      groups: [{ id: 'g1', logicalOperator: 'OR', parentViewFilterGroupId: null }],
+      fields,
+      now: NOW,
+    });
+
+    expect(result.ok).toBe(true);
   });
 });

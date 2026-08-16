@@ -860,3 +860,21 @@ out of the create's race-handling `try`, where a failure was either misread as a
 rejected an upsert whose conversation already existed; and `listDueCampaigns` gained an
 `orderBy scheduledAt` so a workspace with more due campaigns than one page cannot starve the
 oldest.
+
+---
+
+## D-40 — A view filter that cannot be reached is refused, not ignored
+
+**Status: DECIDED (forced by a review finding)** · 2026-08-16
+
+`translateViewFilters` walks down from the root through `parentViewFilterGroupId`. Anything the
+walk never reaches — a filter whose group has been deleted, a group whose parent chain is broken
+or circular — was silently absent from the translation.
+
+That is the D-23 failure in its purest form: a **dropped condition widens the audience**, and the
+result looks like a working translation. The existing test for the cyclic case even asserted the
+old behaviour, `{ ok: true, filter: null }` — which for a campaign audience does not mean "no
+filter", it means **every contact in the CRM**.
+
+The translation now reconciles: every filter row and every group must have been visited, or the
+whole view is refused by name, like every other thing this module cannot reproduce exactly.

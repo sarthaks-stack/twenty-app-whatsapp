@@ -98,6 +98,8 @@ export const METRIC = {
 
   STATUS_PROCESSED: 'wa.status.processed',
   STATUS_ORPHAN: 'wa.status.orphan',
+  /** An orphan handed to a later job because its message may still be landing. */
+  STATUS_ORPHAN_DEFERRED: 'wa.status.orphan_deferred',
   STATUS_DOWNGRADE_IGNORED: 'wa.status.downgrade_ignored',
   STATUS_FAILED_TERMINAL: 'wa.status.failed_terminal',
   STATUS_FAILED_RETRYABLE: 'wa.status.failed_retryable',
@@ -131,10 +133,16 @@ export const METRIC = {
   POLICY_DENIED_BLOCKED: 'wa.policy.denied_blocked',
 
   WINDOW_SWEPT: 'wa.window.swept',
+  /** A sweep hit its pass limit with stale threads still outstanding. */
+  WINDOW_SWEEP_TRUNCATED: 'wa.window.sweep_truncated',
   THREAD_AUTO_CLOSED: 'wa.thread.auto_closed',
 
   HEALTH_ACCOUNT_ERROR: 'wa.health.account_error',
   HEALTH_WEBHOOK_STALE: 'wa.health.webhook_stale',
+  /** A probe failed transiently; the account keeps sending for now. */
+  HEALTH_PROBE_DEGRADED: 'wa.health.probe_degraded',
+  /** One account's checks threw; the rest of the sweep carried on. */
+  HEALTH_ACCOUNT_CHECK_FAILED: 'wa.health.account_check_failed',
   HEALTH_STUCK_REQUEUED: 'wa.health.stuck_requeued',
   HEALTH_STUCK_FAILED: 'wa.health.stuck_failed',
   HEALTH_TIER_WINDOW_ROLLED: 'wa.health.tier_window_rolled',
@@ -145,7 +153,14 @@ export const METRIC = {
   CONSENT_CONFIRMATION_SUPPRESSED: 'wa.consent.confirmation_suppressed',
   CONSENT_IMPORTED: 'wa.consent.imported',
   CONSENT_BACKFILLED: 'wa.consent.backfilled',
+  /** Meta accepted the message but the wamid could not be written to the row. */
+  SEND_WAMID_UNRECORDED: 'wa.send.wamid_unrecorded',
+  /** Bookkeeping after an accepted send failed; the send itself stands. */
+  SEND_POST_ACCEPT_FAILED: 'wa.send.post_accept_failed',
+
   ERASURE_COMPLETED: 'wa.erasure.completed',
+  /** An erasure that deleted rows but could not prove the person was clear. */
+  ERASURE_FAILED: 'wa.erasure.failed',
 
   CAMPAIGN_QUEUED: 'wa.campaign.queued',
   CAMPAIGN_STALE_CLAIM_REVERTED: 'wa.campaign.stale_claim_reverted',

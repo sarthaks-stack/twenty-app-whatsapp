@@ -28,15 +28,40 @@ export const DEFAULT_LANE_RATES: LaneRates = {
   minimumInteractivePerSecond: 5,
 };
 
+/**
+ * The campaign lane is never squeezed to nothing, however small the ceiling —
+ * a rate of zero is not slow, it is stopped, and it would divide by zero on the
+ * way there.
+ */
+const CAMPAIGN_FLOOR_PER_SECOND = 1;
+
+/**
+ * How fast one lane may send, given the account's ceiling.
+ *
+ * **The two lanes always sum to exactly `throttlePerSecond`.** They used to be
+ * computed independently, each with its own floor, so a small ceiling produced
+ * lanes that added up to more than the account allowed: at `throttlePerSecond:
+ * 3` the interactive floor alone returned 5, the campaign floor 1.8, and the
+ * pacing designed to keep us under Meta's limit handed out 6.8/s (D-29).
+ *
+ * Interactive is served first — someone is waiting for it (AR-19) — but only up
+ * to what is left after the campaign lane's floor, so priority never becomes
+ * starvation in either direction.
+ */
 export const laneRate = (lane: Lane, rates: LaneRates = DEFAULT_LANE_RATES): number => {
-  const { throttlePerSecond, interactiveShare } = rates;
+  const ceiling = Math.max(0, rates.throttlePerSecond);
+
+  if (ceiling === 0) return 0;
+
   const minimum = rates.minimumInteractivePerSecond ?? 5;
+  const campaignFloor = Math.min(CAMPAIGN_FLOOR_PER_SECOND, ceiling / 2);
 
-  if (lane === LANE.INTERACTIVE) {
-    return Math.max(minimum, throttlePerSecond * interactiveShare);
-  }
+  const interactive = Math.min(
+    Math.max(minimum, ceiling * rates.interactiveShare),
+    ceiling - campaignFloor,
+  );
 
-  return Math.max(1, throttlePerSecond * (1 - interactiveShare));
+  return lane === LANE.INTERACTIVE ? interactive : ceiling - interactive;
 };
 
 export type SlotPlan = {

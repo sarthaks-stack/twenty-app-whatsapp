@@ -22,8 +22,16 @@ export type ExclusionCandidate = {
   additionalPhones?: string[];
   consent: ConsentStatus;
   threadIsBlocked?: boolean;
-  /** Placeholder indexes that resolved empty with no fallback (FR-CAM-4). */
-  missingVariables?: number[];
+  /**
+   * Every placeholder that resolved empty with no fallback (FR-CAM-4), named
+   * the way `resolveParameters` names them: `{{1}}`, `header image`, `button 0`.
+   *
+   * Keys rather than body positions, because a template fails at Meta over a
+   * header or a button URL just as surely as over `{{1}}` — and while this took
+   * positions, those two gaps left the recipient *included*, to be rejected
+   * one-by-one by Meta at send time instead of once, here, for free (D-26).
+   */
+  missingVariables?: string[];
 };
 
 export type ExclusionInput = {

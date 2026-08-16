@@ -36,13 +36,21 @@ import {
 } from './wa-send-message-route';
 import { statusAfterLink } from './wa-thread-actions-route';
 import {
+  PROBE_FAILURES_BEFORE_ERROR,
   STALE_CLAIM_MS,
   STUCK_MESSAGE_MS,
   isWebhookStale,
+  probeVerdict,
   shouldRollTierWindow,
   stuckAction,
   throughputPerSecond,
 } from './wa-health-check';
+import {
+  MAX_ORPHAN_ATTEMPTS,
+  ORPHAN_GRACE_MS,
+  ORPHAN_RETRY_DELAY_MS,
+  orphansToDefer,
+} from './wa-status-processor';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -597,6 +605,32 @@ describe('the two lanes', () => {
     );
   });
 
+  /**
+   * D-29. The lanes are a division of the account's ceiling, so they must add
+   * up to it — no more, or the pacing that exists to keep us under Meta's limit
+   * is handing out permission to exceed our own.
+   */
+  it.each([1, 2, 3, 5, 8, 10, 20, 50, 80])(
+    'divides a ceiling of %s between the lanes without inventing capacity',
+    (throttle) => {
+      const rates = laneRatesFor({ ...account, sendThrottlePerSecond: throttle });
+      const interactive = laneRate(LANE.INTERACTIVE, rates);
+      const campaign = laneRate(LANE.CAMPAIGN, rates);
+
+      expect(interactive + campaign).toBeCloseTo(throttle, 10);
+      expect(campaign).toBeGreaterThan(0);
+      expect(interactive).toBeGreaterThan(0);
+    },
+  );
+
+  /** A tiny ceiling still favours the person waiting, without starving campaigns. */
+  it('prefers interactive when the floor does not fit', () => {
+    const rates = laneRatesFor({ ...account, sendThrottlePerSecond: 3 });
+
+    expect(laneRate(LANE.INTERACTIVE, rates)).toBe(2);
+    expect(laneRate(LANE.CAMPAIGN, rates)).toBe(1);
+  });
+
   it('reads the account throttle in preference to the variable', () => {
     process.env.WA_SEND_THROTTLE_PER_SECOND = '50';
 
@@ -765,5 +799,66 @@ describe('the hourly health check', () => {
 
   it('gives a stuck message longer than a stale claim', () => {
     expect(STUCK_MESSAGE_MS).toBeGreaterThan(STALE_CLAIM_MS);
+  });
+
+  /**
+   * D-31. `ERROR` is read by the policy gate as "send nothing", so deciding it
+   * from a single failed probe meant one refused connection to Meta silenced a
+   * working number for an hour — an outage produced by the monitoring itself.
+   */
+  describe('what a failed probe decides', () => {
+    const transient = new MetaApiError('Meta is having a moment', { httpStatus: 503 });
+    const credential = new MetaApiError('Bad token', { httpStatus: 401 });
+
+    it('keeps sending through the first transient failures', () => {
+      expect(probeVerdict(transient, 0)).toBe('degraded');
+      expect(probeVerdict(transient, 1)).toBe('degraded');
+      expect(probeVerdict(transient, 2)).toBe('degraded');
+    });
+
+    it('stops the account once a transient failure stops being transient', () => {
+      expect(probeVerdict(transient, PROBE_FAILURES_BEFORE_ERROR)).toBe('error');
+    });
+
+    /** A rejected credential is about the account, not about the minute. */
+    it('stops the account immediately on a rejected credential', () => {
+      expect(probeVerdict(credential, 0)).toBe('error');
+    });
+
+    it('stops the account on an error it cannot classify', () => {
+      expect(probeVerdict(new Error('something else entirely'), 0)).toBe('error');
+    });
+  });
+});
+
+/**
+ * D-30. The grace window was computed, logged as `retryable`, and then the
+ * status was dropped — the webhook event was marked `PROCESSED` regardless. A
+ * `delivered` that beat our own POST response was lost, and its message went on
+ * reporting `accepted` for ever.
+ */
+describe('statuses that arrive before their message', () => {
+  const now = new Date('2026-08-16T12:00:00.000Z');
+  const at = (secondsAgo: number) => ({
+    id: `wamid.${secondsAgo}`,
+    status: 'delivered',
+    timestamp: String(Math.floor(now.getTime() / 1000) - secondsAgo),
+  });
+
+  it('hands on a status still inside the grace window', () => {
+    expect(orphansToDefer([at(10)], 0, now)).toHaveLength(1);
+  });
+
+  it('gives up on one older than the window', () => {
+    expect(orphansToDefer([at(10 * 60)], 0, now)).toEqual([]);
+  });
+
+  it('gives up after the attempt cap, however recent', () => {
+    expect(orphansToDefer([at(1)], MAX_ORPHAN_ATTEMPTS, now)).toEqual([]);
+  });
+
+  /** The retries have to fit inside the window, or the cap decides nothing. */
+  it('retries within the grace window it is capped by', () => {
+    expect(MAX_ORPHAN_ATTEMPTS * ORPHAN_RETRY_DELAY_MS).toBeLessThan(ORPHAN_GRACE_MS);
   });
 });

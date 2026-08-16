@@ -651,6 +651,65 @@ const failMessage = async ({
   });
 };
 
+/**
+ * The fallback record of an acceptance the database refused to take.
+ *
+ * `sendGuard` reads the message row, so a message Meta accepted but whose wamid
+ * could not be written still looks sendable — and the stuck-message sweeper
+ * re-queues exactly that shape. This marker is the second place the fact lives,
+ * chosen because it is written through a different system than the one that
+ * just failed. It is never cleaned up: a message id is used once, and an
+ * outbound send is not worth risking twice to save a key.
+ */
+export const acceptanceKey = (messageId: string): string => `wa:accepted:${messageId}`;
+
+type SendLog = ReturnType<typeof logger.child>;
+
+const markAcceptedOutOfBand = async (messageId: string, wamid: string): Promise<void> => {
+  try {
+    await kv.set(acceptanceKey(messageId), { wamid, at: Date.now() }, { scope: 'WORKSPACE' });
+  } catch (error) {
+    /** Both records failed. The log line is all that is left of the send. */
+    logger.error('wa.send.acceptance_unrecordable', {
+      messageId,
+      wamid,
+      ...describeError(error),
+    });
+  }
+};
+
+export const readAcceptanceMarker = async (
+  messageId: string,
+): Promise<{ wamid: string } | null> => {
+  try {
+    return await kv.get<{ wamid: string }>(acceptanceKey(messageId), { scope: 'WORKSPACE' });
+  } catch {
+    /** A kv outage must not stop sending; the row's own wamid still guards. */
+    return null;
+  }
+};
+
+/**
+ * Runs one piece of post-acceptance bookkeeping.
+ *
+ * None of these may throw out of the send. The message is already with Meta, so
+ * a thrown error would only travel back to the queue and invite a retry of
+ * something that must never be retried. Each failure is counted and logged with
+ * the step that failed, which is what makes it repairable.
+ */
+const afterAcceptance = async (
+  step: string,
+  log: SendLog,
+  effect: () => Promise<unknown>,
+): Promise<void> => {
+  try {
+    await effect();
+  } catch (error) {
+    count(METRIC.SEND_POST_ACCEPT_FAILED);
+    log.error('wa.send.post_accept_failed', { step, ...describeError(error) });
+  }
+};
+
 export const sendOutbound = async (
   payload: OutboundPayload,
 ): Promise<OutboundResult> => {
@@ -671,6 +730,19 @@ export const sendOutbound = async (
     log.info('wa.send.skip_nonqueued', { reason: guard.reason });
 
     return { outcome: 'skipped', reason: guard.reason };
+  }
+
+  /**
+   * One extra read on the hot path, for the one case the row cannot report:
+   * Meta accepted this message and the write of its wamid did not land.
+   */
+  const marker = await readAcceptanceMarker(message.id);
+
+  if (marker !== null) {
+    count(METRIC.SEND_SKIP_NONQUEUED);
+    log.warn('wa.send.skip_accepted_marker', { wamid: marker.wamid });
+
+    return { outcome: 'skipped', reason: 'already accepted by Meta', wamid: marker.wamid };
   }
 
   const thread =
@@ -809,6 +881,21 @@ export const sendOutbound = async (
 
   const retryCount = message.retryCount ?? 0;
 
+  /**
+   * The send, and *only* the send.
+   *
+   * Everything that happens after Meta accepts is deliberately outside this
+   * block. When the bookkeeping lived inside it, a Core API blip while writing
+   * the wamid fell into the catch below and was classified as a *Meta* failure:
+   * the message a customer had just received was written down as FAILED, its
+   * campaign recipient with it, and the wamid — the only handle on a message
+   * that exists — was lost, so the delivery receipts arriving minutes later
+   * matched nothing. A retry, and with it a second copy to a real person, was
+   * one classification away: any post-acceptance error carrying an HTTP 429 or
+   * 5xx would have been rescheduled onto a row that still looked unsent (D-25).
+   */
+  let accepted: { wamid: string; mediaId: string | null };
+
   try {
     const handle = mediaHandleFor(spec, template);
 
@@ -829,88 +916,7 @@ export const sendOutbound = async (
       payload: wirePayload,
     });
 
-    const now = new Date();
-
-    const patch: MessagePatch = {
-      wamid: result.wamid,
-      status: MESSAGE_STATUS.ACCEPTED,
-      statusTimestamps: {
-        ...asJson<JsonObject>(message.statusTimestamps, {}),
-        accepted: Math.floor(now.getTime() / 1000),
-      },
-      errorCode: null,
-      errorDetail: null,
-      ...(mediaId === null
-        ? {}
-        : {
-            mediaMeta: {
-              ...asJson<JsonObject>(message.mediaMeta, {}),
-              metaMediaId: mediaId,
-            },
-          }),
-    };
-
-    await patchMessage(message.id, patch);
-
-    /**
-     * A reaction is not a conversation turn: it must not move the thread to
-     * `AWAITING_REPLY` or rewrite the preview, or reacting 👍 to a customer's
-     * message would make the inbox claim the rep had replied.
-     */
-    if (spec.kind !== 'reaction') {
-      await patchThread(thread.id, {
-        lastOutboundAt: now.toISOString(),
-        lastMessageAt: now.toISOString(),
-        lastMessageDirection: DIRECTION.OUTBOUND,
-        lastMessagePreview: previewFor(spec, message),
-        ...(thread.status === THREAD_STATUS.NEEDS_REVIEW
-          ? {}
-          : { status: THREAD_STATUS.AWAITING_REPLY }),
-      });
-    }
-
-    if (lane === LANE.CAMPAIGN) {
-      await mirrorToRecipient(message.id, { status: RECIPIENT_STATUS.QUEUED });
-    }
-
-    /**
-     * The tier ledger is written **after acceptance**, not before (AR-21).
-     *
-     * Meta counts conversations it actually opened, so counting at enqueue
-     * time would charge the allowance for messages that were denied by policy,
-     * failed on a bad number, or never sent at all — and a campaign would sit
-     * in `tier_waiting` for an allowance nobody had spent.
-     */
-    if (
-      isBusinessInitiated({
-        isTemplate: spec.kind === 'template',
-        templateCategory: (message.templateCategory ?? null) as TemplateCategory | null,
-        windowOpen: (toDate(thread.serviceWindowExpiresAt)?.getTime() ?? 0) > now.getTime(),
-      })
-    ) {
-      await recordBusinessInitiated({ account, waId: thread.waId, now });
-    }
-
-    await writeTimelineActivity({
-      name:
-        spec.kind === 'template'
-          ? TIMELINE_EVENT.TEMPLATE_SENT
-          : TIMELINE_EVENT.MESSAGE_SENT,
-      happensAt: now,
-      properties: {
-        kind: spec.kind,
-        wamid: result.wamid,
-        ...(template === null ? {} : { template: template.name }),
-      },
-      targetPersonId: thread.personId ?? null,
-      linkedRecordId: thread.id,
-      linkedObjectUniversalIdentifier: THREAD_OBJECT_UID,
-    });
-
-    count(METRIC.SEND_ACCEPTED);
-    log.info('wa.send.accepted', { wamid: result.wamid, kind: spec.kind });
-
-    return { outcome: 'sent', wamid: result.wamid };
+    accepted = { wamid: result.wamid, mediaId };
   } catch (error) {
     if (error instanceof WorkspaceFileError) {
       await failMessage({
@@ -988,6 +994,118 @@ export const sendOutbound = async (
 
     return { outcome: 'failed', reason: classification.meaning };
   }
+
+  /**
+   * Meta has the message. From here the only question is bookkeeping, and the
+   * answer to every failure is the same: record what can be recorded, shout
+   * about what cannot, and never, ever send again.
+   */
+  const now = new Date();
+
+  const patch: MessagePatch = {
+    wamid: accepted.wamid,
+    status: MESSAGE_STATUS.ACCEPTED,
+    statusTimestamps: {
+      ...asJson<JsonObject>(message.statusTimestamps, {}),
+      accepted: Math.floor(now.getTime() / 1000),
+    },
+    errorCode: null,
+    errorDetail: null,
+    ...(accepted.mediaId === null
+      ? {}
+      : {
+          mediaMeta: {
+            ...asJson<JsonObject>(message.mediaMeta, {}),
+            metaMediaId: accepted.mediaId,
+          },
+        }),
+  };
+
+  /**
+   * The wamid write is the one that matters: it is what `sendGuard` reads, so
+   * until it lands the record still looks sendable. If it fails after four
+   * retries the message is marked accepted from the fallback marker instead,
+   * and the wamid is logged at error level so the row can be repaired by hand.
+   */
+  try {
+    await patchMessage(message.id, patch);
+  } catch (error) {
+    count(METRIC.SEND_WAMID_UNRECORDED);
+    log.error('wa.send.wamid_unrecorded', {
+      wamid: accepted.wamid,
+      ...describeError(error),
+    });
+
+    await markAcceptedOutOfBand(message.id, accepted.wamid);
+  }
+
+  /**
+   * A reaction is not a conversation turn: it must not move the thread to
+   * `AWAITING_REPLY` or rewrite the preview, or reacting 👍 to a customer's
+   * message would make the inbox claim the rep had replied.
+   */
+  if (spec.kind !== 'reaction') {
+    await afterAcceptance('thread', log, () =>
+      patchThread(thread.id, {
+        lastOutboundAt: now.toISOString(),
+        lastMessageAt: now.toISOString(),
+        lastMessageDirection: DIRECTION.OUTBOUND,
+        lastMessagePreview: previewFor(spec, message),
+        ...(thread.status === THREAD_STATUS.NEEDS_REVIEW
+          ? {}
+          : { status: THREAD_STATUS.AWAITING_REPLY }),
+      }),
+    );
+  }
+
+  if (lane === LANE.CAMPAIGN) {
+    await afterAcceptance('recipient', log, () =>
+      mirrorToRecipient(message.id, { status: RECIPIENT_STATUS.QUEUED }),
+    );
+  }
+
+  /**
+   * The tier ledger is written **after acceptance**, not before (AR-21).
+   *
+   * Meta counts conversations it actually opened, so counting at enqueue
+   * time would charge the allowance for messages that were denied by policy,
+   * failed on a bad number, or never sent at all — and a campaign would sit
+   * in `tier_waiting` for an allowance nobody had spent.
+   */
+  if (
+    isBusinessInitiated({
+      isTemplate: spec.kind === 'template',
+      templateCategory: (message.templateCategory ?? null) as TemplateCategory | null,
+      windowOpen: (toDate(thread.serviceWindowExpiresAt)?.getTime() ?? 0) > now.getTime(),
+    })
+  ) {
+    const waId = thread.waId;
+
+    await afterAcceptance('tierLedger', log, () =>
+      recordBusinessInitiated({ account, waId, now }),
+    );
+  }
+
+  await afterAcceptance('timeline', log, () =>
+    writeTimelineActivity({
+      name:
+        spec.kind === 'template' ? TIMELINE_EVENT.TEMPLATE_SENT : TIMELINE_EVENT.MESSAGE_SENT,
+      happensAt: now,
+      properties: {
+        kind: spec.kind,
+        wamid: accepted.wamid,
+        ...(template === null ? {} : { template: template.name }),
+      },
+      targetPersonId: thread.personId ?? null,
+      linkedRecordId: thread.id,
+      linkedObjectUniversalIdentifier: THREAD_OBJECT_UID,
+    }),
+  );
+
+  count(METRIC.SEND_ACCEPTED);
+  log.info('wa.send.accepted', { wamid: accepted.wamid, kind: spec.kind });
+
+  return { outcome: 'sent', wamid: accepted.wamid };
 };
 
 /** The inbox preview for an outbound message, mirroring the inbound labels. */

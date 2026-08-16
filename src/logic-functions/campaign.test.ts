@@ -10,6 +10,7 @@ import {
   RECIPIENT_STATUS,
   TEMPLATE_CATEGORY,
   TEMPLATE_STATUS,
+  type CampaignStatus,
   type TemplateCategory,
 } from '../domain/constants';
 import type { VariableSpec } from '../domain/template-spec';
@@ -17,6 +18,7 @@ import { personPhones } from '../server/audience';
 import {
   MAX_TEST_RECIPIENTS,
   launchGate,
+  snapshotInvalidatedBy,
   templateRefusal,
 } from './wa-campaign-control';
 import {
@@ -85,14 +87,22 @@ const decide = (
     category = TEMPLATE_CATEGORY.MARKETING as TemplateCategory,
     blocked = new Set<string>(),
     seen = new Set<string>(),
-  }: { category?: TemplateCategory; blocked?: Set<string>; seen?: Set<string> } = {},
+    spec = SPEC,
+    mapping = MAPPING as Parameters<typeof decidePage>[0]['mapping'],
+  }: {
+    category?: TemplateCategory;
+    blocked?: Set<string>;
+    seen?: Set<string>;
+    spec?: VariableSpec;
+    mapping?: Parameters<typeof decidePage>[0]['mapping'];
+  } = {},
 ) =>
   decidePage({
     people: people as never,
     campaignId: 'c1',
     templateCategory: category,
-    spec: SPEC,
-    mapping: MAPPING,
+    spec,
+    mapping,
     defaultCallingCode: '+244',
     accountDisplayName: 'Pixel',
     blockedWaIds: blocked,
@@ -232,6 +242,59 @@ describe('the exclusion matrix over a page', () => {
     const { rows } = decide([person('p1', { firstName: null })]);
 
     expect(rows[0]!.exclusionReason).toBe(EXCLUSION_REASON.MISSING_VARIABLES);
+  });
+
+  /**
+   * A gap outside the body is still a gap (D-26). While the exclusion took body
+   * positions only, an unresolvable header or button URL let every recipient
+   * through to be rejected one at a time by Meta — the campaign reported a full
+   * audience and then failed all of it.
+   */
+  it('excludes a contact whose header media cannot be resolved', () => {
+    const { rows, stats } = decide([person('p1')], {
+      spec: {
+        ...SPEC,
+        header: { format: 'IMAGE', variableCount: 0, indices: [], names: [], text: null, example: [] },
+      } as VariableSpec,
+      // A media header with no id and no way to fetch the bytes.
+      mapping: {
+        ...MAPPING,
+        header: { kind: 'media', fileId: 'f-1' },
+      } as Parameters<typeof decidePage>[0]['mapping'],
+    });
+
+    expect(rows[0]!.exclusionReason).toBe(EXCLUSION_REASON.MISSING_VARIABLES);
+    expect(stats.breakdown[EXCLUSION_REASON.MISSING_VARIABLES]).toBe(1);
+  });
+
+  it('excludes a contact whose button variable cannot be resolved', () => {
+    const { rows } = decide([person('p1')], {
+      spec: {
+        ...SPEC,
+        buttons: [{ index: 0, type: 'URL', hasVariable: true, text: 'Abrir' }],
+      } as VariableSpec,
+      mapping: {
+        ...MAPPING,
+        buttons: [{ index: 0, kind: 'field', path: 'person.city', subType: 'url' }],
+      } as Parameters<typeof decidePage>[0]['mapping'],
+    });
+
+    expect(rows[0]!.exclusionReason).toBe(EXCLUSION_REASON.MISSING_VARIABLES);
+  });
+
+  it('still accepts a contact whose header resolves', () => {
+    const { stats } = decide([person('p1')], {
+      spec: {
+        ...SPEC,
+        header: { format: 'IMAGE', variableCount: 0, indices: [], names: [], text: null, example: [] },
+      } as VariableSpec,
+      mapping: {
+        ...MAPPING,
+        header: { kind: 'media', mediaId: 'meta-123' },
+      } as Parameters<typeof decidePage>[0]['mapping'],
+    });
+
+    expect(stats).toMatchObject({ accepted: 1, excluded: 0 });
   });
 
   /** FR-CAM-4: a fallback makes an empty resolution a non-event. */
@@ -417,6 +480,50 @@ describe('the launch gate', () => {
 
   it('blocks a campaign with no sending number', () => {
     expect(launchGate(null, true).allowed).toBe(false);
+  });
+});
+
+/**
+ * D-28. A built campaign holds parameters resolved against one template for one
+ * set of people. Editing what it was built from and leaving it `ready` meant a
+ * launch could push the old template's values through the new template's
+ * placeholders — every field present, every field valid, and the wrong message.
+ */
+describe('which edits invalidate a build', () => {
+  const built = CAMPAIGN_STATUS.READY as CampaignStatus;
+
+  it.each(['templateId', 'accountId', 'audienceDefinition', 'variableMapping'])(
+    'sends a ready campaign back to draft when %s changes',
+    (field) => {
+      expect(snapshotInvalidatedBy({ [field]: 'x' }, built)).toEqual([field]);
+    },
+  );
+
+  it('reports every changed field, not just the first', () => {
+    expect(snapshotInvalidatedBy({ templateId: 't2', variableMapping: {} }, built)).toEqual([
+      'templateId',
+      'variableMapping',
+    ]);
+  });
+
+  it('leaves a build alone for a rename or a reschedule', () => {
+    expect(
+      snapshotInvalidatedBy({ name: 'Festa', scheduledAt: '2026-09-01T09:00:00.000Z' }, built),
+    ).toEqual([]);
+  });
+
+  /** A draft has no build to invalidate, so the edit just applies. */
+  it('says nothing about a draft', () => {
+    expect(snapshotInvalidatedBy({ templateId: 't2' }, CAMPAIGN_STATUS.DRAFT as CampaignStatus)).toEqual(
+      [],
+    );
+  });
+
+  /** `null` is a change too — clearing the template is not "no edit". */
+  it('treats an explicit null as a change', () => {
+    expect(snapshotInvalidatedBy({ audienceDefinition: null }, built)).toEqual([
+      'audienceDefinition',
+    ]);
   });
 });
 

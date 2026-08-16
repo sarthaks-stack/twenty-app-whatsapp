@@ -1,4 +1,5 @@
 import { defineLogicFunction } from 'twenty-sdk/define';
+import { kv } from 'twenty-sdk/logic-function';
 
 import { LF_HEALTH_CHECK, LF_OUTBOUND_SENDER } from '../constants/universal-identifiers';
 import {
@@ -11,7 +12,12 @@ import {
   type Quality,
 } from '../domain/constants';
 import { getProvider } from '../providers/whatsapp';
-import { INTERNAL_ERROR, MetaApiError } from '../providers/whatsapp/errors';
+import {
+  ERROR_CLASS,
+  INTERNAL_ERROR,
+  MetaApiError,
+  classify,
+} from '../providers/whatsapp/errors';
 import { config } from '../server/config';
 import { enqueue } from '../server/jobs';
 import { describeError, logger } from '../server/logger';
@@ -53,9 +59,21 @@ export const STALE_CLAIM_MS = 10 * 60_000;
 
 export const TIER_WINDOW_MS = 24 * 3_600_000;
 
+/**
+ * How many consecutive probe failures it takes to stop an account sending.
+ *
+ * `ERROR` is not a diagnosis, it is a decision: the policy gate reads it as
+ * "send nothing". A single failed probe used to be enough, so one refused
+ * connection to Meta's Graph API silenced a working number until the next hour's
+ * check — an outage caused entirely by our own monitoring (D-31). Three probes
+ * is three hours of a condition that keeps failing, which is a real fault.
+ */
+export const PROBE_FAILURES_BEFORE_ERROR = 3;
+
 export type AccountHealth = {
   accountId: string;
-  probe: 'ok' | 'failed' | 'skipped';
+  /** `degraded`: the probe failed, but transiently and not yet often enough. */
+  probe: 'ok' | 'failed' | 'degraded' | 'skipped';
   webhookStale: boolean;
   tierWindowRolled: boolean;
 };
@@ -150,9 +168,47 @@ export const stuckAction = (
   return timestamps.requeuedAt === undefined ? 'requeue' : 'fail';
 };
 
+export const probeFailureKey = (accountId: string): string =>
+  `wa:probe-failures:${accountId}`;
+
+/**
+ * Whether a failed probe should stop the account sending.
+ *
+ * A 429 or a 5xx says something about the minute we asked in; a rejected
+ * credential says something about the account. Only the second is a reason to
+ * stop, and even the first becomes one if it keeps happening.
+ */
+export const probeVerdict = (
+  error: unknown,
+  consecutiveFailures: number,
+): 'error' | 'degraded' => {
+  const transient =
+    error instanceof MetaApiError &&
+    classify(error).class === ERROR_CLASS.RETRYABLE_BACKOFF;
+
+  return transient && consecutiveFailures < PROBE_FAILURES_BEFORE_ERROR ? 'degraded' : 'error';
+};
+
+const readProbeFailures = async (accountId: string): Promise<number> => {
+  try {
+    return (await kv.get<number>(probeFailureKey(accountId), { scope: 'WORKSPACE' })) ?? 0;
+  } catch {
+    /** Without the counter, fall back to the old behaviour: one strike. */
+    return PROBE_FAILURES_BEFORE_ERROR;
+  }
+};
+
+const writeProbeFailures = async (accountId: string, value: number): Promise<void> => {
+  try {
+    await kv.set(probeFailureKey(accountId), value, { scope: 'WORKSPACE' });
+  } catch (error) {
+    logger.warn('wa.health.probe_counter_failed', { accountId, ...describeError(error) });
+  }
+};
+
 const probeAccount = async (
   account: WhatsappAccountRecord,
-): Promise<'ok' | 'failed' | 'skipped'> => {
+): Promise<'ok' | 'failed' | 'degraded' | 'skipped'> => {
   if (typeof account.phoneNumberId !== 'string') return 'skipped';
 
   try {
@@ -172,12 +228,39 @@ const probeAccount = async (
       tokenLastCheckedAt: new Date().toISOString(),
     });
 
+    await writeProbeFailures(account.id, 0);
+
     return 'ok';
   } catch (error) {
     const detail =
       error instanceof MetaApiError
         ? `${error.code ?? error.httpStatus ?? 'error'}: ${error.details ?? error.message}`
         : String(error);
+
+    const failures = (await readProbeFailures(account.id)) + 1;
+
+    await writeProbeFailures(account.id, failures);
+
+    /**
+     * A transient failure is recorded but does not stop the account. The
+     * detail still lands on the record, so the health panel shows what
+     * happened, and the counter decides when "what happened" becomes "what is
+     * wrong" (D-31).
+     */
+    if (probeVerdict(error, failures - 1) === 'degraded') {
+      await patchAccount(account.id, {
+        statusDetail: `Probe failed (${failures}/${PROBE_FAILURES_BEFORE_ERROR}): ${detail}`.slice(
+          0,
+          500,
+        ),
+        tokenLastCheckedAt: new Date().toISOString(),
+      });
+
+      count(METRIC.HEALTH_PROBE_DEGRADED);
+      logger.warn('wa.health.probe_degraded', { accountId: account.id, failures, detail });
+
+      return 'degraded';
+    }
 
     /**
      * `ERROR` pauses sending through the policy gate's first rule, which is the
@@ -240,6 +323,52 @@ const sweepStuckMessages = async (
   return { requeued, failed };
 };
 
+/** Everything the hourly sweep checks about one account. */
+const checkAccount = async (
+  account: WhatsappAccountRecord,
+  now: Date,
+  stalenessHours: number,
+  log: ReturnType<typeof logger.child>,
+): Promise<AccountHealth> => {
+  const probe = await probeAccount(account);
+
+  const webhookStale = isWebhookStale({
+    lastEventAt: toDate(account.webhookLastEventAt),
+    now,
+    stalenessHours,
+  });
+
+  if (webhookStale) {
+    count(METRIC.HEALTH_WEBHOOK_STALE);
+    log.warn('wa.health.webhook_stale', {
+      accountId: account.id,
+      lastEventAt: account.webhookLastEventAt,
+    });
+  }
+
+  /**
+   * Rolling the tier window resets the unique-recipient count. Campaigns
+   * parked in `TIER_WAITING` are woken by the runner's next tick reading the
+   * reset counter — nothing here reaches into them, so the two can be
+   * reasoned about separately.
+   */
+  const tierWindowRolled = shouldRollTierWindow({
+    startedAt: toDate(account.tierWindowStartedAt),
+    now,
+  });
+
+  if (tierWindowRolled) {
+    await patchAccount(account.id, {
+      tierUniqueUsersUsed: 0,
+      tierWindowStartedAt: now.toISOString(),
+    });
+
+    count(METRIC.HEALTH_TIER_WINDOW_ROLLED);
+  }
+
+  return { accountId: account.id, probe, webhookStale, tierWindowRolled };
+};
+
 export const runHealthCheck = async (now: Date = new Date()): Promise<HealthResult> => {
   const log = logger.child({ fn: 'wa-health-check' });
 
@@ -252,44 +381,33 @@ export const runHealthCheck = async (now: Date = new Date()): Promise<HealthResu
   const stalenessHours = config.webhookStalenessHours();
   const health: AccountHealth[] = [];
 
+  /**
+   * Each account is swept inside its own boundary (D-32).
+   *
+   * The checks after this loop — stuck messages, stale campaign claims, failed
+   * webhook events — are the ones that unstick the *whole workspace*, and they
+   * used to sit behind an unguarded `await` on a single account's patch. One
+   * account erroring meant none of them ran, so a Core API blip while writing
+   * one account's tier window left every stuck message stuck and every claimed
+   * recipient held for another hour.
+   */
   for (const account of accounts) {
-    const probe = await probeAccount(account);
-
-    const webhookStale = isWebhookStale({
-      lastEventAt: toDate(account.webhookLastEventAt),
-      now,
-      stalenessHours,
-    });
-
-    if (webhookStale) {
-      count(METRIC.HEALTH_WEBHOOK_STALE);
-      log.warn('wa.health.webhook_stale', {
+    try {
+      health.push(await checkAccount(account, now, stalenessHours, log));
+    } catch (error) {
+      count(METRIC.HEALTH_ACCOUNT_CHECK_FAILED);
+      log.error('wa.health.account_check_failed', {
         accountId: account.id,
-        lastEventAt: account.webhookLastEventAt,
-      });
-    }
-
-    /**
-     * Rolling the tier window resets the unique-recipient count. Campaigns
-     * parked in `TIER_WAITING` are woken by the runner's next tick reading the
-     * reset counter — nothing here reaches into them, so the two can be
-     * reasoned about separately.
-     */
-    const tierWindowRolled = shouldRollTierWindow({
-      startedAt: toDate(account.tierWindowStartedAt),
-      now,
-    });
-
-    if (tierWindowRolled) {
-      await patchAccount(account.id, {
-        tierUniqueUsersUsed: 0,
-        tierWindowStartedAt: now.toISOString(),
+        ...describeError(error),
       });
 
-      count(METRIC.HEALTH_TIER_WINDOW_ROLLED);
+      health.push({
+        accountId: account.id,
+        probe: 'failed',
+        webhookStale: false,
+        tierWindowRolled: false,
+      });
     }
-
-    health.push({ accountId: account.id, probe, webhookStale, tierWindowRolled });
   }
 
   const stuck = await sweepStuckMessages(now);

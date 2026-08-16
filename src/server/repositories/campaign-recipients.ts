@@ -1,4 +1,8 @@
-import type { ExclusionReason, RecipientStatus } from '../../domain/constants';
+import {
+  RECIPIENT_STATUS,
+  type ExclusionReason,
+  type RecipientStatus,
+} from '../../domain/constants';
 import { inBatches, isUniqueViolation } from '../batching';
 import { nodesOf, query, type JsonObject } from './base';
 
@@ -261,6 +265,70 @@ export const upsertRecipients = async (
   return { created, updated };
 };
 
+/** What a retired row's `errorCode` says, so a rebuild is legible in the data. */
+export const REBUILT_ERROR_CODE = 'SNAPSHOT_REBUILT';
+
+/**
+ * Retires the rows of a previous snapshot before a rebuild.
+ *
+ * A campaign can be built more than once — an admin fixes a mapping, changes
+ * the template, widens the view — and the second build must not inherit the
+ * first one's rows. It cannot delete them either: hard deletes live in the
+ * erasure routine alone, and a recipient row is the audit trail of who a
+ * campaign was going to message.
+ *
+ * So they are retired instead: `SKIPPED`, with a code that says why. The
+ * duplicate detector ignores retired rows, and `upsertRecipients` writes over
+ * any of them whose person is still in the audience — so a rebuilt campaign
+ * keeps one row per person, showing the current snapshot's decision.
+ */
+export const retirePreviousSnapshot = async (campaignId: string): Promise<number> => {
+  let total = 0;
+
+  /**
+   * Looped because the server may cap how many rows one filtered update
+   * touches. Bounded because "keep going until it says zero" is a promise the
+   * caller cannot keep if something else is writing rows at the same time.
+   */
+  for (let pass = 0; pass < 200; pass += 1) {
+    const updated = await query(
+      (client) =>
+        client.mutation({
+          updateWhatsappCampaignRecipients: {
+            __args: {
+              data: {
+                status: RECIPIENT_STATUS.SKIPPED,
+                errorCode: REBUILT_ERROR_CODE,
+                errorDetail: 'Superseded by a later build of this campaign',
+                claimedAt: null,
+              },
+              filter: {
+                campaignId: { eq: campaignId },
+                status: {
+                  in: [
+                    RECIPIENT_STATUS.PENDING,
+                    RECIPIENT_STATUS.CLAIMED,
+                    RECIPIENT_STATUS.EXCLUDED,
+                  ],
+                },
+              },
+            },
+            id: true,
+          },
+        }),
+      'recipients.retireSnapshot',
+    );
+
+    const count = (updated.updateWhatsappCampaignRecipients ?? []).length;
+
+    total += count;
+
+    if (count === 0) break;
+  }
+
+  return total;
+};
+
 /**
  * Which of these numbers this campaign has already accepted (FR-CAM-3).
  *
@@ -299,6 +367,14 @@ export const findExistingPhones = async (
                    * hiding the real reason behind a misleading one.
                    */
                   exclusionReason: { is: 'NULL' },
+                  /**
+                   * Nor does a row from a *superseded* snapshot. A rebuild
+                   * retires the previous rows to `SKIPPED`, and without this
+                   * line every one of them would answer "taken" for its own
+                   * number — turning the second build of a campaign into an
+                   * audience where everybody is a duplicate of themselves.
+                   */
+                  status: { neq: RECIPIENT_STATUS.SKIPPED },
                 },
                 first: batch.length,
               },

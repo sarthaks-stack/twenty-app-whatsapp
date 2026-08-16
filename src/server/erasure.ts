@@ -2,7 +2,7 @@ import { CONSENT_METHOD } from '../domain/constants';
 import { inBatches } from './batching';
 import { describeError, logger } from './logger';
 import { METRIC, count } from './metrics';
-import { nodesOf, query } from './repositories/base';
+import { pageOf, query } from './repositories/base';
 import { createConsentEvent } from './repositories/consent-events';
 import { writeTimelineActivity, TIMELINE_EVENT } from './timeline';
 
@@ -36,7 +36,167 @@ export type ErasureResult = ErasureCounts & {
   personId: string;
 };
 
+export type ErasureTargets = {
+  threadIds: string[];
+  messageIds: string[];
+  consentEventIds: string[];
+  recipientIds: string[];
+  mediaFileCount: number;
+};
+
 const idsOf = (records: { id: string }[]): string[] => records.map((record) => record.id);
+
+export const ERASURE_PAGE_SIZE = 200;
+
+/**
+ * A safety valve, not a budget: 2 000 pages is 400 000 records of a single kind
+ * for a single person. Reaching it means the cursor is not advancing — a bug —
+ * and looping forever inside a route is worse than stopping.
+ */
+export const MAX_ERASURE_PAGES = 2_000;
+
+/**
+ * Raised when the enumeration could not be finished.
+ *
+ * It exists so that a partial erasure is *never* reported as a completed one.
+ * The failure mode this class rules out is the dangerous one: deleting the
+ * first page, writing a tombstone that says the person was erased, and leaving
+ * the rest of their messages in the workspace with a receipt claiming
+ * otherwise. An error the operator sees is recoverable; a false receipt is not.
+ */
+export class ErasureIncompleteError extends Error {
+  constructor(readonly kind: string) {
+    super(`Could not enumerate all ${kind} within ${MAX_ERASURE_PAGES} pages`);
+    this.name = 'ErasureIncompleteError';
+  }
+}
+
+/**
+ * Reads every page of a connection, not the first one.
+ *
+ * Ordering by id is what makes the cursor stable: without a total order the
+ * API is free to return a row twice or not at all across pages, and "not at
+ * all" during an erasure means content that survives.
+ */
+const collectAll = async <T>(
+  kind: string,
+  readPage: (after: string | null) => Promise<{ items: T[]; nextCursor: string | null }>,
+): Promise<T[]> => {
+  const all: T[] = [];
+  let after: string | null = null;
+
+  for (let page = 0; page < MAX_ERASURE_PAGES; page += 1) {
+    const { items, nextCursor } = await readPage(after);
+
+    all.push(...items);
+
+    if (nextCursor === null) return all;
+
+    after = nextCursor;
+  }
+
+  throw new ErasureIncompleteError(kind);
+};
+
+const readThreadPage = async (personId: string, after: string | null) =>
+  pageOf<{ id: string }>(
+    (
+      await query(
+        (client) =>
+          client.query({
+            whatsappThreads: {
+              __args: {
+                filter: { personId: { eq: personId } },
+                orderBy: [{ id: 'AscNullsFirst' }],
+                first: ERASURE_PAGE_SIZE,
+                ...(after === null ? {} : { after }),
+              },
+              edges: { node: { id: true } },
+              pageInfo: { hasNextPage: true, endCursor: true },
+            },
+          }),
+        'erasure.threads',
+      )
+    ).whatsappThreads,
+  );
+
+type MessageRow = { id: string; mediaFile?: { fileId?: string }[] | null };
+
+const readMessagePage = async (threadIds: string[], after: string | null) =>
+  pageOf<MessageRow>(
+    (
+      await query(
+        (client) =>
+          client.query({
+            whatsappMessages: {
+              __args: {
+                filter: { threadId: { in: threadIds } },
+                orderBy: [{ id: 'AscNullsFirst' }],
+                first: ERASURE_PAGE_SIZE,
+                ...(after === null ? {} : { after }),
+              },
+              edges: { node: { id: true, mediaFile: { fileId: true } } },
+              pageInfo: { hasNextPage: true, endCursor: true },
+            },
+          }),
+        'erasure.messages',
+      )
+    ).whatsappMessages,
+  );
+
+/**
+ * Tombstones from earlier erasures are left alone.
+ *
+ * They hold no content — counts and an actor — and destroying them would mean
+ * a second erasure quietly deleting the proof that the first one happened,
+ * which is the one thing this module exists to keep.
+ */
+const readConsentEventPage = async (personId: string, after: string | null) =>
+  pageOf<{ id: string }>(
+    (
+      await query(
+        (client) =>
+          client.query({
+            whatsappConsentEvents: {
+              __args: {
+                filter: {
+                  personId: { eq: personId },
+                  or: [{ isTombstone: { eq: false } }, { isTombstone: { is: 'NULL' } }],
+                },
+                orderBy: [{ id: 'AscNullsFirst' }],
+                first: ERASURE_PAGE_SIZE,
+                ...(after === null ? {} : { after }),
+              },
+              edges: { node: { id: true } },
+              pageInfo: { hasNextPage: true, endCursor: true },
+            },
+          }),
+        'erasure.consentEvents',
+      )
+    ).whatsappConsentEvents,
+  );
+
+const readRecipientPage = async (personId: string, after: string | null) =>
+  pageOf<{ id: string }>(
+    (
+      await query(
+        (client) =>
+          client.query({
+            whatsappCampaignRecipients: {
+              __args: {
+                filter: { personId: { eq: personId } },
+                orderBy: [{ id: 'AscNullsFirst' }],
+                first: ERASURE_PAGE_SIZE,
+                ...(after === null ? {} : { after }),
+              },
+              edges: { node: { id: true } },
+              pageInfo: { hasNextPage: true, endCursor: true },
+            },
+          }),
+        'erasure.recipients',
+      )
+    ).whatsappCampaignRecipients,
+  );
 
 /**
  * Everything the erasure would touch, counted before anything is destroyed.
@@ -45,108 +205,54 @@ const idsOf = (records: { id: string }[]): string[] => records.map((record) => r
  * before confirming — an erasure is the one action in this app with no undo,
  * and "19 messages across 1 conversation" is a very different decision from
  * "4 200 messages across 37".
+ *
+ * Every read here pages to exhaustion. An earlier version took one page of each
+ * kind and treated it as the whole set, which meant a contact with more than a
+ * page of history had the oldest part of it kept — while the erasure reported
+ * success and wrote a tombstone saying it was gone (D-24).
  */
-export const collectErasureTargets = async (
-  personId: string,
-): Promise<{
-  threadIds: string[];
-  messageIds: string[];
-  consentEventIds: string[];
-  recipientIds: string[];
-  mediaFileCount: number;
-}> => {
-  const threads = await query(
-    (client) =>
-      client.query({
-        whatsappThreads: {
-          __args: { filter: { personId: { eq: personId } }, first: 200 },
-          edges: { node: { id: true } },
-        },
-      }),
-    'erasure.threads',
+export const collectErasureTargets = async (personId: string): Promise<ErasureTargets> => {
+  const threadIds = idsOf(
+    await collectAll('threads', (after) => readThreadPage(personId, after)),
   );
-
-  const threadIds = idsOf(nodesOf<{ id: string }>(threads.whatsappThreads));
 
   const messages =
     threadIds.length === 0
       ? []
-      : nodesOf<{ id: string; mediaFile?: { fileId?: string }[] | null }>(
-          (
-            await query(
-              (client) =>
-                client.query({
-                  whatsappMessages: {
-                    __args: { filter: { threadId: { in: threadIds } }, first: 1000 },
-                    edges: { node: { id: true, mediaFile: { fileId: true } } },
-                  },
-                }),
-              'erasure.messages',
-            )
-          ).whatsappMessages ?? null,
-        );
+      : await collectAll<MessageRow>('messages', (after) => readMessagePage(threadIds, after));
 
-  const consentEvents = await query(
-    (client) =>
-      client.query({
-        whatsappConsentEvents: {
-          __args: { filter: { personId: { eq: personId } }, first: 500 },
-          edges: { node: { id: true } },
-        },
-      }),
-    'erasure.consentEvents',
+  const consentEventIds = idsOf(
+    await collectAll('consent events', (after) => readConsentEventPage(personId, after)),
   );
 
-  const recipients = await query(
-    (client) =>
-      client.query({
-        whatsappCampaignRecipients: {
-          __args: { filter: { personId: { eq: personId } }, first: 500 },
-          edges: { node: { id: true } },
-        },
-      }),
-    'erasure.recipients',
+  const recipientIds = idsOf(
+    await collectAll('campaign recipients', (after) => readRecipientPage(personId, after)),
   );
 
   return {
     threadIds,
     messageIds: idsOf(messages),
-    consentEventIds: idsOf(nodesOf<{ id: string }>(consentEvents.whatsappConsentEvents)),
-    recipientIds: idsOf(nodesOf<{ id: string }>(recipients.whatsappCampaignRecipients)),
+    consentEventIds,
+    recipientIds,
     mediaFileCount: messages.filter(
       (message) => Array.isArray(message.mediaFile) && message.mediaFile.length > 0,
     ).length,
   };
 };
 
-export const erasePerson = async ({
-  personId,
-  actorId,
-  dryRun = false,
-}: {
-  personId: string;
-  actorId: string | null;
-  dryRun?: boolean;
-}): Promise<ErasureResult> => {
-  const log = logger.child({ fn: 'erasure', correlationId: personId });
-
-  const targets = await collectErasureTargets(personId);
-
-  const counts: ErasureCounts = {
-    threads: targets.threadIds.length,
-    messages: targets.messageIds.length,
-    consentEvents: targets.consentEventIds.length,
-    campaignRecipients: targets.recipientIds.length,
-    mediaFiles: targets.mediaFileCount,
-  };
-
-  if (dryRun) return { ...counts, dryRun: true, personId };
-
-  /**
-   * Messages before threads. The other order would leave orphaned messages if
-   * the second call failed, and an orphaned message is content that survived an
-   * erasure with nothing pointing at it — the worst of both outcomes.
-   */
+/**
+ * One pass of destruction over an already-enumerated set.
+ *
+ * Messages before threads. The other order would leave orphaned messages if
+ * the second call failed, and an orphaned message is content that survived an
+ * erasure with nothing pointing at it — the worst of both outcomes.
+ *
+ * Campaign recipient rows go too. They record that this person was targeted,
+ * which is exactly the kind of profiling record an erasure request is about —
+ * and the campaign's own counters are a separate, aggregate fact that the
+ * rollup keeps.
+ */
+const destroyTargets = async (targets: ErasureTargets): Promise<void> => {
   await inBatches(
     targets.messageIds,
     (batch) =>
@@ -173,12 +279,6 @@ export const erasePerson = async ({
     { label: 'erasure.destroyThreads' },
   );
 
-  /**
-   * Campaign recipient rows go too. They record that this person was targeted,
-   * which is exactly the kind of profiling record an erasure request is about —
-   * and the campaign's own counters are a separate, aggregate fact that the
-   * rollup keeps.
-   */
   await inBatches(
     targets.recipientIds,
     (batch) =>
@@ -210,6 +310,95 @@ export const erasePerson = async ({
       ),
     { label: 'erasure.destroyConsentEvents' },
   );
+};
+
+const isEmpty = (targets: ErasureTargets): boolean =>
+  targets.threadIds.length === 0 &&
+  targets.messageIds.length === 0 &&
+  targets.consentEventIds.length === 0 &&
+  targets.recipientIds.length === 0;
+
+const addTo = (counts: ErasureCounts, targets: ErasureTargets): ErasureCounts => ({
+  threads: counts.threads + targets.threadIds.length,
+  messages: counts.messages + targets.messageIds.length,
+  consentEvents: counts.consentEvents + targets.consentEventIds.length,
+  campaignRecipients: counts.campaignRecipients + targets.recipientIds.length,
+  mediaFiles: counts.mediaFiles + targets.mediaFileCount,
+});
+
+/**
+ * How many times the erasure re-reads the workspace looking for stragglers.
+ *
+ * More than one because an inbound message can land mid-erasure: the webhook
+ * that creates it does not know an erasure is running, and a row created after
+ * the enumeration but before the tombstone would otherwise outlive an erasure
+ * that claims to have removed it.
+ */
+export const MAX_ERASURE_ROUNDS = 3;
+
+export const erasePerson = async ({
+  personId,
+  actorId,
+  dryRun = false,
+}: {
+  personId: string;
+  actorId: string | null;
+  dryRun?: boolean;
+}): Promise<ErasureResult> => {
+  const log = logger.child({ fn: 'erasure', correlationId: personId });
+
+  const first = await collectErasureTargets(personId);
+
+  let counts: ErasureCounts = {
+    threads: 0,
+    messages: 0,
+    consentEvents: 0,
+    campaignRecipients: 0,
+    mediaFiles: 0,
+  };
+
+  if (dryRun) return { ...addTo(counts, first), dryRun: true, personId };
+
+  /**
+   * Delete, then look again, and only stop when a fresh read comes back empty.
+   * The re-read is what lets the tombstone be a statement of fact rather than
+   * of intent: it is written after the workspace has been observed clean, not
+   * after the delete calls returned.
+   */
+  let targets = first;
+  let clean = false;
+
+  for (let round = 0; round < MAX_ERASURE_ROUNDS && !clean; round += 1) {
+    await destroyTargets(targets);
+
+    counts = addTo(counts, targets);
+
+    targets = await collectErasureTargets(personId);
+    clean = isEmpty(targets);
+
+    if (!clean) {
+      log.warn('wa.erasure.residue', {
+        round: round + 1,
+        threads: targets.threadIds.length,
+        messages: targets.messageIds.length,
+        consentEvents: targets.consentEventIds.length,
+        campaignRecipients: targets.recipientIds.length,
+      });
+    }
+  }
+
+  /**
+   * Nothing is recorded if the workspace is not clean. The counts so far are
+   * real — those rows are gone — but a tombstone and a `DATA_ERASED` activity
+   * both assert something stronger than "most of it", and the caller needs to
+   * see a failure rather than a receipt.
+   */
+  if (!clean) {
+    count(METRIC.ERASURE_FAILED);
+    log.error('wa.erasure.incomplete', { ...counts, actorId });
+
+    throw new ErasureIncompleteError('records');
+  }
 
   /**
    * The tombstone. It is the compromise between "erase everything" and "prove

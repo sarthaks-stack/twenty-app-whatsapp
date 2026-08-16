@@ -193,7 +193,7 @@ export const decidePage = ({
         threadIsBlocked:
           phones.primary !== null &&
           blockedWaIds.has(toWaId(toE164(phones.primary, defaultCallingCode) ?? '')),
-        missingVariables: resolution.ok ? [] : resolution.missing,
+        missingVariables: resolution.ok ? [] : resolution.missingKeys,
       },
       templateCategory,
       defaultCallingCode,

@@ -18,18 +18,45 @@ describe('laneRate', () => {
   });
 
   it('never paces interactive below the floor, however small the share', () => {
-    expect(laneRate(LANE.INTERACTIVE, { throttlePerSecond: 2, interactiveShare: 0.4 })).toBe(5);
+    expect(laneRate(LANE.INTERACTIVE, { throttlePerSecond: 20, interactiveShare: 0.05 })).toBe(5);
   });
 
-  it('keeps the campaign lane above zero', () => {
-    expect(laneRate(LANE.CAMPAIGN, { throttlePerSecond: 1, interactiveShare: 1 })).toBe(1);
+  /**
+   * D-29. The floor is a preference, not a licence. When the whole account is
+   * paced at 2/s an interactive floor of 5 cannot be honoured — and honouring
+   * it anyway is how the two lanes came to hand out 6.8/s against a ceiling of
+   * 3, which is the number this module exists to hold.
+   */
+  it('does not let the interactive floor exceed the account ceiling', () => {
+    const rates = { throttlePerSecond: 2, interactiveShare: 0.4 };
+
+    expect(laneRate(LANE.INTERACTIVE, rates)).toBe(1);
+    expect(laneRate(LANE.CAMPAIGN, rates)).toBe(1);
   });
 
-  it('the two lanes never exceed the configured ceiling', () => {
-    const rates = { throttlePerSecond: 20, interactiveShare: 0.4, minimumInteractivePerSecond: 0 };
-    expect(laneRate(LANE.INTERACTIVE, rates) + laneRate(LANE.CAMPAIGN, rates)).toBeLessThanOrEqual(
-      rates.throttlePerSecond,
-    );
+  it('keeps the campaign lane above zero even when the share is all interactive', () => {
+    expect(laneRate(LANE.CAMPAIGN, { throttlePerSecond: 1, interactiveShare: 1 })).toBe(0.5);
+  });
+
+  it.each([
+    [1, 0.4],
+    [2, 0.4],
+    [3, 0.4],
+    [10, 0.1],
+    [20, 0.4],
+    [80, 0.9],
+  ])('divides a ceiling of %s exactly between the lanes', (throttlePerSecond, interactiveShare) => {
+    const rates = { throttlePerSecond, interactiveShare };
+    const total = laneRate(LANE.INTERACTIVE, rates) + laneRate(LANE.CAMPAIGN, rates);
+
+    expect(total).toBeCloseTo(throttlePerSecond, 10);
+  });
+
+  it('paces nothing when the account is throttled to zero', () => {
+    const rates = { throttlePerSecond: 0, interactiveShare: 0.4 };
+
+    expect(laneRate(LANE.INTERACTIVE, rates)).toBe(0);
+    expect(laneRate(LANE.CAMPAIGN, rates)).toBe(0);
   });
 });
 

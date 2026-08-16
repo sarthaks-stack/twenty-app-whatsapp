@@ -12,6 +12,7 @@ import { rateFor } from '../domain/campaign/guardrails';
 import type { MetaError, MetaStatus } from '../domain/webhook/types';
 import { ERROR_CLASS, MetaApiError, classify } from '../providers/whatsapp/errors';
 import { noteCampaignChange } from '../server/campaign-deltas';
+import { enqueue } from '../server/jobs';
 import { config } from '../server/config';
 import { logger } from '../server/logger';
 import { METRIC, count } from '../server/metrics';
@@ -45,12 +46,16 @@ export type StatusPayload = {
   statuses?: MetaStatus[];
   kind?: 'accountError';
   errors?: MetaError[];
+  /** Set only on a job this function enqueued for itself; see `deferred`. */
+  orphanAttempt?: number;
 };
 
 export type StatusResult = {
   processed: number;
   orphans: number;
   advanced: number;
+  /** Orphans handed to a later job because their message may still be landing. */
+  deferred: number;
 };
 
 const META_TO_STATUS: Record<string, MessageStatus> = {
@@ -87,6 +92,34 @@ export const isRecentEnoughToRetry = (
   return now.getTime() - seconds * 1000 < ORPHAN_GRACE_MS;
 };
 
+/** How long to wait before looking for the message again. */
+export const ORPHAN_RETRY_DELAY_MS = 30_000;
+
+/**
+ * How many times an orphan is handed forward before it is accepted as one.
+ *
+ * Three attempts at 30 s sit inside `ORPHAN_GRACE_MS`, so the cap and the grace
+ * window agree about when a status stops being a race and starts being a fact.
+ */
+export const MAX_ORPHAN_ATTEMPTS = 3;
+
+/**
+ * Which orphans deserve another look (D-30).
+ *
+ * The grace window was computed and *logged* and then the status was dropped:
+ * the event was marked `PROCESSED` regardless, so a `delivered` that beat our
+ * own POST response — the exact race the window exists for — was lost, and the
+ * message it belonged to kept reporting `accepted` for ever.
+ */
+export const orphansToDefer = (
+  statuses: MetaStatus[],
+  attempt: number,
+  now: Date = new Date(),
+): MetaStatus[] =>
+  attempt >= MAX_ORPHAN_ATTEMPTS
+    ? []
+    : statuses.filter((status) => isRecentEnoughToRetry(status, now));
+
 export const processStatuses = async (
   payload: StatusPayload,
 ): Promise<StatusResult> => {
@@ -107,7 +140,7 @@ export const processStatuses = async (
       await markWebhookEvent(payload.webhookEventId, 'PROCESSED');
     }
 
-    return { processed: 0, orphans: 0, advanced: 0 };
+    return { processed: 0, orphans: 0, advanced: 0, deferred: 0 };
   }
 
   const statuses = payload.statuses ?? [];
@@ -123,9 +156,10 @@ export const processStatuses = async (
   // the entire Core API budget at campaign scale (NFR-R2).
   const messages = await findMessagesByWamids(wamids);
 
-  const result: StatusResult = { processed: 0, orphans: 0, advanced: 0 };
+  const result: StatusResult = { processed: 0, orphans: 0, advanced: 0, deferred: 0 };
   const recipientTransitions = new Map<RecipientStatus, string[]>();
   const campaignDeltas = new Map<string, Record<string, number>>();
+  const orphans: MetaStatus[] = [];
 
   for (const status of statuses) {
     const wamid = status.id;
@@ -140,6 +174,7 @@ export const processStatuses = async (
         correlationId: wamid,
         retryable: isRecentEnoughToRetry(status),
       });
+      orphans.push(status);
       continue;
     }
 
@@ -235,8 +270,50 @@ export const processStatuses = async (
   await mirrorToRecipients(recipientTransitions, campaignDeltas);
   await writeCampaignDeltas(campaignDeltas);
 
+  /**
+   * A status can beat the response to the POST that created its message. Those
+   * go to a later job rather than being counted as orphans and forgotten; the
+   * ones outside the grace window, or past the attempt cap, stay orphans.
+   */
+  const attempt = payload.orphanAttempt ?? 0;
+  const deferred = orphansToDefer(orphans, attempt);
+
+  let handedOn = true;
+
+  if (deferred.length > 0) {
+    handedOn = await enqueue({
+      logicFunctionUniversalIdentifier: LF_STATUS_PROCESSOR,
+      payload: {
+        accountId: payload.accountId,
+        statuses: deferred as unknown as Record<string, unknown>[],
+        orphanAttempt: attempt + 1,
+      },
+      delayMs: ORPHAN_RETRY_DELAY_MS,
+      correlationId: deferred[0]?.id ?? null,
+    });
+
+    if (handedOn) {
+      result.deferred = deferred.length;
+      count(METRIC.STATUS_ORPHAN_DEFERRED);
+      log.info('wa.status.orphans_deferred', { deferred: deferred.length, attempt: attempt + 1 });
+    }
+  }
+
   if (payload.webhookEventId !== undefined) {
-    await markWebhookEvent(payload.webhookEventId, 'PROCESSED');
+    /**
+     * The event is only `PROCESSED` if everything in it was either applied or
+     * handed on. Marking it processed while statuses were dropped on the floor
+     * is what made this defect invisible for as long as it was.
+     */
+    if (handedOn) {
+      await markWebhookEvent(payload.webhookEventId, 'PROCESSED');
+    } else {
+      await markWebhookEventFailed(
+        payload.webhookEventId,
+        attempt,
+        `Could not requeue ${deferred.length} status(es) whose message has not arrived`,
+      );
+    }
   }
 
   log.info('wa.status.batch', result);

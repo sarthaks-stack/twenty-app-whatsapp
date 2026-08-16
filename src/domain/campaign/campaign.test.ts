@@ -54,7 +54,7 @@ describe('evaluateExclusion', () => {
     ['no phone', { primaryPhone: null }, EXCLUSION_REASON.INVALID_PHONE],
     ['unparseable phone', { primaryPhone: 'not a number' }, EXCLUSION_REASON.INVALID_PHONE],
     ['blocked thread', { threadIsBlocked: true }, EXCLUSION_REASON.BLOCKED],
-    ['missing variables', { missingVariables: [2] }, EXCLUSION_REASON.MISSING_VARIABLES],
+    ['missing variables', { missingVariables: ['{{2}}'] }, EXCLUSION_REASON.MISSING_VARIABLES],
   ])('excludes %s', (_label, overrides, reason) => {
     expect(evaluate(overrides)).toMatchObject({ excluded: true, reason });
   });
@@ -108,7 +108,7 @@ describe('evaluateExclusion', () => {
 
     it('reports a duplicate ahead of missing variables', () => {
       expect(
-        evaluate({ missingVariables: [1] }, TEMPLATE_CATEGORY.MARKETING, new Set(['+244923000000'])),
+        evaluate({ missingVariables: ['{{1}}'] }, TEMPLATE_CATEGORY.MARKETING, new Set(['+244923000000'])),
       ).toMatchObject({ reason: EXCLUSION_REASON.DUPLICATE });
     });
   });

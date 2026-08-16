@@ -646,3 +646,177 @@ Everything else the builder can produce is covered: text (including composite fa
 `firstName`/`lastName` when no sub-field is named), select, multi-select, boolean, number, date
 and relation, with `IS_EMPTY` on text correctly meaning *null or empty string*, since Twenty
 writes `''` into a cleared column.
+
+---
+
+## D-24 — An erasure that cannot prove it finished must not issue a receipt
+
+**Status: DECIDED (forced by a review finding)** · 2026-08-16
+
+`collectErasureTargets` read one page of each kind — 200 threads, 1 000 messages, 500 consent
+events — and treated it as the whole set. A contact with a longer history kept the oldest part of
+it while `erasePerson` returned success, wrote a `DATA_ERASED` activity, and left a tombstone
+saying the data was gone. Under-deleting is bad; under-deleting **and issuing a receipt** is the
+shape that survives an audit until the day it does not (SEC-8).
+
+Three things changed:
+
+- Every read pages to exhaustion, ordered by `id` so the cursor is stable. A cursor that stops
+  advancing raises `ErasureIncompleteError` rather than looping.
+- Deletion runs in **rounds**: delete, re-read, stop only when a fresh read comes back empty. This
+  also covers the inbound message that lands mid-erasure — the webhook does not know an erasure is
+  running, and a row created after the enumeration would otherwise outlive it.
+- If the workspace is still not clean after `MAX_ERASURE_ROUNDS`, **nothing is recorded** and the
+  caller gets an error. The rows deleted are still deleted; what is withheld is the claim that the
+  person was cleared.
+
+Tombstones from earlier erasures are now excluded from the targets. They carry counts and an
+actor, never content, and destroying them would mean a second erasure quietly deleting the proof
+of the first.
+
+---
+
+## D-25 — After Meta accepts, nothing may look like a Meta failure
+
+**Status: DECIDED (forced by a review finding)** · 2026-08-16
+
+Every post-acceptance write — the wamid, the thread, the campaign recipient, the tier ledger, the
+timeline — sat inside the same `try` as `sendMessage`. So a Core API blip while writing the wamid
+was caught by the send's own `catch`, classified as a *Meta* error, and the message a customer had
+just received was written down as `FAILED`, its recipient row with it, and the wamid — the only
+handle on a sent message that exists — was lost, so the delivery receipts arriving a minute later
+matched nothing.
+
+A double send was one classification away: any post-acceptance error carrying an HTTP 429 or 5xx
+would have been *rescheduled*, onto a row that still looked unsent.
+
+The send is now alone in the `try`. Everything after it is bookkeeping, and every piece of it is
+individually guarded: a failure is counted and logged with the step that failed, and the outcome
+stays `sent`. If the wamid write itself fails, an acceptance marker goes to `kv` — a different
+system from the one that just failed — and the sender checks that marker before every send. It is
+never cleaned up: a message id is used once, and an outbound send is not worth risking twice to
+save a key.
+
+---
+
+## D-26 — A missing variable is a missing variable wherever it lives
+
+**Status: DECIDED (forced by a review finding)** · 2026-08-16
+
+`resolveParameters` reports gaps two ways: `missing` (body positions) and `missingKeys` (every
+gap, named). The snapshot passed `missing` to the exclusion rule, so an unresolvable **header
+media** or **button URL** excluded nobody. The campaign reported a full audience, then failed
+every recipient at Meta, one send at a time, for a condition knowable at build time for free.
+
+`ExclusionCandidate.missingVariables` now takes the keys. The exclusion breakdown gains nothing it
+did not have; what it gains is being right.
+
+---
+
+## D-27 — A rebuild retires the snapshot it replaces
+
+**Status: DECIDED** · 2026-08-16
+
+Found while fixing D-28. Building a campaign twice is ordinary — fix a mapping, swap a template,
+widen a view — and the second build inherited the first one's rows. Their numbers still counted as
+taken by `findExistingPhones`, so **every person was excluded as a `duplicate` of their own row
+from the previous build**, and the campaign reported an audience of nobody with a reason that made
+no sense.
+
+`build` now retires the previous snapshot first: `PENDING`, `CLAIMED` and `EXCLUDED` rows become
+`SKIPPED` with `errorCode: SNAPSHOT_REBUILT`, and the duplicate detector ignores retired rows.
+They are retired rather than deleted because hard deletes live in the erasure routine alone (D-21)
+and a recipient row is the record of who a campaign was going to message. `upsertRecipients`
+writes over any retired row whose person is still in the audience, so a rebuilt campaign keeps one
+row per person showing the current decision.
+
+---
+
+## D-28 — Editing what a campaign was built from unbuilds it
+
+**Status: DECIDED (forced by a review finding)** · 2026-08-16
+
+`update` accepted edits on a `ready` campaign and left it ready. A `ready` campaign holds
+parameters *frozen against one template for one set of people* (FR-CAM-2), so changing
+`templateId` underneath it meant `launch` would fill the new template's placeholders with the old
+template's values — silently, because every field involved is present and valid.
+
+Changing any of `templateId`, `accountId`, `audienceDefinition` or `variableMapping` now sends the
+campaign back to `draft` through `transitionCampaign`, and it must be rebuilt before it can
+launch. Renaming a campaign or moving its `scheduledAt` touches nothing the audience was derived
+from, so those edits leave a built campaign built.
+
+---
+
+## D-29 — The lanes divide the ceiling; they do not each get one
+
+**Status: DECIDED (forced by a review finding)** · 2026-08-16
+
+`laneRate` computed each lane independently, each with its own floor. At `throttlePerSecond: 3`
+the interactive floor returned 5 and the campaign floor 1.8 — 6.8/s handed out against a ceiling
+of 3, by the module whose entire purpose is holding that ceiling (AR-12).
+
+The two lanes now sum to exactly `throttlePerSecond`. Interactive is served first, as AR-19
+requires, but only up to what is left after a small campaign floor, so priority never becomes
+starvation in either direction. A floor is a preference; the account's ceiling is not.
+
+---
+
+## D-30 — A status that beat its message is retried, not logged
+
+**Status: DECIDED (forced by a review finding)** · 2026-08-16
+
+`ORPHAN_GRACE_MS` exists because Meta's webhook can beat the response to our own POST. The
+processor computed it, logged `retryable: true`, and then marked the webhook event `PROCESSED`
+anyway — so the status was dropped and its message reported `accepted` for ever. A window whose
+verdict changes nothing is not a window.
+
+Orphans inside the grace window are now re-enqueued to this same function after 30 seconds,
+carrying `orphanAttempt`, up to three times — which fits inside the five-minute window, so the cap
+and the window agree about when a race becomes a fact. The event is marked `PROCESSED` only if
+everything in it was applied or handed on; if the requeue itself fails, the event is marked
+`FAILED` so the redrive can find it.
+
+---
+
+## D-31 — One failed probe is not a broken account
+
+**Status: DECIDED (forced by a review finding)** · 2026-08-16
+
+The hourly health check set `ACCOUNT_STATUS.ERROR` on any probe failure, and the policy gate reads
+`ERROR` as *send nothing*. So a single refused connection to Meta's Graph API silenced a working
+number until the next hour's check — an outage manufactured by our own monitoring.
+
+A transient failure (429, 5xx, network) now leaves the status alone and records the detail with a
+counter; three consecutive transient failures, or any credential rejection, stops the account. A
+rejected credential is a fact about the account; a 5xx is a fact about the minute.
+
+---
+
+## D-32 — One account's failure may not cancel the workspace's sweep
+
+**Status: DECIDED (forced by a review finding)** · 2026-08-16
+
+The health check's per-account loop had an unguarded `await` in it, and the checks that unstick the
+*whole workspace* — stuck messages, stale campaign claims, failed webhook events — ran after that
+loop. So a Core API blip while writing one account's tier window meant none of them ran, and every
+stuck message stayed stuck for another hour.
+
+Each account is now checked inside its own boundary; a failure is counted, logged against that
+account, and the sweep continues.
+
+---
+
+## D-33 — A cap that reads as a result is worse than a slow sweep
+
+**Status: DECIDED (forced by a review finding)** · 2026-08-16
+
+The window sweeper processed one batch of 60 per 15-minute run. Above 60 expiries a quarter hour
+the backlog grew for ever, and because each run reported "swept 60" it looked healthy the whole
+way.
+
+The sweep now drains up to `MAX_SWEEP_PASSES` batches — 1 200 threads a run — and a run that
+reaches that limit returns `truncated: true`, counts a metric and logs a warning. The cap remains,
+because a 60-second budget is a real constraint; what changes is that hitting it is *visible*.
+This is the general rule the review kept finding exceptions to: **a bounded operation must say
+when the bound was reached.**

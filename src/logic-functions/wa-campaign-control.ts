@@ -43,6 +43,7 @@ import {
   countRecipients,
   listRecipients,
   patchRecipients,
+  retirePreviousSnapshot,
 } from '../server/repositories/campaign-recipients';
 import {
   createCampaign,
@@ -150,6 +151,41 @@ export const templateRefusal = (
 
   return null;
 };
+
+/**
+ * The fields a snapshot is built *from* (specs/07 §3).
+ *
+ * Editing any of them makes an existing build a description of something that
+ * no longer exists — most sharply the template, whose placeholders the frozen
+ * parameters were resolved against.
+ */
+export const SNAPSHOT_DEFINING_FIELDS = [
+  'templateId',
+  'accountId',
+  'audienceDefinition',
+  'variableMapping',
+] as const;
+
+/**
+ * Which snapshot-defining fields this edit touches, if the campaign is built.
+ *
+ * Empty means the edit is safe to apply in place: a `draft` has no snapshot to
+ * invalidate, and renaming a campaign or moving its `scheduledAt` changes
+ * nothing the audience was derived from.
+ *
+ * Non-empty means the campaign goes back to `draft` and must be rebuilt before
+ * it can launch. It used to be applied silently, which left a `ready` campaign
+ * holding parameters resolved against the template it *used* to have — so a
+ * launch would fill the new template's placeholders with the old one's values,
+ * with every field involved present and superficially valid (D-28).
+ */
+export const snapshotInvalidatedBy = (
+  body: Record<string, unknown>,
+  status: CampaignStatus,
+): string[] =>
+  status !== CAMPAIGN_STATUS.READY
+    ? []
+    : SNAPSHOT_DEFINING_FIELDS.filter((field) => body[field] !== undefined);
 
 export type LaunchGate =
   | { allowed: true; warning: string | null }
@@ -574,6 +610,23 @@ export const handler = async (
           if (refusal !== null) return new Response({ error: refusal }, { status: 400 });
         }
 
+        const invalidated = snapshotInvalidatedBy(
+          body,
+          (campaign.status ?? CAMPAIGN_STATUS.DRAFT) as CampaignStatus,
+        );
+
+        if (invalidated.length > 0) {
+          const reopened = await transitionCampaign({
+            campaign,
+            to: CAMPAIGN_STATUS.DRAFT,
+            reason: 'edited_after_build',
+            actorId: caller.workspaceMemberId,
+            details: { changed: invalidated },
+          });
+
+          if (!reopened.ok) return new Response({ error: reopened.reason }, { status: 409 });
+        }
+
         await patchCampaign(campaign.id, {
           ...(body.name === undefined ? {} : { name: body.name.trim() }),
           ...(body.templateId === undefined ? {} : { templateId: body.templateId }),
@@ -659,6 +712,20 @@ export const handler = async (
         });
 
         if (!moved.ok) return new Response({ error: moved.reason }, { status: 409 });
+
+        /**
+         * Anything the previous build wrote is retired before this one starts.
+         *
+         * Rebuilding is ordinary — fix a mapping, swap the template, widen the
+         * view — and without this the old rows stayed. Their numbers still
+         * counted as taken, so the second build excluded every single person as
+         * a `duplicate` of their own row from the first, and the campaign
+         * reported an audience of nobody with a reason that made no sense
+         * (D-27).
+         */
+        const retired = await retirePreviousSnapshot(campaign.id);
+
+        if (retired > 0) log.info('wa.campaign.snapshot_retired', { retired });
 
         const landed = await enqueue({
           logicFunctionUniversalIdentifier: LF_CAMPAIGN_SNAPSHOT,

@@ -224,6 +224,34 @@ export const processMedia = async (
       }
     }
 
+    /**
+     * The ceiling again, this time against the bytes we actually received.
+     *
+     * The check before the download trusts Meta's declared `file_size`, which
+     * is absent on some payloads and merely advisory on the rest — so a file
+     * over the limit was deferred only if Meta had said how big it was. The
+     * policy is about what lands in workspace storage (D-8), and that is this
+     * number, not that one (D-46).
+     */
+    if (payload.force !== true && download.buffer.length > ceiling) {
+      await patchMessage(message.id, {
+        mediaMeta: {
+          ...meta,
+          fileSize: download.buffer.length,
+          deferred: true,
+        } as Record<string, unknown>,
+      });
+
+      count(METRIC.MEDIA_DEFERRED);
+      log.info('wa.media.deferred', {
+        fileSize: download.buffer.length,
+        declaredSize: meta.fileSize ?? null,
+        ceiling,
+      });
+
+      return { outcome: 'deferred', reason: 'over size ceiling once downloaded' };
+    }
+
     const storedFilename = storageFilename(
       message.wamid ?? message.id,
       mimeType ?? download.mimeType,

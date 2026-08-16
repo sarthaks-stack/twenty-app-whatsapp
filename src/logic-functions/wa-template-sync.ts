@@ -25,7 +25,7 @@ import {
   listAccounts,
   type WhatsappAccountRecord,
 } from '../server/repositories/accounts';
-import { nodesOf, query } from '../server/repositories/base';
+import { pageOf, query } from '../server/repositories/base';
 import {
   createTemplateRecord,
   findTemplateByMetaId,
@@ -186,6 +186,12 @@ const upsertTemplate = async (
   return 'updated';
 };
 
+type LocalTemplate = { id: string; metaTemplateId?: string | null; status?: string | null };
+
+/** A WABA may hold thousands of templates; one page of 500 is not the set. */
+const LOCAL_TEMPLATE_PAGE = 200;
+const MAX_LOCAL_TEMPLATE_PAGES = 60;
+
 /**
  * Templates the CRM knows about that Meta no longer lists.
  *
@@ -198,20 +204,60 @@ const disableDisappeared = async (
   accountId: string,
   seen: Set<string>,
 ): Promise<number> => {
-  const result = await query(
-    (client) =>
-      client.query({
-        whatsappTemplates: {
-          __args: { filter: { accountId: { eq: accountId } }, first: 500 },
-          edges: { node: { id: true, metaTemplateId: true, status: true } },
-        },
-      }),
-    'templates.listForDisappearance',
-  );
+  /**
+   * Every local template is examined, not the first page of them.
+   *
+   * A single `first: 500` meant that past 500 templates a genuinely deleted one
+   * was never noticed: it stayed `ACTIVE` and publishable locally, and the
+   * campaign that chose it failed at Meta for every recipient. Meta allows
+   * thousands per WABA, so the cap was reachable by an ordinary business
+   * rather than an extreme one (D-49).
+   */
+  const local: LocalTemplate[] = [];
+  let after: string | null = null;
 
-  const gone = nodesOf<{ id: string; metaTemplateId?: string | null; status?: string | null }>(
-    result.whatsappTemplates,
-  ).filter(
+  for (let page = 0; page < MAX_LOCAL_TEMPLATE_PAGES; page += 1) {
+    const result = await query(
+      (client) =>
+        client.query({
+          whatsappTemplates: {
+            __args: {
+              filter: { accountId: { eq: accountId } },
+              orderBy: [{ id: 'AscNullsFirst' }],
+              first: LOCAL_TEMPLATE_PAGE,
+              ...(after === null ? {} : { after }),
+            },
+            edges: { node: { id: true, metaTemplateId: true, status: true } },
+            pageInfo: { hasNextPage: true, endCursor: true },
+          },
+        }),
+      'templates.listForDisappearance',
+    );
+
+    const { items, nextCursor } = pageOf<LocalTemplate>(result.whatsappTemplates);
+
+    local.push(...items);
+
+    if (nextCursor === null) break;
+
+    after = nextCursor;
+
+    /**
+     * Reaching the page cap means the local set was not fully read — and
+     * "not fully read" is indistinguishable from "not present" to the filter
+     * below, which would disable working templates. So it stops instead.
+     */
+    if (page === MAX_LOCAL_TEMPLATE_PAGES - 1) {
+      logger.warn('wa.template.disappearance_scan_truncated', {
+        accountId,
+        scanned: local.length,
+      });
+
+      return 0;
+    }
+  }
+
+  const gone = local.filter(
     (template) =>
       typeof template.metaTemplateId === 'string' &&
       !seen.has(template.metaTemplateId) &&

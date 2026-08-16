@@ -298,6 +298,27 @@ export const handler = async (
           return new Response({ error: 'Could not create the account record' }, { status: 500 });
         }
 
+        /**
+         * A number can move between WABAs, and reconnecting it under a new one
+         * used to leave the record pointing at the old WABA while the routing
+         * claim pointed at the new one. Template sync reads the record and
+         * webhook routing reads the claim, so the two would have disagreed
+         * about which business this number belongs to — silently, and in the
+         * direction where every template is stale (D-48).
+         */
+        const movedWaba =
+          existing !== null && typeof existing.wabaId === 'string' && existing.wabaId !== wabaId;
+
+        if (movedWaba) {
+          log.warn('wa.account.waba_changed', {
+            accountId: account.id,
+            from: existing!.wabaId,
+            to: wabaId,
+          });
+
+          await patchAccount(account.id, { wabaId });
+        }
+
         // The claim goes down before the probe: a token that fails today must
         // not leave a number whose webhooks are discarded as unclaimed.
         await writeClaims({ workspaceId, phoneNumberId, wabaId });
@@ -329,7 +350,13 @@ export const handler = async (
           action: AUDIT_ACTION.ACCOUNT_CONNECT,
           actorId: caller.workspaceMemberId,
           subject: { accountId: account.id },
-          details: { phoneNumberId, wabaId, probeOk: probe.ok, subscribed },
+          details: {
+            phoneNumberId,
+            wabaId,
+            probeOk: probe.ok,
+            subscribed,
+            ...(movedWaba ? { previousWabaId: existing!.wabaId } : {}),
+          },
         });
 
         return new Response(

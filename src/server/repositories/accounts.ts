@@ -152,6 +152,8 @@ export const listAccounts = async (
 
 export type AccountPatch = {
   status?: AccountStatus;
+  /** Only on reconnect, when a number has moved to a different WABA (D-48). */
+  wabaId?: string;
   statusDetail?: string | null;
   qualityRating?: Quality;
   messagingLimitTier?: MessagingTier;

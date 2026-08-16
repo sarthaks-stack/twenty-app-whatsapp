@@ -968,3 +968,33 @@ described error, which means the throw would land *inside a catch block* and rep
 error with a `TypeError` about logging it. Serialisation now degrades to a line naming the event
 with `contextUnserialisable: true`, because a log line that loses its context is recoverable and
 one that replaces an exception is not.
+
+---
+
+## D-46 … D-49 — The last of the review, verified one at a time
+
+**Status: DECIDED** · 2026-08-16
+
+- **D-46 — the media ceiling is measured on the bytes that arrive.** The auto-download limit was
+  checked against Meta's *declared* `file_size`, which is absent on some payloads and advisory on
+  the rest — so an oversized file was deferred only if Meta had said how big it was. The policy is
+  about what lands in workspace storage (D-8), so it is now also checked against the downloaded
+  buffer, before the upload.
+- **D-47 — a partial component update is folded in, not substituted.** `components_update` sends
+  only the changed parts: an edit to the body arrives as `message_template_element` alone.
+  Replacing the stored array with it dropped the template's header, footer and buttons locally,
+  after which the derived spec said there was no header, the support check called the template
+  usable, and the next send built a payload Meta answers with 132000 for every recipient. The same
+  phantom change also tripped the variable-count rule and unpublished a template nobody had edited
+  that way.
+- **D-48 — a number that moves WABA moves the record with it.** Reconnecting a phone number under
+  a different WABA wrote the new id into the routing claim and left the old one on the account
+  record. Template sync reads the record and webhook routing reads the claim, so the two disagreed
+  about which business the number belonged to — in the direction where every template is stale.
+  The record is updated and the change is logged and audited, rather than being either silent or
+  refused.
+- **D-49 — the disappearance scan reads every local template.** It compared Meta's listing against
+  one page of 500 local rows, so past 500 a genuinely deleted template was never noticed: it stayed
+  `ACTIVE` and publishable, and the campaign that chose it failed at Meta for everyone. It now
+  pages to exhaustion — and if it *cannot* finish, it disables nothing, because a partial read is
+  indistinguishable from "deleted" to the comparison that follows.

@@ -25,6 +25,7 @@ import {
   templateCategoryFor,
   templateStatusFor,
 } from './wa-template-sync';
+import { componentsFromUpdate, mergeComponents } from './wa-template-event';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -320,5 +321,79 @@ describe('submitting a template', () => {
     expect(submitCountKey('WABA1', new Date('2026-08-16T15:00:00.000Z'))).not.toBe(
       submitCountKey('WABA1', at),
     );
+  });
+});
+
+
+/**
+ * D-47. `components_update` is a **partial** payload: an edit to the body
+ * arrives as `message_template_element` on its own. Replacing the stored array
+ * with it dropped the template's header, footer and buttons locally — after
+ * which the derived spec said there was no header, the support check called it
+ * usable, and the next send built a payload Meta answers with 132000 for every
+ * recipient.
+ */
+describe('folding a partial component update into what is stored', () => {
+  const stored = [
+    { type: 'HEADER', format: 'IMAGE' },
+    { type: 'BODY', text: 'Olá {{1}}' },
+    { type: 'FOOTER', text: 'Pixel' },
+    { type: 'BUTTONS', buttons: [{ type: 'URL', text: 'Abrir', url: 'https://x/{{1}}' }] },
+  ];
+
+  it('keeps the components the update did not mention', () => {
+    const changed = componentsFromUpdate({ message_template_element: 'Olá {{1}}, tudo bem?' })!;
+    const merged = mergeComponents(stored, changed);
+
+    expect(merged.map((c) => (c as { type: string }).type)).toEqual([
+      'HEADER',
+      'BODY',
+      'FOOTER',
+      'BUTTONS',
+    ]);
+    expect(merged[0]).toEqual({ type: 'HEADER', format: 'IMAGE' });
+    expect(merged[1]).toEqual({ type: 'BODY', text: 'Olá {{1}}, tudo bem?' });
+  });
+
+  it('replaces the one it does mention, in place', () => {
+    const merged = mergeComponents(stored, [{ type: 'FOOTER', text: 'Pixel Infinito' }]);
+
+    expect(merged[2]).toEqual({ type: 'FOOTER', text: 'Pixel Infinito' });
+    expect(merged).toHaveLength(4);
+  });
+
+  it('appends a component that was not there before', () => {
+    const merged = mergeComponents(
+      [{ type: 'BODY', text: 'Olá' }],
+      [{ type: 'FOOTER', text: 'Pixel' }],
+    );
+
+    expect(merged).toEqual([
+      { type: 'BODY', text: 'Olá' },
+      { type: 'FOOTER', text: 'Pixel' },
+    ]);
+  });
+
+  it('matches types case-insensitively, as Meta sends them', () => {
+    const merged = mergeComponents([{ type: 'body', text: 'antigo' }], [
+      { type: 'BODY', text: 'novo' },
+    ]);
+
+    expect(merged).toEqual([{ type: 'BODY', text: 'novo' }]);
+  });
+
+  it('copes with nothing stored yet', () => {
+    expect(mergeComponents(null, [{ type: 'BODY', text: 'Olá' }])).toEqual([
+      { type: 'BODY', text: 'Olá' },
+    ]);
+  });
+
+  /** A header edit still arrives as a title, and must not become a second header. */
+  it('does not duplicate a header when the title changes', () => {
+    const changed = componentsFromUpdate({ message_template_title: 'Nova manchete' })!;
+    const merged = mergeComponents([{ type: 'HEADER', format: 'TEXT', text: 'Antiga' }], changed);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ type: 'HEADER', text: 'Nova manchete' });
   });
 });

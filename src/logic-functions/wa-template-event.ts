@@ -109,6 +109,41 @@ export const componentsFromUpdate = (value: MetaChangeValue): unknown[] | null =
   return parts.length === 0 ? null : parts;
 };
 
+/**
+ * Folds the changed components into the ones already stored.
+ *
+ * `components_update` is a **partial** payload: an edit to the body arrives as
+ * `message_template_element` alone. Replacing the stored array with it dropped
+ * the template's header, footer and buttons locally — after which the derived
+ * spec said the template had no header, `assessSupport` called it usable, and
+ * the next send built a payload missing those parameters, which Meta answers
+ * with 132000 for every recipient. The same phantom change also tripped the
+ * "variable count changed" rule and unpublished a template nobody had touched
+ * that way (D-47).
+ *
+ * Order follows the stored array, so a component keeps its position; a type
+ * that was not there before is appended.
+ */
+export const mergeComponents = (
+  existing: unknown[] | null | undefined,
+  incoming: unknown[],
+): unknown[] => {
+  const typeOf = (component: unknown): string =>
+    String((component as { type?: unknown } | null)?.type ?? '').toUpperCase();
+
+  const changed = new Map(incoming.map((component) => [typeOf(component), component]));
+  const merged: unknown[] = [];
+
+  for (const component of Array.isArray(existing) ? existing : []) {
+    const type = typeOf(component);
+
+    merged.push(changed.get(type) ?? component);
+    changed.delete(type);
+  }
+
+  return [...merged, ...changed.values()];
+};
+
 export const processTemplateEvent = async (
   payload: TemplateEventPayload,
 ): Promise<TemplateEventResult> => {
@@ -204,9 +239,12 @@ export const processTemplateEvent = async (
   }
 
   if (payload.field === 'message_template_components_update') {
-    const components = componentsFromUpdate(value);
+    const changed = componentsFromUpdate(value);
 
-    if (components !== null) {
+    if (changed !== null) {
+      const stored = asJson<{ components?: unknown[] }>(template.components, {}).components;
+      const components = mergeComponents(stored, changed);
+
       const spec = deriveVariableSpec(components as Parameters<typeof deriveVariableSpec>[0]);
       const support = assessSupport(components as Parameters<typeof assessSupport>[0]);
 

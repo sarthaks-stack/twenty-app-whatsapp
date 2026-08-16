@@ -20,6 +20,14 @@
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "capture:reredact": "node --env-file=.dev.vars tools/webhook-capture/reredact.ts"
   },
+  "frontComponentSharedDependencies": [
+    "react",
+    "react-dom/client",
+    "twenty-ui/input",
+    "twenty-ui/data-display",
+    "twenty-ui/icon",
+    "twenty-ui/theme-constants"
+  ],
   "devDependencies": {
     "@types/node": "^24.7.2",
     "@types/react": "^19.0.0",

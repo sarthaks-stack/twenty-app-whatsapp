@@ -146,6 +146,36 @@ describe('downloading a workspace file', () => {
     });
   });
 
+  /**
+   * D-45. This read sits in the send path — a campaign's header image is
+   * fetched before the template goes out — so a stalled connection used to
+   * hold the sender until the platform's own timeout, with every message
+   * behind it waiting.
+   */
+  it('passes an abort signal so a stalled read cannot hold the sender', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(response([1], 'image/png'));
+
+    await downloadWorkspaceFile(
+      { path: 'files/x.png' },
+      { fetchImpl: fetchImpl as unknown as typeof globalThis.fetch },
+    );
+
+    expect(fetchImpl.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('turns an aborted read into a WorkspaceFileError like any other failure', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+
+    await expect(
+      downloadWorkspaceFile(
+        { path: 'files/slow.png' },
+        { fetchImpl: fetchImpl as unknown as typeof globalThis.fetch },
+      ),
+    ).rejects.toBeInstanceOf(WorkspaceFileError);
+  });
+
   it('turns a non-200 into a WorkspaceFileError naming the status', async () => {
     const fetchImpl = vi
       .fn()

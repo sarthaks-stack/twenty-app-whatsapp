@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { THREAD_STATUS } from '../domain/constants';
 import { chunk, isRetryableCoreError, isUniqueViolation, MAX_BATCH } from './batching';
 import { DEFAULTS, boolVar, config, forAccount, intVar, listVar, numberVar } from './config';
-import { REDACTED, describeError, redactForLog } from './logger';
+import { REDACTED, describeError, logger, redactForLog } from './logger';
 import { splitProfileName, toLinkCandidates } from './matching';
 import { metricKey } from './metrics';
 import { statusAfterInbound } from './threads';
@@ -17,6 +17,44 @@ beforeEach(() => {
 
 afterEach(() => {
   process.env = { ...ORIGINAL_ENV };
+});
+
+/**
+ * D-45. The context most likely to hold something unserialisable is a
+ * described error — which means the throw would land *inside a catch block*
+ * and replace the real error with a TypeError about logging it.
+ */
+describe('logging something that cannot be serialised', () => {
+  const captured: string[] = [];
+  const original = console.error;
+
+  beforeEach(() => {
+    captured.length = 0;
+    console.error = (line: string) => void captured.push(line);
+    process.env.WA_LOG_LEVEL = 'debug';
+  });
+
+  afterEach(() => {
+    console.error = original;
+  });
+
+  it('does not throw on a BigInt', () => {
+    expect(() => logger.error('wa.test', { size: BigInt(9) })).not.toThrow();
+    expect(captured[0]).toContain('contextUnserialisable');
+  });
+
+  it('does not throw on a circular structure', () => {
+    const loop: Record<string, unknown> = { name: 'x' };
+    loop.self = loop;
+
+    expect(() => logger.error('wa.test', { loop })).not.toThrow();
+  });
+
+  it('still names the event when the context is dropped', () => {
+    logger.error('wa.send.failed', { size: BigInt(1) });
+
+    expect(captured[0]).toContain('wa.send.failed');
+  });
 });
 
 describe('logger redaction', () => {

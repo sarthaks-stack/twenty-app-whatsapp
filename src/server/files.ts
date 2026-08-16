@@ -90,12 +90,23 @@ export type FetchLike = typeof globalThis.fetch;
 
 export type DownloadedFile = { buffer: Buffer; mimeType: string };
 
+/**
+ * A workspace file read sits in the send path — a campaign's header image is
+ * fetched before the template goes out — so it needs its own deadline. Without
+ * one, a stalled connection held the sender until the platform's function
+ * timeout, and every message behind it waited (D-45).
+ */
+export const FILE_TIMEOUT_MS = 30_000;
+
 export const downloadWorkspaceFile = async (
   handle: WorkspaceFileHandle,
   { fetchImpl = globalThis.fetch }: { fetchImpl?: FetchLike } = {},
 ): Promise<DownloadedFile> => {
   const url = resolveFileUrl(handle);
   const token = process.env.TWENTY_APP_ACCESS_TOKEN;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FILE_TIMEOUT_MS);
 
   try {
     const response = await fetchImpl(url, {
@@ -104,6 +115,7 @@ export const downloadWorkspaceFile = async (
         typeof token === 'string' && token.length > 0
           ? { Authorization: `Bearer ${token}` }
           : {},
+      signal: controller.signal,
     });
 
     if (!response.ok) {
@@ -112,6 +124,8 @@ export const downloadWorkspaceFile = async (
       );
     }
 
+    // The body read stays inside the deadline; a stalled download is the case
+    // the deadline exists for.
     return {
       buffer: Buffer.from(await response.arrayBuffer()),
       mimeType: response.headers.get('content-type') ?? 'application/octet-stream',
@@ -121,6 +135,12 @@ export const downloadWorkspaceFile = async (
 
     logger.warn('files.download_failed', describeError(error));
 
-    throw new WorkspaceFileError(`Could not read the file: ${String(error)}`);
+    throw new WorkspaceFileError(
+      controller.signal.aborted
+        ? `Reading the file timed out after ${FILE_TIMEOUT_MS} ms`
+        : `Could not read the file: ${String(error)}`,
+    );
+  } finally {
+    clearTimeout(timer);
   }
 };

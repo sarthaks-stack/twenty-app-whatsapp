@@ -86,12 +86,32 @@ export type Logger = {
 const emit = (level: LogLevel, event: string, context: LogContext): void => {
   if (LOG_LEVEL[level] < configuredLevel()) return;
 
-  const line = JSON.stringify({
-    ts: new Date().toISOString(),
-    level,
-    event,
-    ...(redactForLog(context) as Record<string, unknown>),
-  });
+  /**
+   * Serialisation must not throw.
+   *
+   * `JSON.stringify` rejects a BigInt outright and dies on a circular
+   * structure or a `toJSON` that throws — and the context most likely to
+   * contain one is a described error, which means the failure would land
+   * *inside a catch block* and replace the real error with a TypeError about
+   * logging it (D-45). The line degrades instead: the event still gets out.
+   */
+  let line: string;
+
+  try {
+    line = JSON.stringify({
+      ts: new Date().toISOString(),
+      level,
+      event,
+      ...(redactForLog(context) as Record<string, unknown>),
+    });
+  } catch {
+    line = JSON.stringify({
+      ts: new Date().toISOString(),
+      level,
+      event,
+      contextUnserialisable: true,
+    });
+  }
 
   // eslint-disable-next-line no-console
   if (level === 'error') console.error(line);

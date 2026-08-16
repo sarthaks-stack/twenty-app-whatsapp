@@ -947,3 +947,24 @@ get the right boundary. One hour of skew for Angola, more elsewhere — and invi
 because the audience simply comes back slightly different from the one the admin saw in the view.
 That is the same class of error D-23 exists to prevent, arriving through arithmetic instead of a
 missing operand.
+
+---
+
+## D-45 — Two things that must not hang or throw: a file read and a log line
+
+**Status: DECIDED (forced by review findings)** · 2026-08-16
+
+Both are the same shape as D-41, in the parts of the app that are supposed to be boring.
+
+`downloadWorkspaceFile` had no deadline. It sits in the send path — a campaign's header image is
+read before the template goes out — so a stalled connection held the sender until the platform's
+own function timeout, with every message behind it waiting. It now carries a 30-second
+`AbortSignal` that covers the body read as well as the response, and reports a timeout as a
+timeout.
+
+`logger.emit` called `JSON.stringify` unguarded. That throws on a `BigInt`, on a circular
+structure, and on any `toJSON` that throws — and the context most likely to contain one is a
+described error, which means the throw would land *inside a catch block* and replace the real
+error with a `TypeError` about logging it. Serialisation now degrades to a line naming the event
+with `contextUnserialisable: true`, because a log line that loses its context is recoverable and
+one that replaces an exception is not.

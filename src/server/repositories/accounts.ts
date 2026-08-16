@@ -3,6 +3,7 @@ import type {
   MessagingTier,
   Quality,
 } from '../../domain/constants';
+import { logger } from '../logger';
 import { nodesOf, query } from './base';
 
 /**
@@ -130,6 +131,9 @@ export const findAccountById = async (id: string): Promise<WhatsappAccountRecord
   return nodesOf<WhatsappAccountRecord>(result.whatsappAccounts)[0] ?? null;
 };
 
+/** More numbers than this in one workspace is not a shape this app is built for. */
+const ACCOUNT_PAGE = 100;
+
 export const listAccounts = async (
   statuses?: AccountStatus[],
 ): Promise<WhatsappAccountRecord[]> => {
@@ -138,14 +142,26 @@ export const listAccounts = async (
       client.query({
         whatsappAccounts: {
           __args: {
-            first: 100,
+            orderBy: [{ createdAt: 'AscNullsFirst' }],
+            first: ACCOUNT_PAGE,
             ...(statuses === undefined ? {} : { filter: { status: { in: statuses } } }),
           },
           edges: { node: ACCOUNT_FIELDS },
+          pageInfo: { hasNextPage: true },
         },
       }),
     'accounts.list',
   );
+
+  /**
+   * One page, deliberately — a workspace with a hundred connected numbers is
+   * not a shape this app is built for, and paging here would add a loop to
+   * every health check to serve nobody. But the hourly sweep skipping accounts
+   * in silence is the failure D-33 is about, so a full page says so.
+   */
+  if (result.whatsappAccounts?.pageInfo?.hasNextPage === true) {
+    logger.warn('accounts.list_truncated', { limit: ACCOUNT_PAGE });
+  }
 
   return nodesOf(result.whatsappAccounts) as WhatsappAccountRecord[];
 };

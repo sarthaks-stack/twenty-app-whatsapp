@@ -326,7 +326,7 @@ only; reaching them live needs an account at its tier ceiling.
 
 | # | Component | Status | Requirements |
 |---|---|---|---|
-| 9.0 | **Probe P-6** — `column-reverse` anchoring in the sandbox, 200-message list, `twenty-ui` in a record widget | 🚫 **blocks 9.2–9.7** | D-7, R-3 |
+| 9.0 | **Probe P-6** — `column-reverse` anchoring in the sandbox, 200-message list, `twenty-ui` in a record widget | ✅ **answered 2026-08-16** — see specs/00 D-53 | D-7, R-3 |
 | 9.1 | `wa-inbox-feed-route` — the single aggregated data path | ✅ | D-6, FR-UI-4 |
 | 9.2 | `useFeed` hook, theming, i18n scaffolding | ✅ | D-6 |
 | 9.3 | `<ThreadView>` — list, bubbles, ticks, media, day separators | ✅ | FR-UI-1 |
@@ -375,7 +375,7 @@ Only P-1 has been answered. The rest still gate design decisions:
 | P-3 | Can the app role write `timelineActivity`? | 4.11 | downgrade FR-TL-1 to the WhatsApp tab |
 | P-4 | Does a soft-deleted row hold a unique index? | 10.4 | purge hard-destroys. *No longer gates campaigns: the snapshot upserts, so either answer is correct* |
 | P-5 | Can the Core API filter `additionalPhones`? | 4.8 | derived indexed array field |
-| P-6 | Front-component chat feasibility | 9.2–9.7 | UI tiers 2/3 |
+| P-6 | Front-component chat feasibility | — | ✅ **answered**: renders, but no scroll port, no measurement, and auth is blocked (D-53) |
 | P-7 | Row-level permission predicates | SEC-7 enforcement | route-level filtering, limitation documented |
 | P-8 | Does `cronTriggerSettings.pattern` accept a six-field (seconds) pattern? | 07 §10's 30 s freshness | one-minute ticks, ≤ 60 s freshness (as built) |
 

@@ -1060,3 +1060,77 @@ A third guard scans the component tree for literal `t('...')` keys the catalog
 does not define. Interpolated keys — `t(\`policy.${reason}\`)` — cannot be
 checked that way, and the catalog carries a row for every value the server can
 put in them.
+
+---
+
+## D-53 — Probe P-6: what the front-component sandbox actually does
+
+**Status: ANSWERED** · Measured 2026-08-16 against `twentycrm/twenty-app-dev:latest`,
+in a Person-record widget. Supersedes the guesses in specs/08 §1's preamble, several of which
+came from the platform documentation and are wrong.
+
+### Works
+
+| Capability | Result |
+|---|---|
+| Component renders in a record-page widget | ✅ |
+| `useTheme()` | ✅ — returns CSS variables (`var(--t-background-secondary)`) |
+| `useRecordId()` | ✅ — the Person id |
+| Inline styles | ✅ — layout, colour, alignment, radius all apply |
+| `twenty-ui` imports | ✅ resolve and render their text |
+| `flex-direction: column-reverse` | ✅ reverses paint order as expected |
+| `FileReader` | ✅ present — the docs say it does not exist |
+| `/rest/*` (Twenty's REST API) | ✅ |
+
+### Does not work
+
+| Capability | Result | Documented as |
+|---|---|---|
+| `getBoundingClientRect()` | **returns 0×0** | "✓ Works (up to 1 frame stale)" |
+| `localStorage` | **not defined** | "✓ Works (scoped & limited)" |
+| `CSS.supports` | **`CSS` is not defined** | — |
+| `ResizeObserver` / `IntersectionObserver` / `matchMedia` | not defined | ✗ throws — correct |
+| `canvas.getContext` | not a function | ✗ — correct |
+| `twenty-ui` component *styling* | renders unstyled — emotion classes do not apply | — |
+| `/s/*` logic-function routes | **403** — see below | — |
+
+### The two findings that change the design
+
+**1. A widget has no scroll port.** `overflow-y: auto` with `flex: 1 1 auto` produced
+`scrollHeight === clientHeight === 1337` and then `1364` after a row was added: the container
+grows to fit its content and the *page* scrolls. There is nothing to anchor, so D-7's
+`column-reverse` mechanism is neither confirmed nor refuted — it is not reachable. A chat that
+keeps its own scroll needs a height the widget can be given, and `100%`/flex is not it.
+
+Its companion, `getBoundingClientRect()` returning 0×0, means the widget cannot measure itself
+either. `InboxView` already fails towards the single-pane layout when the measurement is
+unusable, which is the right direction — but it will *always* take that branch.
+
+**2. `/s/*` routes answer 403 to every signed-in human, and always have.**
+
+The chain, in the order it was found:
+
+- `RestApiClient` from inside the worker reaches `/rest/people` (200) but not
+  `/s/whatsapp/feed` (403). So the sandbox and the token are fine.
+- The 403 body was ours: `{"error":"Could not verify permissions"}` — `auth.ts`'s catch.
+- The cause: `metadataClient().query({ getRoles: … })` fails with *"Entity performing the
+  request does not have permission"*. The app's role lacked `SystemPermissionFlag.ROLES`.
+  **Granted** — the same class of failure, and the same opaque sentence, as `UPLOAD_FILE`
+  before it.
+- With the flag, the lookup succeeds and the answer becomes
+  `{"error":"This action requires the WhatsApp agent role"}` — because
+  `getRoles.workspaceMembers[].userWorkspaceId` is **`null` for every member** on this version,
+  while the route event carries only `userWorkspaceId`. The join key `requireCaller` is built on
+  does not exist in the data.
+
+**Why nothing caught this.** Every live test of every route so far used an API key. An API key
+has no workspace membership, so `requireCaller` returns a machine caller and *returns before the
+role lookup*. The role map has therefore never been read in the life of this app. The first
+request from a signed-in human was the one that revealed it — which is exactly what a probe is
+for, and an argument for running one earlier than the plan did.
+
+**Open.** Resolving `userWorkspaceId` → role needs a source the app can read, and every
+candidate has been checked: the Core `workspaceMember` has `userId` but no `userWorkspaceId`;
+the metadata `WorkspaceMember` type declares `userWorkspaceId` and returns null; `currentUser`
+is `Forbidden` for an app token and would answer for the app rather than the caller. The fix is
+a decision about the security model, not a patch, and is recorded here rather than guessed at.

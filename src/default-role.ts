@@ -33,6 +33,17 @@ import { APP_DISPLAY_NAME, DEFAULT_ROLE_UNIVERSAL_IDENTIFIER } from 'src/constan
  * `canUpdateAllSettings` (which would also hand every handler the data model,
  * roles and billing) was not needed and would have been a poor trade for one
  * file upload.
+ *
+ * **`ROLES` is granted for the same reason, and it is what makes SEC-5 work at
+ * all.** `requireCaller` answers "may this person do this" by reading the role
+ * map, and without the flag that read fails with the same opaque sentence —
+ * so *every* route answered 403 to *every* real user while working perfectly
+ * for an API key, because an API key is a machine caller and never reaches the
+ * lookup. Found by probe P-6: the first request this app ever received from a
+ * signed-in human was the one that revealed it.
+ *
+ * It is a read of who holds which role. That is the minimum an app needs to
+ * enforce its own permissions, and much less than `canUpdateAllSettings`.
  */
 export default defineApplicationRole({
   universalIdentifier: DEFAULT_ROLE_UNIVERSAL_IDENTIFIER,
@@ -46,5 +57,6 @@ export default defineApplicationRole({
   permissionFlagUniversalIdentifiers: [
     SystemPermissionFlag.UPLOAD_FILE,
     SystemPermissionFlag.DOWNLOAD_FILE,
+    SystemPermissionFlag.ROLES,
   ],
 });

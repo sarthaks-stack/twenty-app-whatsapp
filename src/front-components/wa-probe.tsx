@@ -121,22 +121,36 @@ const WaProbe = () => {
     setTimeout(() => readScroll('depois de antigas'), 120);
   }, [readScroll]);
 
+  /**
+   * Three calls, not one, because the first answered 403 and one failure does
+   * not say *which* thing is broken. `/rest/people` is Twenty's own REST API,
+   * so it separates "this sandbox cannot make an authenticated request at all"
+   * from "our logic-function route refuses this caller".
+   */
   useEffect(() => {
     const client = new RestApiClient();
 
-    client
-      .get<Record<string, unknown>>('/s/whatsapp/feed', { query: { scope: 'bootstrap' } })
-      .then((body) => {
-        const account = body.account as { name?: string; status?: string } | null;
+    const attempt = async (label: string, run: () => Promise<unknown>): Promise<string> => {
+      try {
+        const body = await run();
 
-        setFeed(
-          `OK — conta "${account?.name ?? '—'}" (${account?.status ?? '—'}), ` +
-            `permissions=${JSON.stringify(body.permissions)}`,
-        );
-      })
-      .catch((error: unknown) => {
-        setFeed(`FALHA — ${error instanceof Error ? error.message : String(error)}`);
-      });
+        return `${label}=OK ${JSON.stringify(body).slice(0, 120)}`;
+      } catch (error) {
+        // The status alone does not say who refused. Twenty's own error body
+        // names the reason; ours would be `{"error": "..."}` from the route.
+        const detail = error as { status?: number; body?: unknown };
+
+        return `${label}=${detail?.status ?? '?'} ${JSON.stringify(detail?.body ?? null).slice(0, 200)}`;
+      }
+    };
+
+    void Promise.all([
+      attempt('feed', () =>
+        client.get('/s/whatsapp/feed', { query: { scope: 'bootstrap' } }),
+      ),
+      attempt('rest', () => client.get('/rest/people', { query: { limit: 1 } })),
+      attempt('post', () => client.post('/s/whatsapp/account', { action: 'list' })),
+    ]).then((lines) => setFeed(lines.join(' | ')));
   }, []);
 
   useEffect(() => {

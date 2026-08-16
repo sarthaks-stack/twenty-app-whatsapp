@@ -123,6 +123,31 @@ export const listCampaignsByStatus = async (
   return nodesOf<WhatsappCampaignRecord>(result.whatsappCampaigns);
 };
 
+/**
+ * The campaigns page's list (FR-CAM-10) — every status, newest first.
+ *
+ * Ordered by `createdAt` rather than `startedAt`: a draft has never started, and
+ * ordering on a column that is null for the campaign someone is in the middle of
+ * building would file it last.
+ */
+export const listCampaigns = async (limit = 50): Promise<WhatsappCampaignRecord[]> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappCampaigns: {
+          __args: {
+            orderBy: [{ createdAt: 'DescNullsLast' }],
+            first: limit,
+          },
+          edges: { node: CAMPAIGN_FIELDS },
+        },
+      }),
+    'campaigns.list',
+  );
+
+  return nodesOf<WhatsappCampaignRecord>(result.whatsappCampaigns);
+};
+
 /** Campaigns due to start: `SCHEDULED` with a time that has passed. */
 export const listDueCampaigns = async (
   now: Date,

@@ -36,25 +36,61 @@ five surfaces share one cached bundle.
 | Query | Values |
 |---|---|
 | `scope` | `thread` · `inbox` · `campaign` · `bootstrap` |
-| `id` | thread id, campaign id, or person id (for `scope=thread&by=person`) |
+| `id` | thread id, person id (with `by=person`), or campaign id; **omitted** on `scope=campaign` means the campaign *list* |
+| `by` | thread only: `thread` (default) · `person` |
 | `since` | ISO-8601 cursor; omit for a full first page |
-| `filter` | inbox only: `mine` · `unassigned` · `all` · `campaign_replies` · `window_expiring` |
-| `before` | thread only: pagination cursor for older messages |
+| `filter` | inbox only: `mine` · `unassigned` · `all` · `campaign_replies` · `window_expiring` · `closed` |
+| `before` | opaque cursor: thread — older messages; inbox — the next page of rows |
+| `limit` | 1…200, default 50 |
+
+Every unrecognised value is **refused with a 400**, never defaulted. A typo in `filter`
+falling back to `all` would show a rep every conversation in the workspace under a heading
+that said "Minhas" — the same class of failure as D-34.
+
+`closed` is not in the original table. `close` exists so a handled conversation leaves the
+list, which means the other five filters exclude closed threads and nothing brings one back;
+a state with no way out of it is a bug, so the sixth filter is the way back.
 
 Response envelope, identical for every scope:
 
 ```jsonc
 {
-  "serverTime": "2026-08-15T09:12:03.114Z",     // the next `since`
-  "account": { "id": "...", "qualityRating": "green", "isTestAccount": false, "status": "connected" },
+  "serverTime": "2026-08-15T09:12:03.114Z",     // the clock when the read started
+  "nextSince":  "2026-08-15T09:12:03.114Z",     // what to send back as `since`
+  "truncated": true,                            // optional: a burst did not fit; poll again now
+  "scope": "thread",
+  "account": { "id": "...", "qualityRating": "GREEN", "isTestAccount": false, "status": "CONNECTED" },
   "thread":  { /* thread fields incl. serviceWindowExpiresAt, windowState, status, person */ },
   "messages": [ /* delta or page, newest first */ ],
+  "olderCursor": "...",                         // thread: pass as `before` for the page above
   "threads":  [ /* inbox rows */ ],
+  "nextCursor": "...",                          // inbox: pass as `before` for the next page
   "campaign": { /* campaign + counters */ },
+  "campaigns": [ /* the list, newest first */ ],
+  "templates": [ /* published + usable; full loads only, never on a delta */ ],
   "permissions": { "canSend": true, "canManageTemplates": false, "canManageCampaigns": false },
-  "policy": { "allowed": true, "reason": null, "warnings": ["window_expiring_soon"] }
+  "policy": { "allowed": true, "reason": null, "warnings": ["WINDOW_EXPIRING_SOON"] }
 }
 ```
+
+`serverTime` and `nextSince` are separate because they are not always the same value. The
+clock is captured **before** the first query — taking it afterwards would skip every row
+written while the queries ran — and `nextSince` normally equals it. When a delta hits its
+200-row ceiling, `nextSince` is instead the last row's `updatedAt` and `truncated` is set, so
+the client walks the burst through rather than stepping over the part it never received.
+
+Deltas filter on `updatedAt`, not `createdAt`: a message delivered five minutes after it was
+sent is not a new row, and a chat that only learned about new rows would show ticks that never
+advanced. The comparison is inclusive, so the boundary row repeats on every poll — the client
+merges by message id, and a duplicate costs nothing while a gap is permanent.
+
+Messages are ordered by `createdAt`, not `waTimestamp`: an outbound message has no WhatsApp
+timestamp until Meta accepts it, so ordering by it would file everything a rep just sent below
+messages from last year for as long as the send took.
+
+The inbox has **no delta mode**. A thread's position in the list changes when a *different*
+thread receives a message, so an incremental list would hold a stale order until something in
+it happened to change. Fifty rows per poll is the honest read.
 
 Two design points that matter:
 

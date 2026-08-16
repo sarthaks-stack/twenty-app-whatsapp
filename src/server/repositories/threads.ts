@@ -5,7 +5,7 @@ import type {
   WindowState,
 } from '../../domain/constants';
 import { inBatches } from '../batching';
-import { nodesOf, query, type JsonObject } from './base';
+import { nodesOf, pageOf, query, type JsonObject } from './base';
 
 /**
  * `whatsappThread` — one conversation per (account, waId) (FR-THR-1).
@@ -278,6 +278,114 @@ export const findIdleThreads = async (
   );
 
   return nodesOf<WhatsappThreadRecord>(result.whatsappThreads);
+};
+
+/**
+ * The conversations of one Person, newest first (FR-UI-1, FR-UI-3).
+ *
+ * Plural because one contact can hold two conversations — a second number, or a
+ * number that moved between accounts — and the Person tab has to show the one
+ * that is actually live rather than whichever the database returned first.
+ */
+export const findThreadsForPerson = async (
+  personId: string,
+  limit = 10,
+): Promise<WhatsappThreadRecord[]> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappThreads: {
+          __args: {
+            filter: { personId: { eq: personId } },
+            orderBy: [{ lastMessageAt: 'DescNullsLast' }],
+            first: limit,
+          },
+          edges: { node: THREAD_FIELDS },
+        },
+      }),
+    'threads.findForPerson',
+  );
+
+  return nodesOf<WhatsappThreadRecord>(result.whatsappThreads);
+};
+
+export type InboxFilterSpec =
+  | { kind: 'mine'; assigneeId: string }
+  | { kind: 'unassigned' }
+  | { kind: 'all' }
+  | { kind: 'campaign_replies' }
+  | { kind: 'window_expiring'; now: Date; horizon: Date }
+  | { kind: 'closed' };
+
+export type ThreadPage = { threads: WhatsappThreadRecord[]; nextCursor: string | null };
+
+/**
+ * The inbox list (FR-UI-2).
+ *
+ * Every filter but `closed` excludes closed conversations, because that is what
+ * closing one is *for* — `close` touches neither Meta nor the window, it exists
+ * so a handled conversation leaves the list (specs/05). `closed` is the way
+ * back; without it the state would be a one-way door.
+ *
+ * Ordered by `lastMessageAt` descending, which is also why the inbox has no
+ * delta mode: a thread's position changes when *another* thread receives a
+ * message, so an incremental list would show a stale order until something in
+ * it happened to change. Fifty rows on each poll is the honest read.
+ */
+export const listInboxThreads = async (
+  spec: InboxFilterSpec,
+  { limit = 50, after = null }: { limit?: number; after?: string | null } = {},
+): Promise<ThreadPage> => {
+  const notClosed = { status: { neq: 'CLOSED' } } as const;
+
+  /**
+   * `as const` on every branch, not for style: without it each enum literal
+   * widens to `string` and the generated filter input rejects the lot.
+   */
+  const filter =
+    spec.kind === 'mine'
+      ? ({ ...notClosed, assigneeId: { eq: spec.assigneeId } } as const)
+      : spec.kind === 'unassigned'
+        ? ({ ...notClosed, assigneeId: { is: 'NULL' } } as const)
+        : spec.kind === 'campaign_replies'
+          ? ({
+              ...notClosed,
+              originCampaignId: { is: 'NOT_NULL' },
+              lastMessageDirection: { eq: 'INBOUND' },
+            } as const)
+          : spec.kind === 'window_expiring'
+            ? ({
+                ...notClosed,
+                windowState: { eq: 'OPEN' },
+                serviceWindowExpiresAt: {
+                  gte: spec.now.toISOString(),
+                  lte: spec.horizon.toISOString(),
+                },
+              } as const)
+            : spec.kind === 'closed'
+              ? ({ status: { eq: 'CLOSED' } } as const)
+              : notClosed;
+
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappThreads: {
+          __args: {
+            filter,
+            orderBy: [{ lastMessageAt: 'DescNullsLast' }],
+            first: limit,
+            ...(after === null ? {} : { after }),
+          },
+          edges: { node: THREAD_FIELDS },
+          pageInfo: { hasNextPage: true, endCursor: true },
+        },
+      }),
+    'threads.listInbox',
+  );
+
+  const page = pageOf<WhatsappThreadRecord>(result.whatsappThreads);
+
+  return { threads: page.items, nextCursor: page.nextCursor };
 };
 
 /** The 15-minute sweeper's read (FR-THR-5). */

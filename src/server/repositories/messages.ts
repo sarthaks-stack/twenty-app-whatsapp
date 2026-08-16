@@ -6,7 +6,7 @@ import type {
   SourceKind,
   TemplateCategory,
 } from '../../domain/constants';
-import { nodesOf, query, type JsonObject } from './base';
+import { nodesOf, pageOf, query, type JsonObject } from './base';
 
 /**
  * `whatsappMessage` — the high-volume table (NFR-S1: 50 000/day headroom).
@@ -250,6 +250,130 @@ export const findStuckQueuedMessages = async (
   );
 
   return nodesOf<WhatsappMessageRecord>(result.whatsappMessages);
+};
+
+/**
+ * The chat feed's selection: everything the record carries, plus the stored
+ * file.
+ *
+ * `mediaFile` is not in `MESSAGE_FIELDS` because nothing on the send path needs
+ * it and a FILES column costs a signed-URL mint per row on every read. The chat
+ * is the one caller that does need it — a bubble cannot render an image without
+ * a URL — so it asks for it here rather than making every other query pay.
+ */
+const FEED_MESSAGE_FIELDS = {
+  ...MESSAGE_FIELDS,
+  // A FILES column is a composite: the signed `url` is minted per read, so it
+  // has to be asked for by name like any other sub-field.
+  mediaFile: { fileId: true, label: true, extension: true, url: true },
+} as const;
+
+export type FeedMessageRecord = WhatsappMessageRecord & { mediaFile?: unknown };
+
+export type MessagePage = {
+  messages: FeedMessageRecord[];
+  /** Opaque; hand back as `before` to load the page above this one. */
+  olderCursor: string | null;
+};
+
+/**
+ * One page of a conversation, newest first (specs/08 §3.1, NFR-P4).
+ *
+ * Ordered by `createdAt`, not `waTimestamp`: an outbound message has no WhatsApp
+ * timestamp until Meta accepts it, so ordering by it would put every message a
+ * rep has just sent at the bottom of the list — under messages from last year —
+ * for as long as the send takes. `createdAt` is always present and always
+ * monotonic per thread.
+ *
+ * The cursor is Relay's, not a timestamp: two messages written in the same
+ * millisecond are ordinary during a campaign burst, and a `createdAt < before`
+ * cursor drops whichever of them the page boundary fell between.
+ */
+export const listThreadMessages = async (
+  threadId: string,
+  { limit = 50, before = null }: { limit?: number; before?: string | null } = {},
+): Promise<MessagePage> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappMessages: {
+          __args: {
+            filter: { threadId: { eq: threadId } },
+            orderBy: [{ createdAt: 'DescNullsLast' }],
+            first: limit,
+            ...(before === null ? {} : { after: before }),
+          },
+          edges: { node: FEED_MESSAGE_FIELDS },
+          pageInfo: { hasNextPage: true, endCursor: true },
+        },
+      }),
+    'messages.listThread',
+  );
+
+  const page = pageOf<FeedMessageRecord>(result.whatsappMessages);
+
+  return { messages: page.items, olderCursor: page.nextCursor };
+};
+
+export type MessageDelta = {
+  messages: FeedMessageRecord[];
+  /**
+   * Where the next poll must resume. Equal to the caller's clock when the whole
+   * delta fitted; the last row's `updatedAt` when it did not, so a burst is
+   * walked through rather than skipped.
+   */
+  nextSince: string;
+  truncated: boolean;
+};
+
+export const MAX_DELTA_ROWS = 200;
+
+/**
+ * Everything in this conversation that changed since `since`.
+ *
+ * Filtered on `updatedAt` rather than `createdAt` because a delta has to carry
+ * *status* changes too — a message delivered five minutes after it was sent is
+ * not a new row, and a chat that only learned about new rows would show ticks
+ * that never advance until the tab was reloaded.
+ *
+ * The comparison is inclusive, so the boundary row is re-sent on every poll.
+ * That is deliberate: the client merges by message id, so a duplicate costs
+ * nothing, while an exclusive comparison against a clock that is not the
+ * database's would drop a row written in the same millisecond, permanently.
+ */
+export const listThreadMessagesSince = async (
+  threadId: string,
+  since: string,
+  now: string,
+): Promise<MessageDelta> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappMessages: {
+          __args: {
+            filter: { threadId: { eq: threadId }, updatedAt: { gte: since } },
+            orderBy: [{ updatedAt: 'AscNullsFirst' }],
+            first: MAX_DELTA_ROWS,
+          },
+          edges: { node: { ...FEED_MESSAGE_FIELDS, updatedAt: true } },
+          pageInfo: { hasNextPage: true },
+        },
+      }),
+    'messages.listThreadSince',
+  );
+
+  const messages = nodesOf<FeedMessageRecord & { updatedAt?: string | null }>(
+    result.whatsappMessages,
+  );
+  const truncated = result.whatsappMessages?.pageInfo?.hasNextPage === true;
+  const last = messages[messages.length - 1];
+
+  return {
+    messages,
+    nextSince:
+      truncated && typeof last?.updatedAt === 'string' ? last.updatedAt : now,
+    truncated,
+  };
 };
 
 export const createMessage = async (

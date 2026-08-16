@@ -328,11 +328,11 @@ only; reaching them live needs an account at its tier ceiling.
 |---|---|---|---|
 | 9.0 | **Probe P-6** — `column-reverse` anchoring in the sandbox, 200-message list, `twenty-ui` in a record widget | 🚫 **blocks 9.2–9.7** | D-7, R-3 |
 | 9.1 | `wa-inbox-feed-route` — the single aggregated data path | ✅ | D-6, FR-UI-4 |
-| 9.2 | `useFeed` hook, theming, i18n scaffolding | ⬜ | D-6 |
-| 9.3 | `<ThreadView>` — list, bubbles, ticks, media, day separators | ⬜ | FR-UI-1 |
-| 9.4 | Composer with policy-driven states | ⬜ | FR-OUT-1/2 |
-| 9.5 | Template picker + variable form | ⬜ | FR-TPL-3 |
-| 9.6 | Person tab, side panel, command menu item | ⬜ | FR-UI-1/3 |
+| 9.2 | `useFeed` hook, theming, i18n scaffolding | ✅ | D-6 |
+| 9.3 | `<ThreadView>` — list, bubbles, ticks, media, day separators | ✅ | FR-UI-1 |
+| 9.4 | Composer with policy-driven states | ✅ | FR-OUT-1/2 |
+| 9.5 | Template picker + variable form | ✅ | FR-TPL-3 |
+| 9.6 | Person tab, side panel, command menu item | ✅ | FR-UI-1/3 |
 | 9.7 | Inbox page + headless toaster | ⬜ | FR-UI-2, D-10 |
 | 9.8 | Campaigns page — list, builder, pre-flight, detail | ⬜ | FR-CAM-1/6/10 |
 | 9.9 | Settings — connection, callback card, health, templates, consent, diagnostics | ⬜ | FR-ACC-1…5, NFR-O3 |

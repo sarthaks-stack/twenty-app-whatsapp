@@ -5,7 +5,9 @@ import {
   ForbiddenError,
   UnauthorizedError,
   authErrorResponse,
+  readBearerToken,
   requireRole,
+  rolesForCaller,
   type Caller,
 } from './auth';
 import {
@@ -56,6 +58,90 @@ describe('requireRole', () => {
       expect((error as Error).message).toContain('admin');
       expect((error as Error).message).not.toContain('uw-1');
     }
+  });
+});
+
+describe('readBearerToken', () => {
+  it('reads the header whatever case the gateway used', () => {
+    expect(readBearerToken({ Authorization: 'Bearer abc' })).toBe('abc');
+    expect(readBearerToken({ authorization: 'Bearer abc' })).toBe('abc');
+    expect(readBearerToken({ AUTHORIZATION: 'bearer abc' })).toBe('abc');
+  });
+
+  /** Some callers send the raw token with no scheme; both forms are the token. */
+  it('accepts a bare token', () => {
+    expect(readBearerToken({ authorization: 'abc' })).toBe('abc');
+  });
+
+  it('treats an absent, empty or scheme-only header as no token', () => {
+    expect(readBearerToken(undefined)).toBeNull();
+    expect(readBearerToken({})).toBeNull();
+    expect(readBearerToken({ authorization: '' })).toBeNull();
+    expect(readBearerToken({ authorization: 'Bearer   ' })).toBeNull();
+  });
+});
+
+/**
+ * D-53. The join that failed in production, and the reason it failed: the
+ * platform lists role members by `workspaceMember.id` and leaves
+ * `userWorkspaceId` null, while the route event carries only `userWorkspaceId`.
+ * Matching on either key is what lets a real person be placed at all.
+ */
+describe('rolesForCaller', () => {
+  const roles = [
+    {
+      universalIdentifier: ROLE_AGENT,
+      canUpdateAllSettings: false,
+      members: [{ id: 'wm-1', userWorkspaceId: null }],
+    },
+    {
+      universalIdentifier: ROLE_ADMIN,
+      canUpdateAllSettings: false,
+      members: [{ id: 'wm-2', userWorkspaceId: null }],
+    },
+  ];
+
+  it('places a caller by workspace member id when the platform sends no userWorkspaceId', () => {
+    expect(
+      rolesForCaller(roles, { userWorkspaceId: 'uw-1', workspaceMemberId: 'wm-1' }).map(
+        (role) => role.universalIdentifier,
+      ),
+    ).toEqual([ROLE_AGENT]);
+  });
+
+  /** The old behaviour, kept working for a platform that does fill the field in. */
+  it('still places a caller by userWorkspaceId when it is present', () => {
+    const filled = [
+      { ...roles[0], members: [{ id: 'wm-1', userWorkspaceId: 'uw-1' }] },
+      roles[1],
+    ];
+
+    expect(
+      rolesForCaller(filled, { userWorkspaceId: 'uw-1', workspaceMemberId: null }).map(
+        (role) => role.universalIdentifier,
+      ),
+    ).toEqual([ROLE_AGENT]);
+  });
+
+  /**
+   * A caller we could not identify gets nothing — not everything. Without this,
+   * a failed identity lookup would read as "matches every role whose members
+   * also have a null id", which is how a fail-open is written by accident.
+   */
+  it('gives an unidentified caller no roles at all', () => {
+    expect(rolesForCaller(roles, { userWorkspaceId: 'uw-9', workspaceMemberId: null })).toEqual(
+      [],
+    );
+  });
+
+  it('does not let a null userWorkspaceId on both sides count as a match', () => {
+    const orphan = [
+      { universalIdentifier: ROLE_ADMIN, canUpdateAllSettings: true, members: [] },
+    ];
+
+    expect(rolesForCaller(orphan, { userWorkspaceId: 'uw-1', workspaceMemberId: 'wm-1' })).toEqual(
+      [],
+    );
   });
 });
 

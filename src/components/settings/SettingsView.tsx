@@ -6,6 +6,7 @@ import { useTheme } from 'twenty-ui/theme-constants';
 import { useCopy } from '../common/copy';
 import { relativeTime } from '../common/format';
 import { ActionButton, Banner, Card, Field, StatusPill, Tabs, useInputStyle } from '../common/ui';
+import { describeHealth } from './health-detail';
 
 /**
  * *Settings → Applications → WhatsApp* (FR-ACC-1 … FR-ACC-5, NFR-O3).
@@ -394,7 +395,7 @@ export const SettingsView = () => {
                 <span
                   style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}
                 >
-                  {JSON.stringify(row.detail)}
+                  {describeHealth(row.key, row.detail, t, lang)}
                 </span>
 
                 {/* A red row that does not say what to do is a red light with no
@@ -449,9 +450,17 @@ export const SettingsView = () => {
                 {String(template.language ?? '')} · {String(template.category ?? '')}
               </span>
               <StatusPill status={(template.status ?? null) as string | null} />
-              {template.qualityScore === null || template.qualityScore === undefined ? null : (
+              {/*
+                Meta reports `UNKNOWN` for any template without enough traffic
+                to score, which is most of them on a new number. Printing the
+                word next to a green APPROVED pill reads as a second, failing
+                status; saying nothing is what "no score yet" looks like.
+              */}
+              {template.qualityScore === null ||
+              template.qualityScore === undefined ||
+              String(template.qualityScore).toUpperCase() === 'UNKNOWN' ? null : (
                 <span style={{ color: theme.font.color.tertiary }}>
-                  {String(template.qualityScore)}
+                  {t('settings.templateQuality', { score: String(template.qualityScore) })}
                 </span>
               )}
               {template.unsupportedReason === null ||

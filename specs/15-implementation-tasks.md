@@ -375,7 +375,7 @@ Only P-1 has been answered. The rest still gate design decisions:
 | P-3 | Can the app role write `timelineActivity`? | 4.11 | downgrade FR-TL-1 to the WhatsApp tab |
 | P-4 | Does a soft-deleted row hold a unique index? | 10.4 | purge hard-destroys. *No longer gates campaigns: the snapshot upserts, so either answer is correct* |
 | P-5 | Can the Core API filter `additionalPhones`? | 4.8 | derived indexed array field |
-| P-6 | Front-component chat feasibility | — | ✅ **answered**: renders, but no scroll port, no measurement, and auth is blocked (D-53) |
+| P-6 | Front-component chat feasibility | — | ✅ **answered and acted on**: the chat is buildable. Three doc'd APIs were wrong, the widget needed an explicit height, `clientWidth` measures where `getBoundingClientRect` does not, and `/s/*` auth was broken for every human until the caller's own token was forwarded (D-53) |
 | P-7 | Row-level permission predicates | SEC-7 enforcement | route-level filtering, limitation documented |
 | P-8 | Does `cronTriggerSettings.pattern` accept a six-field (seconds) pattern? | 07 §10's 30 s freshness | one-minute ticks, ≤ 60 s freshness (as built) |
 

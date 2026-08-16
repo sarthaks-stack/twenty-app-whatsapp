@@ -58,6 +58,38 @@ describe('projectMessage', () => {
     });
   });
 
+  /**
+   * The sender's own name for the file, spelled the way `MediaMeta` spells it.
+   * Reading `fileName` here found nothing and fell through to the storage
+   * label, which is deliberately a WAMID — so every document in the chat was
+   * labelled `wamid.HBgMMj….pdf` and looked broken.
+   */
+  it('prefers the name the sender gave the document over the storage label', () => {
+    const projected = projectMessage({
+      id: 'm1',
+      messageType: 'DOCUMENT',
+      mediaMeta: { mimeType: 'application/pdf', filename: 'Proposta.pdf', fileSize: 82_000 },
+      mediaFile: [
+        { fileId: 'f1', label: 'wamid.HBgMMjQ0OTI4.pdf', url: 'https://host/file/f1?token=x' },
+      ],
+    });
+
+    expect(projected.media?.fileName).toBe('Proposta.pdf');
+  });
+
+  it('falls back to the storage label when the sender named nothing', () => {
+    const projected = projectMessage({
+      id: 'm1',
+      messageType: 'DOCUMENT',
+      mediaMeta: { mimeType: 'application/pdf' },
+      mediaFile: [
+        { fileId: 'f1', label: 'wamid.HBgMMjQ0OTI4.pdf', url: 'https://host/file/f1?token=x' },
+      ],
+    });
+
+    expect(projected.media?.fileName).toBe('wamid.HBgMMjQ0OTI4.pdf');
+  });
+
   it('reports deferred media with no url, so the bubble offers a download (D-8)', () => {
     const projected = projectMessage({
       id: 'm1',

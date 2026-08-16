@@ -88,7 +88,7 @@ const COPY = {
 
   'consent.OPTED_IN': { pt: 'Subscrito', en: 'Subscribed' },
   'consent.OPTED_OUT': { pt: 'Cancelou', en: 'Unsubscribed' },
-  'consent.UNKNOWN': { pt: 'Sem registo', en: 'No record' },
+  'consent.UNKNOWN': { pt: 'Consentimento desconhecido', en: 'Consent unknown' },
 
   // ─── The Meta errors a rep can see on a bubble (appendix B) ───────────────
   'error.131047': {
@@ -435,6 +435,37 @@ const COPY = {
   'settings.health.failedWebhookEvents.remedy': {
     pt: 'Há eventos por processar. Veja o separador Diagnóstico.',
     en: 'There are unprocessed events. See the Diagnostics tab.',
+  },
+  'settings.templateQuality': { pt: 'Qualidade {score}', en: 'Quality {score}' },
+  'settings.health.detail.tokenNever': {
+    pt: 'Nunca verificado',
+    en: 'Never checked',
+  },
+  'settings.health.detail.tokenChecked': {
+    pt: 'Verificado {when}',
+    en: 'Checked {when}',
+  },
+  'settings.health.detail.webhookNone': {
+    pt: 'Ainda sem eventos recebidos',
+    en: 'No events received yet',
+  },
+  'settings.health.detail.webhookLast': {
+    pt: 'Último evento {when}',
+    en: 'Last event {when}',
+  },
+  'settings.health.detail.quality': {
+    pt: 'Classificação {rating}',
+    en: 'Rated {rating}',
+  },
+  'settings.health.detail.tier': {
+    pt: '{available} envios disponíveis hoje de {limit}, com {reserve} reservados para conversas 1:1',
+    en: '{available} sends available today of {limit}, with {reserve} held back for 1:1 conversations',
+  },
+  'settings.health.detail.none': { pt: 'Nenhuma', en: 'None' },
+  'settings.health.detail.count': { pt: '{count}', en: '{count}' },
+  'settings.health.detail.stuck': {
+    pt: '{count} há mais de {minutes} minutos',
+    en: '{count} for more than {minutes} minutes',
   },
   'settings.health.stuckOutbound': { pt: 'Mensagens presas', en: 'Stuck messages' },
   'settings.health.stuckOutbound.remedy': {

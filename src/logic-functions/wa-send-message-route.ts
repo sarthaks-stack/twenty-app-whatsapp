@@ -551,6 +551,9 @@ export default defineLogicFunction({
     path: '/whatsapp/send',
     httpMethod: 'POST',
     isAuthRequired: true,
+    // The caller's own token, so `requireCaller` can ask the platform who they
+    // are rather than guess from a `userWorkspaceId` nothing else joins on (D-53).
+    forwardedRequestHeaders: ['authorization'],
   },
   handler,
 });

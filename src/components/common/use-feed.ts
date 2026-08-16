@@ -40,6 +40,8 @@ export type FeedPermissions = {
   canSend: boolean;
   canManageTemplates: boolean;
   canManageCampaigns: boolean;
+  /** The caller's own workspace member id, as resolved by the server (D-53). */
+  workspaceMemberId: string | null;
 };
 
 export type FeedPolicy = {

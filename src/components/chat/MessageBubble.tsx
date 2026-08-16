@@ -209,7 +209,13 @@ export const MessageBubble = ({
 
       {renderMedia()}
 
-      {message.body === null ? null : (
+      {/*
+        A document with no caption is stored with its filename as the body
+        (specs/03: "documents caption to their filename"), which is the right
+        thing for a preview line in the inbox and the wrong thing here — the
+        link above already says it, so printing it again reads as a bug.
+      */}
+      {message.body === null || message.body === media?.fileName ? null : (
         <span style={{ whiteSpace: 'pre-wrap' }}>{message.body}</span>
       )}
 

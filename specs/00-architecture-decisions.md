@@ -227,7 +227,13 @@ Design:
 
 ## D-7 — Chat scrolling must be CSS-driven; the sandbox cannot scroll programmatically
 
-**Status: SPECIFIED** · Δ TRD FR-UI-1, C-3, R-3
+**Status: CONFIRMED IN THE BROWSER 2026-08-16** · Δ TRD FR-UI-1, C-3, R-3
+
+Verified with a real conversation: the chat opens anchored to the newest message, older messages
+prepend without moving the view, and no scripted scrolling exists anywhere in the component. One
+correction from D-53 — the mechanism only works once the list has a scroll port at all, which
+means the surface needs an explicit height (`SURFACE_MAX_HEIGHT`); a widget left to size itself
+grows and scrolls the page instead.
 
 In the front-component sandbox, assigning `scrollTop`/`scrollLeft` is a documented **no-op**, and
 `IntersectionObserver` throws. A conventional chat implementation ("append message, scroll to
@@ -1078,9 +1084,11 @@ came from the platform documentation and are wrong.
 | `useRecordId()` | ✅ — the Person id |
 | Inline styles | ✅ — layout, colour, alignment, radius all apply |
 | `twenty-ui` imports | ✅ resolve and render their text |
-| `flex-direction: column-reverse` | ✅ reverses paint order as expected |
+| `flex-direction: column-reverse` | ✅ reverses paint order **and anchors to the visual bottom**, once the list has a scroll port |
 | `FileReader` | ✅ present — the docs say it does not exist |
 | `/rest/*` (Twenty's REST API) | ✅ |
+| `node.clientWidth` / `clientHeight` / `scrollHeight` | ✅ real numbers — unlike `getBoundingClientRect()` |
+| `window.innerWidth` / `innerHeight` | ✅ — answers for the browser window, not the widget |
 
 ### Does not work
 
@@ -1094,19 +1102,29 @@ came from the platform documentation and are wrong.
 | `twenty-ui` component *styling* | renders unstyled — emotion classes do not apply | — |
 | `/s/*` logic-function routes | **403** — see below | — |
 
-### The two findings that change the design
+### The two findings that changed the design
 
-**1. A widget has no scroll port.** `overflow-y: auto` with `flex: 1 1 auto` produced
-`scrollHeight === clientHeight === 1337` and then `1364` after a row was added: the container
-grows to fit its content and the *page* scrolls. There is nothing to anchor, so D-7's
-`column-reverse` mechanism is neither confirmed nor refuted — it is not reachable. A chat that
-keeps its own scroll needs a height the widget can be given, and `100%`/flex is not it.
+**1. A widget has no scroll port of its own, and cannot measure itself the documented way.**
 
-Its companion, `getBoundingClientRect()` returning 0×0, means the widget cannot measure itself
-either. `InboxView` already fails towards the single-pane layout when the measurement is
-unusable, which is the right direction — but it will *always* take that branch.
+`overflow-y: auto` with `flex: 1 1 auto` produced `scrollHeight === clientHeight === 1337`, then
+`1364` after a row was added: the widget grows to fit its content and the *page* scrolls. The
+containing grid confirmed it — `grid-template-rows` computed to `1932px` for a chat with eleven
+messages inside a 724px pane. So `height: 100%` resolves against an `auto` parent and means
+nothing, and `getBoundingClientRect()` returning 0×0 means the widget cannot measure the pane and
+adapt either.
 
-**2. `/s/*` routes answer 403 to every signed-in human, and always have.**
+**Resolved, both parts.**
+
+- *Height*: `SURFACE_MAX_HEIGHT` (`72vh`) caps the chat and sets the inbox outright. The viewport
+  is the only bound CSS can resolve without being told. `height: 100%` stays alongside it, so a
+  parent that *is* bounded still wins. With the cap in place, **D-7 is confirmed**: the chat opens
+  anchored to the newest message and scrolls internally, with no scripted scrolling anywhere.
+- *Measurement*: `getBoundingClientRect()` is the only broken one. `clientWidth`, `clientHeight`
+  and `scrollHeight` on the same node all return real numbers, and `window.innerWidth` works too.
+  `InboxView` measures with `clientWidth` and the two-pane layout appears as designed. Before
+  this it silently took the narrow branch at every width.
+
+**2. `/s/*` routes answered 403 to every signed-in human, and always had.**
 
 The chain, in the order it was found:
 
@@ -1120,17 +1138,44 @@ The chain, in the order it was found:
 - With the flag, the lookup succeeds and the answer becomes
   `{"error":"This action requires the WhatsApp agent role"}` — because
   `getRoles.workspaceMembers[].userWorkspaceId` is **`null` for every member** on this version,
-  while the route event carries only `userWorkspaceId`. The join key `requireCaller` is built on
-  does not exist in the data.
+  while the route event carries only `userWorkspaceId`. The join key `requireCaller` was built on
+  does not exist in the data. `loadRoleAssignments` then made it worse by *requiring* the field to
+  be a string, discarding every member of every role and leaving an empty map.
 
 **Why nothing caught this.** Every live test of every route so far used an API key. An API key
 has no workspace membership, so `requireCaller` returns a machine caller and *returns before the
-role lookup*. The role map has therefore never been read in the life of this app. The first
+role lookup*. The role map had therefore never been read in the life of this app. The first
 request from a signed-in human was the one that revealed it — which is exactly what a probe is
 for, and an argument for running one earlier than the plan did.
 
-**Open.** Resolving `userWorkspaceId` → role needs a source the app can read, and every
-candidate has been checked: the Core `workspaceMember` has `userId` but no `userWorkspaceId`;
-the metadata `WorkspaceMember` type declares `userWorkspaceId` and returns null; `currentUser`
-is `Forbidden` for an app token and would answer for the app rather than the caller. The fix is
-a decision about the security model, not a patch, and is recorded here rather than guessed at.
+### Resolved: the caller's own token makes the join
+
+The app cannot map `userWorkspaceId` to a member. Every source was checked and none of them
+does it: Core `workspaceMember` has `userId` and no `userWorkspaceId`; metadata `WorkspaceMember`
+declares the field and returns null; `currentUser` under the *app's* token is `Forbidden`, and
+would answer for the app anyway.
+
+**The caller can.** `httpRouteTriggerSettings.forwardedRequestHeaders: ['authorization']` delivers
+the requester's own bearer token to the handler, and `currentUser` under *that* token answers for
+the person holding it. `requireCaller` therefore asks the platform who the caller is, and joins
+the role map on `workspaceMember.id` — a key `getRoles` does populate.
+
+Two properties make it safe to trust, and both are enforced in `resolveWorkspaceMemberId`:
+
+- **It is not a claim the caller makes.** The front component sends no identity of its own; the
+  token is a credential the platform issued and verifies. Forging it means already holding
+  someone else's session. Had the browser been asked to *state* its member id, any rep could have
+  claimed the admin's.
+- **It is bound to this request.** `currentUser.currentUserWorkspace.id` must equal the
+  `userWorkspaceId` the platform injected into the event. A mismatch resolves to nothing.
+
+It fails towards the old behaviour rather than towards permission: no token, a refused
+`currentUser`, or a mismatch all return `null`, the role map is then matched on `userWorkspaceId`
+as before, and a caller who cannot be placed still gets 403. Nothing is cached — it is one query,
+it is the request's identity, and a cache keyed on anything cheaper than the token is a way to
+answer as the wrong person.
+
+Verified in the browser: the feed, the account admin route and the settings surface all answer a
+signed-in workspace administrator, and `permissions.workspaceMemberId` comes back populated —
+which is also why that field is now on the wire, so a null on a signed-in human is *visible*
+rather than indistinguishable from having no roles.

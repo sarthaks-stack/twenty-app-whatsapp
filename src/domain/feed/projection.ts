@@ -148,7 +148,14 @@ const projectMedia = (source: MessageSource): MediaProjection | null => {
   return {
     kind: stringOrNull(source.messageType),
     mimeType: stringOrNull(meta?.mimeType),
-    fileName: stringOrNull(meta?.fileName) ?? stringOrNull(file?.label),
+    /**
+     * `filename`, not `fileName`. Meta spells it lowercase and so does
+     * `MediaMeta`; reading the camel-cased name found nothing and silently fell
+     * through to the storage label, so every document in the chat was titled
+     * `wamid.HBgMMj….pdf` instead of the name the sender gave it — the exact
+     * thing the media worker preserves the original for.
+     */
+    fileName: stringOrNull(meta?.filename) ?? stringOrNull(file?.label),
     sizeBytes: numberOrNull(meta?.fileSize),
     url: stringOrNull(file?.url),
     deferred: meta?.deferred === true,

@@ -503,6 +503,7 @@ describe('permissions', () => {
       canSend: true,
       canManageTemplates: false,
       canManageCampaigns: false,
+      workspaceMemberId: 'wm-1',
     });
   });
 
@@ -516,6 +517,7 @@ describe('permissions', () => {
       canSend: true,
       canManageTemplates: true,
       canManageCampaigns: true,
+      workspaceMemberId: 'wm-1',
     });
   });
 });

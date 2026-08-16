@@ -4,6 +4,8 @@ import { useTheme } from 'twenty-ui/theme-constants';
 import type { ThreadProjection } from '../../domain/feed/projection';
 import { useCopy } from '../common/copy';
 import { countdown, displayPhone, relativeTime } from '../common/format';
+import { SURFACE_MAX_HEIGHT, SURFACE_MIN_HEIGHT } from '../common/surface';
+import { InboundToaster } from './InboundToaster';
 import { useFeed } from '../common/use-feed';
 import { ThreadView } from '../chat/ThreadView';
 
@@ -11,12 +13,12 @@ import { ThreadView } from '../chat/ThreadView';
  * The inbox (FR-UI-2, specs/08 §4).
  *
  * **Layout.** Two panes when there is room, list-then-detail when there is not.
- * The width is measured with `getBoundingClientRect()` — documented as working
- * here, up to a frame stale — and re-measured on every render, which the poll
- * causes anyway. `ResizeObserver` throws and `matchMedia` throws, and `@media`
- * would answer for the browser window rather than for a widget that may be a
- * third of it. A resize between polls therefore lags by up to one interval;
- * that is the cost of the only measurement this sandbox offers.
+ * The width is read from `node.clientWidth` and re-read on every render, which
+ * the poll causes anyway. `ResizeObserver` and `matchMedia` are both undefined
+ * here, and `@media` would answer for the browser window rather than for a
+ * widget that may be a third of it. A resize between polls therefore lags by up
+ * to one interval; that is the cost of the only measurement this sandbox
+ * offers — and P-6 found it is not the one the docs name (see `measure`).
  *
  * **No virtualisation.** Every windowing library measures with the observers
  * that throw here. Fifty rows and a "Carregar mais" is the design that works.
@@ -168,7 +170,28 @@ export const InboxView = () => {
     if (node === null) return;
 
     try {
-      const isWide = node.getBoundingClientRect().width >= TWO_PANE_MIN_WIDTH;
+      /**
+       * `clientWidth`, not `getBoundingClientRect()`.
+       *
+       * Probe P-6 found the rect API returns **0×0** here — it exists, it does
+       * not throw, and it lies — while `scrollHeight` and `clientHeight` on the
+       * same node return real numbers. So the layout box is there and only that
+       * one API is unimplemented; measuring through it meant every inbox, at
+       * every width, silently took the narrow branch.
+       *
+       * `window.innerWidth` is the backstop rather than the primary: it answers
+       * for the whole browser window (1680 where the widget was 1030), which is
+       * right only because this surface is a full-width standalone page. If the
+       * node can speak for itself, it does.
+       */
+      const width =
+        node.clientWidth > 0
+          ? node.clientWidth
+          : typeof window === 'undefined'
+            ? 0
+            : (window.innerWidth ?? 0);
+
+      const isWide = width >= TWO_PANE_MIN_WIDTH;
 
       if (measured.current !== isWide) {
         measured.current = isWide;
@@ -199,14 +222,24 @@ export const InboxView = () => {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: '100%',
-        minHeight: 0,
+        /**
+         * A height, not a percentage. The page sizes itself to us rather than
+         * the other way round, so `100%` resolves to `auto` and the inbox would
+         * be as tall as its content — a two-row list in a 400px box on a
+         * 1400px screen, and a page-scrolling column when the list is long.
+         * See `SURFACE_MAX_HEIGHT`.
+         */
+        height: SURFACE_MAX_HEIGHT,
+        minHeight: SURFACE_MIN_HEIGHT,
         background: theme.background.primary,
         color: theme.font.color.primary,
         fontFamily: theme.font.family,
         overflow: 'hidden',
       }}
     >
+      {/* Renders nothing; polls `mine` and raises the snackbars (D-10 layer 2). */}
+      <InboundToaster />
+
       {account !== null && account.status !== 'CONNECTED' ? (
         <div
           role="status"

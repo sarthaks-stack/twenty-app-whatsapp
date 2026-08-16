@@ -5,6 +5,7 @@ import type { MessageProjection } from '../../domain/feed/projection';
 import type { ResolvedParameters } from '../../domain/template-render';
 import { newClientToken, useActions, type SendOutcome } from '../common/actions';
 import { useCopy } from '../common/copy';
+import { SURFACE_MAX_HEIGHT, SURFACE_MIN_HEIGHT } from '../common/surface';
 import { useFeed } from '../common/use-feed';
 import { Composer } from './Composer';
 import { MessageList } from './MessageList';
@@ -200,15 +201,16 @@ export const ThreadView = ({
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
-    minHeight: variant === 'tab' ? '420px' : 0,
+    /**
+     * The widget owns its own height and never grows the page. `height: 100%`
+     * alone did not achieve that — the pane sizes itself to us, not the other
+     * way round — so the cap is what actually holds. See `SURFACE_MAX_HEIGHT`.
+     */
+    maxHeight: SURFACE_MAX_HEIGHT,
+    minHeight: variant === 'tab' ? SURFACE_MIN_HEIGHT : 0,
     background: theme.background.primary,
     color: theme.font.color.primary,
     fontFamily: theme.font.family,
-    /**
-     * The widget owns its own height and never grows the page. A chat that
-     * scrolled the record page instead of itself is the failure mode CLAUDE.md
-     * names outright.
-     */
     overflow: 'hidden',
   };
 

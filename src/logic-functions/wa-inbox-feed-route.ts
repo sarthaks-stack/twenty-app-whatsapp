@@ -75,6 +75,15 @@ export type FeedPermissions = {
   canSend: boolean;
   canManageTemplates: boolean;
   canManageCampaigns: boolean;
+  /**
+   * Who the server decided the caller is (D-53).
+   *
+   * The browser never asserts this — it is told. It is here because the inbox
+   * needs it to say "assigned to you" without a second round trip, and because
+   * a null on a signed-in human is the visible symptom of an identity lookup
+   * that failed, which is otherwise indistinguishable from having no roles.
+   */
+  workspaceMemberId: string | null;
 };
 
 export type FeedPolicy = {
@@ -110,6 +119,7 @@ export const permissionsFor = (caller: Caller): FeedPermissions => ({
   canSend: caller.isAgent,
   canManageTemplates: caller.isAdmin,
   canManageCampaigns: caller.isAdmin,
+  workspaceMemberId: caller.workspaceMemberId,
 });
 
 const asPolicy = (verdict: SendVerdict): FeedPolicy => ({
@@ -451,6 +461,9 @@ export default defineLogicFunction({
     path: '/whatsapp/feed',
     httpMethod: 'GET',
     isAuthRequired: true,
+    // The caller's own token, so `requireCaller` can ask the platform who they
+    // are rather than guess from a `userWorkspaceId` nothing else joins on (D-53).
+    forwardedRequestHeaders: ['authorization'],
   },
   handler,
 });

@@ -88,9 +88,15 @@ vi.mock('./repositories/base', async (importOriginal) => ({
 
 const createConsentEvent = vi.fn();
 const writeTimelineActivity = vi.fn();
+const patchPersonConsent = vi.fn();
 
 vi.mock('./repositories/consent-events', () => ({
   createConsentEvent: (...args: unknown[]) => createConsentEvent(...args),
+}));
+
+vi.mock('./repositories/people', () => ({
+  findPersonById: async (id: string) => ({ id }),
+  patchPersonConsent: (...args: unknown[]) => patchPersonConsent(...args),
 }));
 
 vi.mock('./timeline', () => ({
@@ -131,6 +137,7 @@ beforeEach(() => {
   onRead = null;
   createConsentEvent.mockReset();
   writeTimelineActivity.mockReset();
+  patchPersonConsent.mockReset();
   seed({});
 });
 
@@ -235,6 +242,29 @@ describe('erasing', () => {
       isTombstone: true,
       notes: 'Erased 3 consent events, 1400 messages and 2 conversations',
     });
+  });
+
+  /**
+   * The events behind the status are gone, so a Person left `OPTED_IN` would
+   * be an unauditable claim — and would keep an "erased" contact selectable
+   * for the next campaign.
+   */
+  it('resets the person’s denormalised consent status with the evidence', async () => {
+    seed({ consentEvents: 3 });
+
+    await erasePerson({ personId: 'p1', actorId: 'a1' });
+
+    expect(patchPersonConsent).toHaveBeenCalledTimes(1);
+    expect(patchPersonConsent.mock.calls[0][0]).toBe('p1');
+    expect(patchPersonConsent.mock.calls[0][1]).toBe('UNKNOWN');
+  });
+
+  it('does not touch the person’s consent status on a dry run', async () => {
+    seed({ consentEvents: 3 });
+
+    await erasePerson({ personId: 'p1', actorId: 'a1', dryRun: true });
+
+    expect(patchPersonConsent).not.toHaveBeenCalled();
   });
 
   it('carries no content into the tombstone', async () => {

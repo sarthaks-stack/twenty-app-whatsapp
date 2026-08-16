@@ -2,6 +2,7 @@ import { kv } from 'twenty-sdk/logic-function';
 
 import { ROLE_ADMIN, ROLE_AGENT } from '../constants/universal-identifiers';
 import { callerMetadataClient, metadataClient } from './clients';
+import { config } from './config';
 import { describeError, logger } from './logger';
 
 /**
@@ -233,17 +234,27 @@ export const requireCaller = async (event: AuthEvent): Promise<Caller> => {
    * "Token invalid."). So reaching this line without a membership means a valid
    * workspace-level credential — an API key.
    *
-   * Such a key is granted admin authority here because refusing it would not be
-   * a control. An API key can already create and modify any record through the
-   * Core API directly; the thing this route uniquely owns is the `kv` routing
-   * claim, and blocking it would only make automated setup impossible while
-   * leaving the record writable anyway. What SEC-5 actually defends against is
-   * a *logged-in agent* calling an admin route, and that case still fails.
+   * Machine callers are **refused by default**. Twenty lets an API key be
+   * assigned a restricted role, and this app has no way to read which role a
+   * given key holds — `currentUser` answers nothing for a key — so treating
+   * every key as an admin would silently promote a read-only or unrelated
+   * credential to sending messages, connecting numbers, changing consent and
+   * running erasure. A workspace that runs trusted automation against these
+   * routes opts in explicitly with `WA_ALLOW_API_KEY_ADMIN=true`, and should
+   * scope that automation to a dedicated key.
    *
-   * Machine actions are audited with a null actor, so "who connected this
-   * number" reads "an API key" rather than a member's name.
+   * When enabled, machine actions are audited with a null actor, so "who
+   * connected this number" reads "an API key" rather than a member's name.
    */
   if (typeof userWorkspaceId !== 'string' || userWorkspaceId.length === 0) {
+    if (!config.allowApiKeyAdmin()) {
+      logger.warn('auth.machine_caller_refused');
+
+      throw new ForbiddenError(
+        'API keys cannot call WhatsApp routes on this workspace. Set the WA_ALLOW_API_KEY_ADMIN application variable to true to allow trusted automation.',
+      );
+    }
+
     logger.info('auth.machine_caller');
 
     return {

@@ -10,7 +10,7 @@ import {
   LF_WEBHOOK_INGEST,
   LF_WEBHOOK_RESOLVER,
 } from '../constants/universal-identifiers';
-import type { MetaWebhookBody } from '../domain/webhook/types';
+import type { MetaEntry, MetaWebhookBody } from '../domain/webhook/types';
 import {
   META_SIGNATURE_HEADER,
   verifyIncomingSignature,
@@ -72,6 +72,74 @@ export const resolveWorkspaceId = async (
   return null;
 };
 
+/** The routing keys of a *single* entry, in the same preference order. */
+export const entryRoutingKeys = (entry: MetaEntry): string[] => {
+  const keys: string[] = [];
+
+  for (const change of entry.changes ?? []) {
+    const phoneNumberId = change.value?.metadata?.phone_number_id;
+
+    if (typeof phoneNumberId === 'string' && phoneNumberId.length > 0) {
+      keys.push(`wa:phone-number:${phoneNumberId}`);
+    }
+  }
+
+  if (typeof entry.id === 'string' && entry.id.length > 0) {
+    keys.push(`wa:waba:${entry.id}`);
+  }
+
+  return [...new Set(keys)];
+};
+
+/**
+ * Entries grouped by the workspace that claims them.
+ *
+ * A single Meta delivery can batch entries for several WABAs, and on a server
+ * hosting several workspaces those can belong to different tenants. Resolving
+ * the *body* to one workspace would hand tenant B's entries to tenant A —
+ * where the ingest's data-isolation guard discards them as foreign, so the
+ * delivery is silently lost. Grouping per entry lets the handler dispatch
+ * exactly the entries the resolved workspace owns, and say out loud what it
+ * could not deliver.
+ */
+export const partitionEntriesByWorkspace = async (
+  body: MetaWebhookBody,
+): Promise<{ groups: Map<string, MetaEntry[]>; unclaimedEntries: number }> => {
+  const cache = new Map<string, string | null>();
+  const groups = new Map<string, MetaEntry[]>();
+  let unclaimedEntries = 0;
+
+  for (const entry of body.entry ?? []) {
+    let workspaceId: string | null = null;
+
+    for (const key of entryRoutingKeys(entry)) {
+      let owner = cache.get(key);
+
+      if (owner === undefined) {
+        owner = (await kv.get<string>(key, { scope: 'SERVER' })) ?? null;
+        cache.set(key, owner);
+      }
+
+      if (typeof owner === 'string' && owner.length > 0) {
+        workspaceId = owner;
+        break;
+      }
+    }
+
+    if (workspaceId === null) {
+      unclaimedEntries += 1;
+      continue;
+    }
+
+    const group = groups.get(workspaceId);
+
+    if (group === undefined) groups.set(workspaceId, [entry]);
+    else group.push(entry);
+  }
+
+  return { groups, unclaimedEntries };
+};
+
 export const handler = async (
   event: RoutePayload<MetaWebhookBody>,
 ): Promise<ServerRouteResolverResult> => {
@@ -123,10 +191,11 @@ export const handler = async (
     return new Response({ ok: true, skipped: 'unrecognised payload' }, { status: 200 });
   }
 
-  let workspaceId: string | null = null;
+  let groups: Map<string, MetaEntry[]>;
+  let unclaimedEntries: number;
 
   try {
-    workspaceId = await resolveWorkspaceId(body);
+    ({ groups, unclaimedEntries } = await partitionEntriesByWorkspace(body));
   } catch (error) {
     logger.error('wa.webhook.routing_failed', {
       fn: 'wa-webhook-resolver',
@@ -141,17 +210,41 @@ export const handler = async (
    * seven days, so refusing traffic for a number we do not host would earn a
    * week of retries for a delivery we will never want.
    */
-  if (workspaceId === null) {
+  if (groups.size === 0) {
     count(METRIC.WEBHOOK_UNCLAIMED);
-    logger.warn('wa.webhook.unclaimed', { fn: 'wa-webhook-resolver' });
+    logger.warn('wa.webhook.unclaimed', { fn: 'wa-webhook-resolver', unclaimedEntries });
 
     return new Response({ ok: true, skipped: 'unclaimed number' }, { status: 200 });
+  }
+
+  const [workspaceId, entries] = groups.entries().next().value as [string, MetaEntry[]];
+
+  /**
+   * The platform can dispatch one delivery to exactly one workspace, so when
+   * a batch spans several tenants only the first group can be delivered. That
+   * is a real loss — Meta will not retry a 200 — and the one thing worse than
+   * losing it is losing it silently.
+   */
+  if (groups.size > 1) {
+    const dropped = [...groups.entries()]
+      .filter(([id]) => id !== workspaceId)
+      .reduce((total, [, group]) => total + group.length, 0);
+
+    count(METRIC.WEBHOOK_SPLIT_DROPPED, dropped);
+    logger.error('wa.webhook.multi_workspace_delivery', {
+      fn: 'wa-webhook-resolver',
+      workspaces: groups.size,
+      deliveredEntries: entries.length,
+      droppedEntries: dropped,
+    });
   }
 
   return {
     workspaceId,
     targetLogicFunctionUniversalIdentifier: LF_WEBHOOK_INGEST,
-    payload: { body, receivedAt: new Date().toISOString() },
+    // Only the entries this workspace owns: the others belong to other
+    // tenants, and their raw payloads must not enter this workspace at all.
+    payload: { body: { ...body, entry: entries }, receivedAt: new Date().toISOString() },
   };
 };
 

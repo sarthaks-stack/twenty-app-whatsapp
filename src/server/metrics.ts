@@ -86,6 +86,7 @@ export const METRIC = {
   WEBHOOK_VERIFY_REJECTED: 'wa.webhook.verify_rejected',
   WEBHOOK_SIGNATURE_REJECTED: 'wa.webhook.signature_rejected',
   WEBHOOK_UNCLAIMED: 'wa.webhook.unclaimed',
+  WEBHOOK_SPLIT_DROPPED: 'wa.webhook.split_dropped',
   WEBHOOK_FOREIGN_ENTRY: 'wa.webhook.foreign_entry',
   WEBHOOK_DEDUP_HIT: 'wa.webhook.dedup_hit',
   WEBHOOK_UNHANDLED_FIELD: 'wa.webhook.unhandled_field',

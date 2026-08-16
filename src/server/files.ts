@@ -1,4 +1,5 @@
 import { describeError, logger } from './logger';
+import { BodyTooLargeError, readBodyCapped } from './read-body';
 
 /**
  * Reading a file back out of Twenty's own storage (specs/04 §5 step 6, D-18).
@@ -45,12 +46,25 @@ const apiBaseUrl = (): string => {
 };
 
 /**
- * Resolves a handle to an absolute URL **on the workspace's own origin**, and
- * throws otherwise.
+ * The one path prefix Twenty serves stored file bytes from. Everything else on
+ * the origin — `/rest`, `/graphql`, `/metadata` — is the workspace's *data*,
+ * and this module holds the app's own token.
+ */
+const FILE_STORE_PREFIX = '/files/';
+
+/**
+ * Resolves a handle to an absolute URL **on the workspace's own origin and
+ * inside the file store**, and throws otherwise.
  *
  * Relative forms are resolved rather than rejected because that is what the
  * platform hands us: a FILES column's `url` is frequently a path, and a caller
  * forced to reassemble the base URL would reassemble it wrongly somewhere.
+ *
+ * The path restriction is as load-bearing as the origin one. `fileUrl` and
+ * `filePath` arrive from route callers, so without it any agent could name
+ * `/rest/people?...`, have this module fetch the authenticated JSON with
+ * `TWENTY_APP_ACCESS_TOKEN`, and send the workspace's CRM data to a WhatsApp
+ * number as a "document" — an exfiltration channel, not a file read.
  */
 export const resolveFileUrl = (handle: WorkspaceFileHandle): string => {
   const base = apiBaseUrl();
@@ -83,6 +97,25 @@ export const resolveFileUrl = (handle: WorkspaceFileHandle): string => {
     );
   }
 
+  /**
+   * `new URL()` has already collapsed `.`/`..` segments, so a literal
+   * traversal cannot reach here — but an *encoded* one (`%2e%2e`) survives in
+   * `pathname` and would be decoded by the server, so it is rejected too.
+   */
+  const decodedPath = ((): string => {
+    try {
+      return decodeURIComponent(resolved.pathname);
+    } catch {
+      return resolved.pathname;
+    }
+  })();
+
+  if (!resolved.pathname.startsWith(FILE_STORE_PREFIX) || decodedPath.includes('..')) {
+    throw new WorkspaceFileError(
+      `Refusing to read ${resolved.pathname}: only ${FILE_STORE_PREFIX} paths are workspace files`,
+    );
+  }
+
   return resolved.toString();
 };
 
@@ -97,6 +130,13 @@ export type DownloadedFile = { buffer: Buffer; mimeType: string };
  * timeout, and every message behind it waited (D-45).
  */
 export const FILE_TIMEOUT_MS = 30_000;
+
+/**
+ * WhatsApp's own largest outbound media is a 100 MB document, so nothing
+ * bigger can ever be sent — buffering more than that is only ever a memory
+ * exhaustion, never a successful send.
+ */
+export const MAX_WORKSPACE_FILE_BYTES = 100 * 1024 * 1024;
 
 export const downloadWorkspaceFile = async (
   handle: WorkspaceFileHandle,
@@ -116,6 +156,12 @@ export const downloadWorkspaceFile = async (
           ? { Authorization: `Bearer ${token}` }
           : {},
       signal: controller.signal,
+      /**
+       * A redirect is a way out of the origin-and-path guard above: the file
+       * store answering 302 to somewhere else must be a refusal, not a fetch
+       * of wherever it pointed.
+       */
+      redirect: 'error',
     });
 
     if (!response.ok) {
@@ -127,11 +173,17 @@ export const downloadWorkspaceFile = async (
     // The body read stays inside the deadline; a stalled download is the case
     // the deadline exists for.
     return {
-      buffer: Buffer.from(await response.arrayBuffer()),
+      buffer: await readBodyCapped(response, MAX_WORKSPACE_FILE_BYTES),
       mimeType: response.headers.get('content-type') ?? 'application/octet-stream',
     };
   } catch (error) {
     if (error instanceof WorkspaceFileError) throw error;
+
+    if (error instanceof BodyTooLargeError) {
+      throw new WorkspaceFileError(
+        `The file exceeds the ${MAX_WORKSPACE_FILE_BYTES}-byte ceiling for outbound media`,
+      );
+    }
 
     logger.warn('files.download_failed', describeError(error));
 

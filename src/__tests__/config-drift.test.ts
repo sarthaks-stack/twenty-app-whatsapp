@@ -99,6 +99,7 @@ const PAIRS: [keyof typeof DEFAULTS, string][] = [
   ['rateMarketingUsd', 'WA_RATE_MARKETING_USD'],
   ['rateUtilityUsd', 'WA_RATE_UTILITY_USD'],
   ['rateAuthenticationUsd', 'WA_RATE_AUTHENTICATION_USD'],
+  ['allowApiKeyAdmin', 'WA_ALLOW_API_KEY_ADMIN'],
 ];
 
 /** `'0.0040'` and `0.004` are the same number; `['A','B']` and a JS array are the same list. */

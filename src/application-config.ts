@@ -259,6 +259,13 @@ export default defineApplication({
       value: false,
       type: FieldType.BOOLEAN,
     },
+    WA_ALLOW_API_KEY_ADMIN: {
+      universalIdentifier: '9703dacf-6ba6-4e18-9e09-a8d1b87c1933',
+      description:
+        'Allow API keys (machine callers) to use the WhatsApp routes with admin authority. Off by default: a key’s assigned role cannot be read, so enabling this promotes every key in the workspace — scope automation to a dedicated, trusted key before turning it on (SEC-5).',
+      value: false,
+      type: FieldType.BOOLEAN,
+    },
     WA_WEBHOOK_STALENESS_HOURS: {
       universalIdentifier: '15259fd1-f7a0-46e6-b337-f77a7dda7541',
       description:

@@ -493,27 +493,52 @@ export const handler = async (
             ? (parsed.message.caption ?? null)
             : null;
 
-    const message = await queueOutbound({
-      thread,
-      account,
-      spec: toSendSpec(parsed.message),
-      body: renderedBody,
-      lane: LANE.INTERACTIVE,
-      sourceKind: SOURCE_KIND.AGENT,
-      sentById: caller.workspaceMemberId,
-      clientToken: clientToken.length === 0 ? null : clientToken,
-      template:
-        template === null
-          ? null
-          : {
-              id: template.id,
-              name: template.name,
-              language: template.language,
-              category: template.category,
-              parameters:
-                parsed.message.kind === 'template' ? parsed.message.parameters : null,
-            },
-    });
+    let message;
+
+    try {
+      message = await queueOutbound({
+        thread,
+        account,
+        spec: toSendSpec(parsed.message),
+        body: renderedBody,
+        lane: LANE.INTERACTIVE,
+        sourceKind: SOURCE_KIND.AGENT,
+        sentById: caller.workspaceMemberId,
+        clientToken: clientToken.length === 0 ? null : clientToken,
+        template:
+          template === null
+            ? null
+            : {
+                id: template.id,
+                name: template.name,
+                language: template.language,
+                category: template.category,
+                parameters:
+                  parsed.message.kind === 'template' ? parsed.message.parameters : null,
+              },
+      });
+    } catch (error) {
+      /**
+       * Two concurrent requests with the same token both pass the read above;
+       * `clientToken` is unique, so the loser's *create* fails here. That is
+       * the race the earlier lookup cannot close, and the answer is the same
+       * replay response the lookup gives.
+       */
+      if (clientToken.length > 0) {
+        const existing = await findMessageByClientToken(clientToken);
+
+        if (existing !== null) {
+          log.info('wa.send.idempotent_replay_on_conflict', { correlationId: existing.id });
+
+          return new Response(
+            { message: existing, threadId: existing.threadId, replayed: true },
+            { status: 202 },
+          );
+        }
+      }
+
+      throw error;
+    }
 
     if (template !== null) {
       audit({

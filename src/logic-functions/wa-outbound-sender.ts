@@ -7,7 +7,6 @@ import { LF_OUTBOUND_SENDER } from '../constants/universal-identifiers';
 import {
   ACCOUNT_STATUS,
   CAMPAIGN_STATUS,
-  CONSENT_STATUS,
   DIRECTION,
   LANE,
   MESSAGE_STATUS,
@@ -15,7 +14,6 @@ import {
   RECIPIENT_STATUS,
   THREAD_STATUS,
   type AccountStatus,
-  type ConsentStatus,
   type Lane,
   type Quality,
   type TemplateCategory,
@@ -55,6 +53,7 @@ import {
 } from '../providers/whatsapp/payload';
 import type { SendPayload } from '../providers/whatsapp/types';
 import { config } from '../server/config';
+import { effectiveConsentStatus } from '../server/consent';
 import { downloadWorkspaceFile, WorkspaceFileError } from '../server/files';
 import { describeError, logger } from '../server/logger';
 import { METRIC, count } from '../server/metrics';
@@ -800,6 +799,13 @@ export const sendOutbound = async (
     typeof thread.personId === 'string' ? await findPersonById(thread.personId) : null;
 
   /**
+   * Consent is bound to the destination number, not only to the thread's
+   * (re-linkable) Person — detaching an opted-out contact must not turn their
+   * opt-out into `UNKNOWN` (SEC-6).
+   */
+  const consentStatus = await effectiveConsentStatus({ person, waId: thread.waId });
+
+  /**
    * Step 4: the policy gate runs again, on data read *now*.
    *
    * This is what stops the classic bulk-messaging defect — a campaign queued at
@@ -822,13 +828,7 @@ export const sendOutbound = async (
       serviceWindowExpiresAt: toDate(thread.serviceWindowExpiresAt),
       isBlocked: thread.isBlocked === true,
     },
-    person:
-      person === null
-        ? null
-        : {
-            whatsappOptInStatus: (person.whatsappOptInStatus ??
-              CONSENT_STATUS.UNKNOWN) as ConsentStatus,
-          },
+    person: { whatsappOptInStatus: consentStatus },
     account: {
       status: (account.status ?? ACCOUNT_STATUS.PENDING) as AccountStatus,
       qualityRating: (account.qualityRating ?? QUALITY.UNKNOWN) as Quality,

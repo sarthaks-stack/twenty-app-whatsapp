@@ -171,23 +171,69 @@ describe('routing claims', () => {
   it('keeps the WABA claim when another account still uses it', async () => {
     const deleted: string[] = [];
     const kvModule = await import('twenty-sdk/logic-function');
-    const original = kvModule.kv.delete;
+    const originalDelete = kvModule.kv.delete;
+    const originalGet = kvModule.kv.get;
 
     kvModule.kv.delete = (async (key: string) => {
       deleted.push(key);
 
       return true;
     }) as typeof kvModule.kv.delete;
+    kvModule.kv.get = (async () => 'ws-1') as typeof kvModule.kv.get;
 
     try {
-      await clearClaims({ phoneNumberId: 'pn-1', wabaId: 'waba-1', wabaStillInUse: true });
+      await clearClaims({
+        workspaceId: 'ws-1',
+        phoneNumberId: 'pn-1',
+        wabaId: 'waba-1',
+        wabaStillInUse: true,
+      });
       expect(deleted).toEqual(['wa:phone-number:pn-1']);
 
       deleted.length = 0;
-      await clearClaims({ phoneNumberId: 'pn-1', wabaId: 'waba-1', wabaStillInUse: false });
+      await clearClaims({
+        workspaceId: 'ws-1',
+        phoneNumberId: 'pn-1',
+        wabaId: 'waba-1',
+        wabaStillInUse: false,
+      });
       expect(deleted).toEqual(['wa:phone-number:pn-1', 'wa:waba:waba-1']);
     } finally {
-      kvModule.kv.delete = original;
+      kvModule.kv.delete = originalDelete;
+      kvModule.kv.get = originalGet;
+    }
+  });
+
+  /**
+   * The claims are SERVER-scoped and shared across every workspace on the
+   * server, so a disconnect must never delete a claim another tenant holds —
+   * that would silence their number's deliveries from a workspace that does
+   * not own it.
+   */
+  it('never deletes a claim held by another workspace', async () => {
+    const deleted: string[] = [];
+    const kvModule = await import('twenty-sdk/logic-function');
+    const originalDelete = kvModule.kv.delete;
+    const originalGet = kvModule.kv.get;
+
+    kvModule.kv.delete = (async (key: string) => {
+      deleted.push(key);
+
+      return true;
+    }) as typeof kvModule.kv.delete;
+    kvModule.kv.get = (async () => 'someone-else') as typeof kvModule.kv.get;
+
+    try {
+      await clearClaims({
+        workspaceId: 'ws-1',
+        phoneNumberId: 'pn-1',
+        wabaId: 'waba-1',
+        wabaStillInUse: false,
+      });
+      expect(deleted).toEqual([]);
+    } finally {
+      kvModule.kv.delete = originalDelete;
+      kvModule.kv.get = originalGet;
     }
   });
 });

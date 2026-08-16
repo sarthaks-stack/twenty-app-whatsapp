@@ -99,6 +99,7 @@ export const DEFAULTS = {
   rateMarketingUsd: 0.0225,
   rateUtilityUsd: 0.004,
   rateAuthenticationUsd: 0.004,
+  allowApiKeyAdmin: false,
 } as const;
 
 export const config = {
@@ -179,6 +180,11 @@ export const config = {
    */
   templateSubmitHourlyCap: () =>
     intVar('WA_TEMPLATE_SUBMIT_HOURLY_CAP', DEFAULTS.templateSubmitHourlyCap),
+  /**
+   * Off by default (SEC-5). An API key carries no readable role, so granting it
+   * admin authority is a decision a workspace makes explicitly, not a default.
+   */
+  allowApiKeyAdmin: () => boolVar('WA_ALLOW_API_KEY_ADMIN', DEFAULTS.allowApiKeyAdmin),
   rates: () => ({
     marketingUsd: numberVar('WA_RATE_MARKETING_USD', DEFAULTS.rateMarketingUsd),
     utilityUsd: numberVar('WA_RATE_UTILITY_USD', DEFAULTS.rateUtilityUsd),

@@ -47,14 +47,16 @@ export default defineRole({
   canSoftDeleteAllObjectRecords: false,
   canDestroyAllObjectRecords: false,
   objectPermissions: [
-    {
-      universalIdentifier: 'e1b4f0a7-3c62-4d95-8f27-6a3e9c1b5d80',
-      objectUniversalIdentifier: OBJ_THREAD,
-      canReadObjectRecords: true,
-      canUpdateObjectRecords: true,
-      canSoftDeleteObjectRecords: false,
-      canDestroyObjectRecords: false,
-    },
+    /**
+     * Threads are **read-only even for agents**, and this is a security
+     * control rather than tidiness: the outbound sender's binding re-check
+     * trusts `serviceWindowExpiresAt`, `isBlocked` and `personId`, so a direct
+     * Core-API write to any of them would let an agent reopen a closed window,
+     * unblock a suppressed conversation or detach an opted-out contact without
+     * any route's validation or audit. Every legitimate mutation goes through
+     * `wa-thread-actions-route`, which runs as the app.
+     */
+    readOnly(OBJ_THREAD, 'e1b4f0a7-3c62-4d95-8f27-6a3e9c1b5d80'),
     readOnly(OBJ_MESSAGE, 'b7c2e5d9-8a14-4f36-9b50-2d7f1a4c6e93'),
     readOnly(OBJ_TEMPLATE, '4f9a1c6b-2e58-4703-8d1f-5b8c3a7e2d46'),
     readOnly(OBJ_ACCOUNT, '8d3e7b2a-5f19-4c84-9a06-1e4b7d9c3f52'),

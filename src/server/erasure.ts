@@ -1,9 +1,10 @@
-import { CONSENT_METHOD } from '../domain/constants';
+import { CONSENT_METHOD, CONSENT_STATUS } from '../domain/constants';
 import { inBatches } from './batching';
 import { describeError, logger } from './logger';
 import { METRIC, count } from './metrics';
 import { pageOf, query } from './repositories/base';
 import { createConsentEvent } from './repositories/consent-events';
+import { findPersonById, patchPersonConsent } from './repositories/people';
 import { writeTimelineActivity, TIMELINE_EVENT } from './timeline';
 
 /**
@@ -398,6 +399,18 @@ export const erasePerson = async ({
     log.error('wa.erasure.incomplete', { ...counts, actorId });
 
     throw new ErasureIncompleteError('records');
+  }
+
+  /**
+   * The denormalised consent status is reset with the evidence. The events
+   * behind it are gone, so a Person left `OPTED_IN` would be an unauditable
+   * claim — and, worse, would keep an "erased" contact selectable for the
+   * next campaign. Uncaught on purpose: if this write fails the erasure must
+   * fail rather than hand back a receipt for a person who can still be
+   * messaged.
+   */
+  if ((await findPersonById(personId)) !== null) {
+    await patchPersonConsent(personId, CONSENT_STATUS.UNKNOWN, new Date());
   }
 
   /**

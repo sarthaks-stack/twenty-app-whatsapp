@@ -116,23 +116,56 @@ export const writeClaims = async ({
   await kv.set(wabaClaimKey(wabaId), workspaceId, { scope: 'SERVER' });
 };
 
+export type ClaimOwners = { phone: string | null; waba: string | null };
+
+/**
+ * Who currently holds each routing claim — `null` when unclaimed.
+ *
+ * The claims are SERVER-scoped and therefore **shared across every workspace
+ * on the server**, which is what makes them worth stealing: whoever holds
+ * `wa:phone-number:{id}` receives that number's signed webhooks. So no write
+ * or delete of a claim happens without first reading who owns it.
+ */
+export const readClaimOwners = async ({
+  phoneNumberId,
+  wabaId,
+}: {
+  phoneNumberId: string;
+  wabaId: string;
+}): Promise<ClaimOwners> => ({
+  phone: (await kv.get<string>(phoneClaimKey(phoneNumberId), { scope: 'SERVER' })) ?? null,
+  waba: (await kv.get<string>(wabaClaimKey(wabaId), { scope: 'SERVER' })) ?? null,
+});
+
 /**
  * The WABA claim is *not* cleared on disconnect when another connected account
  * still shares that WABA — several numbers commonly live under one business
  * account, and clearing it would break the others' template events.
+ *
+ * Deletion is owner-checked: a claim held by a *different* workspace is left
+ * alone, so disconnecting a local record whose Meta IDs happen to match
+ * another tenant's number cannot silence that tenant's deliveries.
  */
 export const clearClaims = async ({
+  workspaceId,
   phoneNumberId,
   wabaId,
   wabaStillInUse,
 }: {
+  workspaceId: string;
   phoneNumberId: string;
   wabaId: string;
   wabaStillInUse: boolean;
 }): Promise<void> => {
-  await kv.delete(phoneClaimKey(phoneNumberId), { scope: 'SERVER' });
+  const owners = await readClaimOwners({ phoneNumberId, wabaId });
 
-  if (!wabaStillInUse) await kv.delete(wabaClaimKey(wabaId), { scope: 'SERVER' });
+  if (owners.phone === workspaceId) {
+    await kv.delete(phoneClaimKey(phoneNumberId), { scope: 'SERVER' });
+  }
+
+  if (!wabaStillInUse && owners.waba === workspaceId) {
+    await kv.delete(wabaClaimKey(wabaId), { scope: 'SERVER' });
+  }
 };
 
 const ACCOUNT_SUMMARY = {
@@ -465,6 +498,32 @@ export const handler = async (
           );
         }
 
+        /**
+         * Ownership before anything else (SEC-5). A connect naming another
+         * tenant's Meta IDs must be refused outright — overwriting their
+         * SERVER-scoped claims would silently divert their inbound messages,
+         * statuses and template events into this workspace. The kv store has
+         * no compare-and-set, so this is read-check-write; the remaining race
+         * needs two admins connecting the same number in the same instant,
+         * and the loser's claim is still visible in the resolver's routing.
+         */
+        const claimOwners = await readClaimOwners({ phoneNumberId, wabaId });
+
+        if (
+          (claimOwners.phone !== null && claimOwners.phone !== workspaceId) ||
+          (claimOwners.waba !== null && claimOwners.waba !== workspaceId)
+        ) {
+          log.warn('wa.account.claim_conflict', { phoneNumberId, wabaId });
+
+          return new Response(
+            {
+              error:
+                'This phone number or WhatsApp Business Account is already connected in another workspace',
+            },
+            { status: 409 },
+          );
+        }
+
         const existing = await findAccountByPhoneNumberId(phoneNumberId);
 
         const account: WhatsappAccountRecord | null =
@@ -531,6 +590,23 @@ export const handler = async (
         await writeClaims({ workspaceId, phoneNumberId, wabaId });
 
         const probe = await probeNumber(account.id, phoneNumberId);
+
+        /**
+         * A failed probe *rolls back claims this request newly wrote*. Keeping
+         * an unproven claim would let anyone squat an unclaimed number — and
+         * later refuse its real owner's connect. A claim that was already ours
+         * before this request is kept, so a token that fails today on an
+         * established number still resumes delivery once fixed.
+         */
+        if (!probe.ok) {
+          if (claimOwners.phone === null) {
+            await kv.delete(phoneClaimKey(phoneNumberId), { scope: 'SERVER' });
+          }
+
+          if (claimOwners.waba === null) {
+            await kv.delete(wabaClaimKey(wabaId), { scope: 'SERVER' });
+          }
+        }
 
         /**
          * Subscribing the app to the WABA is the step whose absence is
@@ -605,9 +681,20 @@ export const handler = async (
           return new Response({ error: 'Unknown account' }, { status: 404 });
         }
 
+        const workspaceId = await currentWorkspaceId();
+
+        if (workspaceId === null) {
+          log.error('wa.account.no_workspace_id');
+
+          return new Response(
+            { error: 'Could not determine the workspace that owns the routing claim' },
+            { status: 500 },
+          );
+        }
+
         const others = await countOtherAccountsOnWaba(wabaId, account.id);
 
-        await clearClaims({ phoneNumberId, wabaId, wabaStillInUse: others > 0 });
+        await clearClaims({ workspaceId, phoneNumberId, wabaId, wabaStillInUse: others > 0 });
 
         /**
          * Disabled, not deleted. The conversations, messages and campaign

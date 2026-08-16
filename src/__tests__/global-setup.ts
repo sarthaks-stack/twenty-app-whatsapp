@@ -4,6 +4,8 @@ import * as path from 'path';
 
 import { appDevOnce, appUninstall } from 'twenty-sdk/cli';
 
+import { APPLICATION_UNIVERSAL_IDENTIFIER } from '../constants/universal-identifiers';
+
 const APP_PATH = process.cwd();
 const CONFIG_DIR = path.join(os.homedir(), '.twenty');
 
@@ -118,6 +120,50 @@ async function assertWorkspaceIsDisposable(apiUrl: string, apiKey: string) {
   );
 }
 
+/**
+ * The routes refuse machine callers unless `WA_ALLOW_API_KEY_ADMIN` is on
+ * (SEC-5) — and this suite *is* a machine caller: every request it makes
+ * carries the API key. So the flag is switched on for the scratch workspace,
+ * explicitly, the same way a real automation operator would.
+ */
+async function enableApiKeyRoutes(apiUrl: string, apiKey: string) {
+  const call = async (query: string): Promise<Record<string, unknown>> => {
+    const response = await fetch(`${apiUrl}/metadata`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query }),
+    });
+
+    const body = (await response.json()) as {
+      data?: Record<string, unknown>;
+      errors?: { message?: string }[];
+    };
+
+    if (body.errors?.length) {
+      throw new Error(body.errors.map((error) => error.message).join('; '));
+    }
+
+    return body.data ?? {};
+  };
+
+  const found = (await call(
+    `query { findOneApplication(universalIdentifier: "${APPLICATION_UNIVERSAL_IDENTIFIER}") { id } }`,
+  )) as { findOneApplication?: { id?: string } };
+
+  const applicationId = found.findOneApplication?.id;
+
+  if (typeof applicationId !== 'string') {
+    throw new Error('Could not find the installed application to enable WA_ALLOW_API_KEY_ADMIN');
+  }
+
+  await call(
+    `mutation { updateOneApplicationVariable(key: "WA_ALLOW_API_KEY_ADMIN", value: "true", applicationId: "${applicationId}") }`,
+  );
+}
+
 export async function setup() {
   const { apiUrl, apiKey } = validateEnv();
 
@@ -138,6 +184,8 @@ export async function setup() {
       `Dev sync failed: ${result.error?.message ?? 'Unknown error'}`,
     );
   }
+
+  await enableApiKeyRoutes(apiUrl, apiKey);
 }
 
 export async function teardown() {

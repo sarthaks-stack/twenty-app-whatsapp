@@ -69,6 +69,31 @@ describe('resolving a workspace file url', () => {
     expect(() => resolveFileUrl({})).toThrow(/No file url or path/);
   });
 
+  /**
+   * The origin check alone is not enough: everything on the origin outside
+   * `/files/` is the workspace's *data*, and this module fetches with the
+   * app's own token. `/rest/people` sent to a WhatsApp number as a "document"
+   * is an exfiltration, not a file read.
+   */
+  it.each([
+    ['the REST API', 'https://crm.example.test/rest/people?limit=100'],
+    ['GraphQL', 'https://crm.example.test/graphql'],
+    ['a bare path', 'https://crm.example.test/anything'],
+    ['a files lookalike', 'https://crm.example.test/files-2/x.png'],
+  ])('refuses %s even on the workspace origin', (_label, url) => {
+    expect(() => resolveFileUrl({ url })).toThrow(/only \/files\/ paths/);
+  });
+
+  it('refuses an encoded traversal out of the file store', () => {
+    expect(() => resolveFileUrl({ url: 'https://crm.example.test/files/%2e%2e/rest/people' })).toThrow(
+      WorkspaceFileError,
+    );
+    // A literal traversal is collapsed by URL parsing and lands outside /files/.
+    expect(() => resolveFileUrl({ url: 'https://crm.example.test/files/../rest/people' })).toThrow(
+      WorkspaceFileError,
+    );
+  });
+
   it('fails closed when the api url is not configured', () => {
     delete process.env.TWENTY_API_URL;
 
@@ -174,6 +199,40 @@ describe('downloading a workspace file', () => {
         { fetchImpl: fetchImpl as unknown as typeof globalThis.fetch },
       ),
     ).rejects.toBeInstanceOf(WorkspaceFileError);
+  });
+
+  /**
+   * A redirect is a way out of the origin-and-path guard: the request the
+   * guard approved is not the request a 302 would make.
+   */
+  it('tells fetch to treat redirects as errors', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(response([1], 'image/png'));
+
+    await downloadWorkspaceFile(
+      { path: 'files/x.png' },
+      { fetchImpl: fetchImpl as unknown as typeof globalThis.fetch },
+    );
+
+    expect(fetchImpl.mock.calls[0]?.[1]?.redirect).toBe('error');
+  });
+
+  it('refuses a body whose declared length is over the media ceiling', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([1]).buffer as ArrayBuffer, {
+        status: 200,
+        headers: {
+          'content-type': 'video/mp4',
+          'content-length': String(101 * 1024 * 1024),
+        },
+      }),
+    );
+
+    await expect(
+      downloadWorkspaceFile(
+        { path: 'files/huge.mp4' },
+        { fetchImpl: fetchImpl as unknown as typeof globalThis.fetch },
+      ),
+    ).rejects.toThrow(/ceiling/);
   });
 
   it('turns a non-200 into a WorkspaceFileError naming the status', async () => {

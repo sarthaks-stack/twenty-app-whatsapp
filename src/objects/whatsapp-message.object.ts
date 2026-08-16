@@ -279,6 +279,9 @@ export default defineObject({
       icon: 'IconKey',
       type: FieldType.TEXT,
       isNullable: true,
+      // The unique index is the idempotency guarantee: two concurrent retries
+      // both pass the read-then-check, and the second *create* is what fails.
+      isUnique: true,
     },
   ],
 });

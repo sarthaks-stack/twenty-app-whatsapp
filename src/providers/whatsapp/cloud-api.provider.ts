@@ -1,3 +1,4 @@
+import { BodyTooLargeError, readBodyCapped } from '../../server/read-body';
 import { graphBaseUrl, requireSecret } from './config';
 import { MetaApiError, ambiguousError, fromResponseBody, networkError } from './errors';
 import type {
@@ -22,6 +23,9 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const MEDIA_TIMEOUT_MS = 90_000;
+
+/** Just above WhatsApp's own 100 MB document ceiling — nothing legitimate is bigger. */
+export const MAX_MEDIA_DOWNLOAD_BYTES = 110 * 1024 * 1024;
 
 /**
  * The only hosts the access token is ever sent to.
@@ -278,11 +282,26 @@ export const createCloudApiProvider = (): WhatsAppProvider => ({
        * `finally` that cleared the timer, so a connection that stalled
        * mid-download was no longer being aborted by anything of ours — it held
        * the worker until the platform's own timeout (D-41).
+       *
+       * And it is capped: WhatsApp media tops out at a 100 MB document, so a
+       * body past the ceiling can only be a memory exhaustion, and it is cut
+       * off mid-stream rather than buffered first.
        */
-      return {
-        buffer: Buffer.from(await response.arrayBuffer()),
-        mimeType: response.headers.get('content-type') ?? 'application/octet-stream',
-      };
+      try {
+        return {
+          buffer: await readBodyCapped(response, MAX_MEDIA_DOWNLOAD_BYTES),
+          mimeType: response.headers.get('content-type') ?? 'application/octet-stream',
+        };
+      } catch (error) {
+        if (error instanceof BodyTooLargeError) {
+          throw new MetaApiError(
+            `Media download exceeds the ${MAX_MEDIA_DOWNLOAD_BYTES}-byte ceiling`,
+            { httpStatus: 200 },
+          );
+        }
+
+        throw error;
+      }
     } finally {
       clearTimeout(timer);
     }

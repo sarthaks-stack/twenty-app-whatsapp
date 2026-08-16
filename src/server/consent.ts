@@ -3,9 +3,13 @@ import {
   type ConsentMethod,
   type ConsentStatus,
 } from '../domain/constants';
-import { logger } from './logger';
+import { describeError, logger } from './logger';
 import { createConsentEvent } from './repositories/consent-events';
-import { findPersonById, patchPersonConsent } from './repositories/people';
+import {
+  findPeopleByPrimaryPhone,
+  findPersonById,
+  patchPersonConsent,
+} from './repositories/people';
 import { TIMELINE_EVENT, writeTimelineActivity } from './timeline';
 
 /**
@@ -42,6 +46,51 @@ const asConsentStatus = (value: unknown): ConsentStatus =>
   value === CONSENT_STATUS.OPTED_IN || value === CONSENT_STATUS.OPTED_OUT
     ? value
     : CONSENT_STATUS.UNKNOWN;
+
+/**
+ * The consent status a send to this destination must obey (SEC-6).
+ *
+ * The thread→person relation is *mutable* — any agent can detach or re-link a
+ * conversation — so a suppression that read only the linked Person could be
+ * bypassed by detaching an opted-out contact (status falls to `UNKNOWN`) or by
+ * re-linking the thread to someone who opted in. The destination itself cannot
+ * be re-linked: it is the `waId` the message will actually reach. So an
+ * opt-out held by *any* Person whose phone matches the waId is binding,
+ * whatever the thread currently points at.
+ *
+ * The phone sweep is defense-in-depth on top of the linked-person check; if it
+ * cannot be read the linked verdict still stands, and the failure is logged
+ * rather than allowed to block every send.
+ */
+export const effectiveConsentStatus = async ({
+  person,
+  waId,
+}: {
+  person: { whatsappOptInStatus?: string | null } | null;
+  waId: string | null | undefined;
+}): Promise<ConsentStatus> => {
+  const linked = asConsentStatus(person?.whatsappOptInStatus);
+
+  if (linked === CONSENT_STATUS.OPTED_OUT) return linked;
+
+  if (typeof waId === 'string' && waId.length > 0) {
+    try {
+      const matches = await findPeopleByPrimaryPhone([`+${waId}`]);
+
+      if (
+        matches.some(
+          (match) => asConsentStatus(match.whatsappOptInStatus) === CONSENT_STATUS.OPTED_OUT,
+        )
+      ) {
+        return CONSENT_STATUS.OPTED_OUT;
+      }
+    } catch (error) {
+      logger.warn('consent.phone_sweep_failed', { waId, ...describeError(error) });
+    }
+  }
+
+  return linked;
+};
 
 /**
  * Idempotent: re-stating the current status writes nothing and returns

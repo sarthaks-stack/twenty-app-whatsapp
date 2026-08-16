@@ -39,6 +39,8 @@ const secretValues = (): string[] =>
     process.env.META_ACCESS_TOKEN,
     process.env.META_APP_SECRET,
     process.env.META_VERIFY_TOKEN,
+    process.env.TWENTY_APP_ACCESS_TOKEN,
+    process.env.TWENTY_API_KEY,
   ].filter((value): value is string => typeof value === 'string' && value.length >= 8);
 
 const MAX_DEPTH = 6;

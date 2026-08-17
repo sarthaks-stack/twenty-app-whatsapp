@@ -332,39 +332,93 @@ export type ThreadPage = { threads: WhatsappThreadRecord[]; nextCursor: string |
  * message, so an incremental list would show a stale order until something in
  * it happened to change. Fifty rows on each poll is the honest read.
  */
+/**
+ * One filter expression per inbox tab, in one place.
+ *
+ * Extracted so the count read below cannot drift from the list read above: a
+ * "Fechadas 12" beside a list of eleven is worse than no number at all, and
+ * two copies of this expression is exactly how that happens.
+ *
+ * `as const` on every branch, not for style: without it each enum literal
+ * widens to `string` and the generated filter input rejects the lot.
+ */
+export const inboxFilterFor = (spec: InboxFilterSpec) => {
+  const notClosed = { status: { neq: 'CLOSED' } } as const;
+
+  switch (spec.kind) {
+    case 'mine':
+      return { ...notClosed, assigneeId: { eq: spec.assigneeId } } as const;
+
+    case 'unassigned':
+      return { ...notClosed, assigneeId: { is: 'NULL' } } as const;
+
+    case 'campaign_replies':
+      return {
+        ...notClosed,
+        originCampaignId: { is: 'NOT_NULL' },
+        lastMessageDirection: { eq: 'INBOUND' },
+      } as const;
+
+    case 'window_expiring': {
+      /**
+       * A two-sided range spelled as an `and` of two one-sided filters, which
+       * looks redundant and is not.
+       *
+       * `serviceWindowExpiresAt: { gte, lte }` is the obvious way to write it
+       * and the platform refuses it outright — *"Filter for field must have
+       * exactly one operator"*, `INVALID_ARGS_FILTER`, a 500 on the whole
+       * read. It **was** written the obvious way, so the "A fechar" filter
+       * answered nothing but an error for as long as it existed. Nothing
+       * caught it because the route's test fake accepted two operators where
+       * the server does not; the fake now enforces the rule.
+       *
+       * Held in a variable rather than inlined so the array stays mutable:
+       * `as const` would make it a readonly tuple, and the generated filter
+       * input takes a plain array.
+       */
+      const within = [
+        { serviceWindowExpiresAt: { gte: spec.now.toISOString() } },
+        { serviceWindowExpiresAt: { lte: spec.horizon.toISOString() } },
+      ];
+
+      return { ...notClosed, windowState: { eq: 'OPEN' }, and: within } as const;
+    }
+
+    case 'closed':
+      return { status: { eq: 'CLOSED' } } as const;
+
+    default:
+      return notClosed;
+  }
+};
+
+/**
+ * How many conversations a filter holds, without reading any of them.
+ *
+ * `first: 0` and `totalCount` only — the badge needs a number, not fifty rows
+ * it will throw away. Called at most once per filter and never on the fast
+ * poll (see `FeedQuery.counts`).
+ */
+export const countInboxThreads = async (spec: InboxFilterSpec): Promise<number> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappThreads: {
+          __args: { filter: inboxFilterFor(spec), first: 0 },
+          totalCount: true,
+        },
+      }),
+    'threads.countInbox',
+  );
+
+  return result.whatsappThreads?.totalCount ?? 0;
+};
+
 export const listInboxThreads = async (
   spec: InboxFilterSpec,
   { limit = 50, after = null }: { limit?: number; after?: string | null } = {},
 ): Promise<ThreadPage> => {
-  const notClosed = { status: { neq: 'CLOSED' } } as const;
-
-  /**
-   * `as const` on every branch, not for style: without it each enum literal
-   * widens to `string` and the generated filter input rejects the lot.
-   */
-  const filter =
-    spec.kind === 'mine'
-      ? ({ ...notClosed, assigneeId: { eq: spec.assigneeId } } as const)
-      : spec.kind === 'unassigned'
-        ? ({ ...notClosed, assigneeId: { is: 'NULL' } } as const)
-        : spec.kind === 'campaign_replies'
-          ? ({
-              ...notClosed,
-              originCampaignId: { is: 'NOT_NULL' },
-              lastMessageDirection: { eq: 'INBOUND' },
-            } as const)
-          : spec.kind === 'window_expiring'
-            ? ({
-                ...notClosed,
-                windowState: { eq: 'OPEN' },
-                serviceWindowExpiresAt: {
-                  gte: spec.now.toISOString(),
-                  lte: spec.horizon.toISOString(),
-                },
-              } as const)
-            : spec.kind === 'closed'
-              ? ({ status: { eq: 'CLOSED' } } as const)
-              : notClosed;
+  const filter = inboxFilterFor(spec);
 
   const result = await query(
     (client) =>

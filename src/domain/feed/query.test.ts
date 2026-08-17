@@ -32,7 +32,32 @@ describe('parseFeedQuery', () => {
         filter: INBOX_FILTER.ALL,
         before: null,
         limit: DEFAULT_MESSAGE_PAGE,
+        counts: false,
       },
+    });
+  });
+
+  it('treats a missing counts flag as off, and refuses anything but 0 or 1', () => {
+    expect(parseFeedQuery({ scope: 'inbox' })).toMatchObject({
+      ok: true,
+      query: { counts: false },
+    });
+    expect(parseFeedQuery({ scope: 'inbox', counts: '1' })).toMatchObject({
+      ok: true,
+      query: { counts: true },
+    });
+    expect(parseFeedQuery({ scope: 'inbox', counts: '0' })).toMatchObject({
+      ok: true,
+      query: { counts: false },
+    });
+
+    /**
+     * Refused rather than read as falsy. Six extra reads is a decision, and a
+     * typo must not make it silently — in either direction.
+     */
+    expect(parseFeedQuery({ scope: 'inbox', counts: 'true' })).toEqual({
+      ok: false,
+      error: 'counts must be 0 or 1: true',
     });
   });
 

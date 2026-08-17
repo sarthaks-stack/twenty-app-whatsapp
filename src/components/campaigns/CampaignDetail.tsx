@@ -2,9 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { openCommandConfirmationModal } from 'twenty-sdk/front-component';
 import { useTheme } from 'twenty-ui/theme-constants';
 
-import type { Translate } from '../common/copy';
+import type { Lang, Translate } from '../common/copy';
+import { relativeTime } from '../common/format';
+import { Glyph } from '../common/icons';
 import { ActionButton, Banner, Card, StatusPill } from '../common/ui';
 import { useCampaignActions } from './campaign-actions';
+import { deliveryFunnel, RUNNING_STATUSES } from './list';
 
 /**
  * One campaign: what it will cost, who it will miss, and how to stop it
@@ -27,6 +30,8 @@ export type CampaignDetailProps = {
   recipients: Record<string, any>[];
   canManage: boolean;
   t: Translate;
+  lang: Lang;
+  now: Date;
   onBack: () => void;
   onChanged: () => void;
 };
@@ -70,6 +75,8 @@ export const CampaignDetail = ({
   recipients,
   canManage,
   t,
+  lang,
+  now,
   onBack,
   onChanged,
 }: CampaignDetailProps) => {
@@ -132,12 +139,19 @@ export const CampaignDetail = ({
     [run],
   );
 
-  const label = { fontSize: theme.font.size.xxs, color: theme.font.color.tertiary };
+  const label = { fontSize: theme.font.size.xs, color: theme.font.color.tertiary };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing[2] }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing[2] }}>
-        <ActionButton label={`← ${t('campaign.title')}`} onClick={onBack} />
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: theme.spacing[2],
+          flexWrap: 'wrap',
+        }}
+      >
+        <ActionButton label={t('campaign.title')} icon="back" onClick={onBack} />
         <span
           style={{
             fontWeight: theme.font.weight.semiBold,
@@ -147,7 +161,27 @@ export const CampaignDetail = ({
         >
           {campaign.name ?? '—'}
         </span>
-        <StatusPill status={status} />
+        <StatusPill status={status} t={t} />
+        {RUNNING_STATUSES.has(String(status)) ? (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: theme.spacing[1],
+              fontSize: theme.font.size.xs,
+              color: theme.font.color.tertiary,
+            }}
+          >
+            <Glyph name="running" />
+            {t('campaign.updated', {
+              when: relativeTime(
+                (campaign.updatedAt ?? campaign.createdAt ?? null) as string | null,
+                now,
+                lang,
+              ),
+            })}
+          </span>
+        ) : null}
         <span style={{ flex: '1 1 auto' }} />
 
         {/*
@@ -165,6 +199,7 @@ export const CampaignDetail = ({
           <ActionButton
             label={t('campaign.launch')}
             tone="primary"
+            icon="running"
             busy={busy}
             onClick={() =>
               void confirmThen(
@@ -181,6 +216,7 @@ export const CampaignDetail = ({
         {canManage && (status === 'RUNNING' || status === 'TIER_WAITING') ? (
           <ActionButton
             label={t('campaign.pause')}
+            icon="paused"
             busy={busy}
             onClick={() =>
               void confirmThen(t('campaign.pause'), String(campaign.name ?? ''), 'pause')
@@ -190,6 +226,7 @@ export const CampaignDetail = ({
         {canManage && status === 'PAUSED' ? (
           <ActionButton
             label={t('campaign.resume')}
+            icon="running"
             busy={busy}
             onClick={() =>
               void confirmThen(t('campaign.resume'), String(campaign.name ?? ''), 'resume')
@@ -203,6 +240,7 @@ export const CampaignDetail = ({
           <ActionButton
             label={t('campaign.cancel')}
             tone="danger"
+            icon="dismiss"
             busy={busy}
             onClick={() =>
               void confirmThen(
@@ -250,6 +288,77 @@ export const CampaignDetail = ({
           </div>
         </div>
       </Card>
+
+      {/*
+        The same nine numbers as a shape. The grid above answers "how many
+        read it"; this answers "how many of the people we sent to" — which is
+        the question anyone asks second, and which nine equal figures in a row
+        make you do arithmetic for.
+
+        Only once there is an audience to be a share of: five empty bars under
+        a draft say nothing a zero does not.
+      */}
+      {Number(campaign.recipientCount ?? 0) === 0 ? null : (
+        <Card title={t('campaign.funnel')}>
+          <div
+            style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing[1] }}
+          >
+            {deliveryFunnel(campaign).map((stage) => (
+              <div
+                key={stage.key}
+                style={{ display: 'flex', alignItems: 'center', gap: theme.spacing[2] }}
+              >
+                <span
+                  style={{
+                    flex: '0 0 120px',
+                    fontSize: theme.font.size.sm,
+                    color: theme.font.color.secondary,
+                  }}
+                >
+                  {t(stage.key)}
+                </span>
+                {/*
+                  `role="img"` with the numbers in the label: the bar is a
+                  picture of a figure that is already on the row, so a screen
+                  reader gets the sentence and not a stray graphic.
+                */}
+                <span
+                  role="img"
+                  aria-label={`${t(stage.key)}: ${stage.value}`}
+                  style={{
+                    flex: '1 1 auto',
+                    height: '8px',
+                    borderRadius: theme.border.radius.pill,
+                    background: theme.background.transparent.light,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <span
+                    style={{
+                      display: 'block',
+                      width: `${Math.round(stage.share * 100)}%`,
+                      height: '100%',
+                      background: theme.color.blue,
+                    }}
+                  />
+                </span>
+                <span
+                  style={{
+                    flex: '0 0 auto',
+                    fontSize: theme.font.size.sm,
+                    color: theme.font.color.primary,
+                    minWidth: '48px',
+                    textAlign: 'right',
+                  }}
+                >
+                  {stage.value}
+                </span>
+              </div>
+            ))}
+          </div>
+          <span style={label}>{t('campaign.funnelNote')}</span>
+        </Card>
+      )}
 
       {preflight === null ? null : (
         <>
@@ -396,6 +505,7 @@ export const CampaignDetail = ({
           {canManage && status === 'READY' ? (
             <ActionButton
               label={t('campaign.testSend')}
+              icon="testAccount"
               busy={busy}
               onClick={() => void run('testSend')}
             />

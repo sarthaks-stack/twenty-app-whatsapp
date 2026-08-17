@@ -51,6 +51,16 @@ export type FeedQuery = {
   filter: InboxFilter;
   before: string | null;
   limit: number;
+  /**
+   * Ask the inbox scope for a count per filter as well as the current page.
+   *
+   * Opt-in rather than always-on, and the reason is D-6. Counting six filters
+   * means six more reads, and the inbox already polls every eight seconds; a
+   * number beside "Fechadas" is not worth multiplying the workspace's query
+   * load by seven, forever, on every open tab. The surface asks for it on a
+   * much slower clock instead.
+   */
+  counts: boolean;
 };
 
 export type FeedQueryResult =
@@ -116,6 +126,16 @@ export const parseFeedQuery = (
     return { ok: false, error: 'id is required for scope=thread' };
   }
 
+  /**
+   * Refused rather than defaulted, like every other value here. `counts=yes`
+   * silently meaning "no" is the failure this file exists to prevent.
+   */
+  const rawCounts = trimmed(params.counts);
+
+  if (rawCounts !== null && rawCounts !== '1' && rawCounts !== '0') {
+    return { ok: false, error: `counts must be 0 or 1: ${rawCounts}` };
+  }
+
   return {
     ok: true,
     query: {
@@ -126,6 +146,7 @@ export const parseFeedQuery = (
       filter: rawFilter,
       before: trimmed(params.before),
       limit,
+      counts: rawCounts === '1',
     },
   };
 };

@@ -6,6 +6,7 @@ import { useTheme } from 'twenty-ui/theme-constants';
 
 import { useCopy } from '../common/copy';
 import { relativeTime } from '../common/format';
+import { Glyph } from '../common/icons';
 import {
   ActionButton,
   Banner,
@@ -443,7 +444,24 @@ export const SettingsView = () => {
               value={data?.webhook.verifyUrl ?? null}
               copyLabel={t('common.copy')}
             />
-            <div style={{ fontSize: theme.font.size.md, color: theme.font.color.secondary }}>
+            {/*
+              The alert is an element now, not a character inside the
+              translated string, so it renders at icon scale in the theme's own
+              danger colour — and cannot be lost in a re-wording.
+            */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: theme.spacing[1],
+                fontSize: theme.font.size.md,
+                color:
+                  data?.webhook.verifyTokenConfigured === true
+                    ? theme.font.color.secondary
+                    : theme.font.color.danger,
+              }}
+            >
+              {data?.webhook.verifyTokenConfigured === true ? null : <Glyph name="warning" />}
               {t('settings.verifyToken')}:{' '}
               {data?.webhook.verifyTokenConfigured === true
                 ? t('settings.verifyTokenSet')

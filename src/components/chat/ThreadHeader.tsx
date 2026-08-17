@@ -1,8 +1,10 @@
+import { Tag } from 'twenty-ui/data-display';
 import { useTheme } from 'twenty-ui/theme-constants';
 
 import type { AccountProjection, ThreadProjection } from '../../domain/feed/projection';
 import type { Translate } from '../common/copy';
 import { countdown, displayPhone } from '../common/format';
+import { Glyph, ICON, type IconName } from '../common/icons';
 
 /**
  * Who this conversation is with, and what state it is in (specs/08 §3, FR-UI-6).
@@ -11,6 +13,10 @@ import { countdown, displayPhone } from '../common/format';
  * so it says the same thing three ways — colour, icon and words — and the
  * countdown is truncated rather than rounded (`format.countdown`), because a
  * window with fifty seconds left must not read "1m".
+ *
+ * Every chip below is now Twenty's own `Tag`, carrying the icon through its
+ * `Icon` prop. They were hand-rolled 8px spans before, which made the header's
+ * most important information the smallest thing on it.
  */
 
 export type ThreadHeaderProps = {
@@ -20,6 +26,10 @@ export type ThreadHeaderProps = {
   now: Date;
   onToggleBlock?: () => void;
   onClose?: () => void;
+  /** Absent when the caller may not act, or when the server never named them. */
+  onAssign?: () => void;
+  /** The caller's own workspace member id, as the server resolved it (D-53). */
+  viewerId?: string | null;
 };
 
 export const WindowChip = ({
@@ -31,56 +41,32 @@ export const WindowChip = ({
   t: Translate;
   now: Date;
 }) => {
-  const theme = useTheme();
   const remaining = countdown(thread.serviceWindowExpiresAt, now);
   const open = remaining !== null;
 
   return (
-    <div
-      className="wa-window-chip"
-      role="status"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: theme.spacing[1],
-        fontSize: theme.font.size.xs,
-        color: open ? theme.font.color.secondary : theme.font.color.tertiary,
-        background: open
-          ? theme.background.transparent.success
-          : theme.background.transparent.light,
-        borderRadius: theme.border.radius.pill,
-        padding: `${theme.spacing[0.5]} ${theme.spacing[2]}`,
-      }}
-    >
-      <span aria-hidden="true">{open ? '🟢' : '🔒'}</span>
-      <span>
-        {open
-          ? `${t('chat.windowOpen')} — ${t('chat.closesIn', { time: remaining })}`
-          : t('chat.windowClosed')}
-      </span>
-    </div>
+    <span className="wa-window-chip" role="status">
+      <Tag
+        color={open ? 'green' : 'gray'}
+        Icon={open ? ICON.windowOpen : ICON.windowClosed}
+        text={
+          open
+            ? `${t('chat.windowOpen')} — ${t('chat.closesIn', { time: remaining })}`
+            : t('chat.windowClosed')
+        }
+        weight="medium"
+        preventShrink
+      />
+    </span>
   );
 };
 
-const Chip = ({ children, tone }: { children: React.ReactNode; tone?: 'danger' }) => {
-  const theme = useTheme();
+/** Which mark and colour a consent state wears (review §"chat status"). */
+const consentTag = (consent: string): { icon: IconName; color: 'green' | 'red' | 'gray' } => {
+  if (consent === 'OPTED_IN') return { icon: 'optedIn', color: 'green' };
+  if (consent === 'OPTED_OUT') return { icon: 'optedOut', color: 'red' };
 
-  return (
-    <span
-      style={{
-        fontSize: theme.font.size.xxs,
-        color: tone === 'danger' ? theme.font.color.danger : theme.font.color.secondary,
-        background:
-          tone === 'danger'
-            ? theme.background.transparent.danger
-            : theme.background.transparent.light,
-        borderRadius: theme.border.radius.sm,
-        padding: `0 ${theme.spacing[1]}`,
-      }}
-    >
-      {children}
-    </span>
-  );
+  return { icon: 'consentUnknown', color: 'gray' };
 };
 
 export const ThreadHeader = ({
@@ -90,6 +76,8 @@ export const ThreadHeader = ({
   now,
   onToggleBlock,
   onClose,
+  onAssign,
+  viewerId = null,
 }: ThreadHeaderProps) => {
   const theme = useTheme();
 
@@ -100,6 +88,31 @@ export const ThreadHeader = ({
         (thread.profileName ?? '');
 
   const consent = thread.person?.whatsappOptInStatus ?? 'UNKNOWN';
+  const consentStyle = consentTag(consent);
+
+  const mine = viewerId !== null && thread.assigneeId === viewerId;
+  const assigned = thread.assigneeId !== null;
+
+  /**
+   * A header button. 28px and a real border, rather than the 8px-type,
+   * zero-padding text the review measured — these are the controls that block
+   * a customer and close a conversation.
+   */
+  const button: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: theme.spacing[1],
+    minHeight: '28px',
+    border: `1px solid ${theme.border.color.medium}`,
+    borderRadius: theme.border.radius.sm,
+    background: 'transparent',
+    color: theme.font.color.secondary,
+    cursor: 'pointer',
+    fontFamily: theme.font.family,
+    fontSize: theme.font.size.xs,
+    padding: `0 ${theme.spacing[2]}`,
+    whiteSpace: 'nowrap',
+  };
 
   return (
     <div
@@ -123,42 +136,83 @@ export const ThreadHeader = ({
         <span
           style={{
             fontWeight: theme.font.weight.semiBold,
-            fontSize: theme.font.size.sm,
+            fontSize: theme.font.size.md,
             color: theme.font.color.primary,
           }}
         >
           {name === '' ? displayPhone(thread.waId) : name}
         </span>
-        <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
+        <span style={{ fontSize: theme.font.size.sm, color: theme.font.color.tertiary }}>
           {displayPhone(thread.dialablePhone ?? thread.waId)}
         </span>
 
-        {thread.status === 'NEEDS_REVIEW' ? <Chip>{t('chat.needsReview')}</Chip> : null}
-        {thread.isBlocked ? <Chip tone="danger">{t('chat.blocked')}</Chip> : null}
-        <Chip>{t(`consent.${consent}`)}</Chip>
-        {account?.isTestAccount === true ? <Chip>{t('chat.testAccount')}</Chip> : null}
-        {account?.qualityRating === 'YELLOW' ? <Chip>{t('chat.qualityYellow')}</Chip> : null}
+        {thread.status === 'NEEDS_REVIEW' ? (
+          <Tag color="orange" Icon={ICON.needsReview} text={t('chat.needsReview')} weight="medium" />
+        ) : null}
+        {thread.isBlocked ? (
+          <Tag color="red" Icon={ICON.blocked} text={t('chat.blocked')} weight="medium" />
+        ) : null}
+        <Tag
+          color={consentStyle.color}
+          Icon={ICON[consentStyle.icon]}
+          text={t(`consent.${consent}`)}
+          weight="medium"
+        />
+        {account?.isTestAccount === true ? (
+          <Tag color="purple" Icon={ICON.testAccount} text={t('chat.testAccount')} weight="medium" />
+        ) : null}
+        {account?.qualityRating === 'YELLOW' ? (
+          <Tag color="orange" Icon={ICON.warning} text={t('chat.qualityYellow')} weight="medium" />
+        ) : null}
         {account?.qualityRating === 'RED' ? (
-          <Chip tone="danger">{t('chat.qualityRed')}</Chip>
+          <Tag color="red" Icon={ICON.warning} text={t('chat.qualityRed')} weight="medium" />
         ) : null}
 
+        {/*
+          Who is handling this. Shown even when the viewer cannot change it —
+          "somebody already has this" is the thing a second rep needs to know
+          before they answer the same customer twice (FR-THR-3).
+        */}
+        <Tag
+          color={mine ? 'blue' : assigned ? 'gray' : 'sky'}
+          Icon={mine ? ICON.mine : assigned ? ICON.mine : ICON.unassigned}
+          text={t(
+            mine ? 'chat.assignedToYou' : assigned ? 'chat.assignedToOther' : 'chat.unassigned',
+          )}
+          weight="medium"
+        />
+
         <span style={{ flex: '1 1 auto' }} />
+
+        {/*
+          Assign is the action a rep takes most often and the one that had no
+          UI at all: `assigneeId` was on the projection, the route accepted the
+          action, and nothing on screen could reach it.
+        */}
+        {onAssign === undefined ? null : (
+          <button
+            type="button"
+            onClick={onAssign}
+            aria-label={t(mine ? 'chat.unassign' : 'chat.assignToMe')}
+            style={button}
+          >
+            <Glyph name={mine ? 'unassigned' : 'mine'} />
+            {t(mine ? 'chat.unassign' : 'chat.assignToMe')}
+          </button>
+        )}
 
         {onToggleBlock === undefined ? null : (
           <button
             type="button"
             onClick={onToggleBlock}
             aria-label={t(thread.isBlocked ? 'chat.unblock' : 'chat.block')}
-            style={{
-              border: `1px solid ${theme.border.color.medium}`,
-              background: 'transparent',
-              borderRadius: theme.border.radius.sm,
-              color: theme.font.color.secondary,
-              cursor: 'pointer',
-              fontSize: theme.font.size.xxs,
-              padding: `0 ${theme.spacing[1]}`,
-            }}
+            style={
+              thread.isBlocked
+                ? button
+                : { ...button, borderColor: theme.border.color.danger, color: theme.font.color.danger }
+            }
           >
+            <Glyph name="blocked" />
             {t(thread.isBlocked ? 'chat.unblock' : 'chat.block')}
           </button>
         )}
@@ -168,16 +222,9 @@ export const ThreadHeader = ({
             type="button"
             onClick={onClose}
             aria-label={t(thread.status === 'CLOSED' ? 'chat.reopen' : 'chat.close')}
-            style={{
-              border: `1px solid ${theme.border.color.medium}`,
-              background: 'transparent',
-              borderRadius: theme.border.radius.sm,
-              color: theme.font.color.secondary,
-              cursor: 'pointer',
-              fontSize: theme.font.size.xxs,
-              padding: `0 ${theme.spacing[1]}`,
-            }}
+            style={button}
           >
+            <Glyph name={thread.status === 'CLOSED' ? 'windowOpen' : 'closed'} />
             {t(thread.status === 'CLOSED' ? 'chat.reopen' : 'chat.close')}
           </button>
         )}
@@ -186,8 +233,17 @@ export const ThreadHeader = ({
       <WindowChip thread={thread} t={t} now={now} />
 
       {account !== null && account.status !== 'CONNECTED' ? (
-        <div style={{ fontSize: theme.font.size.xs, color: theme.font.color.danger }}>
-          ⚠ {t('chat.accountError')}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: theme.spacing[1],
+            fontSize: theme.font.size.sm,
+            color: theme.font.color.danger,
+          }}
+        >
+          <Glyph name="warning" />
+          {t('chat.accountError')}
         </div>
       ) : null}
     </div>

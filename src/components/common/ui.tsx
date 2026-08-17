@@ -4,6 +4,9 @@ import { Tag } from 'twenty-ui/data-display';
 import { Button } from 'twenty-ui/input';
 import { useTheme } from 'twenty-ui/theme-constants';
 
+import type { Translate } from './copy';
+import { ICON, type IconName } from './icons';
+
 /**
  * The handful of primitives the campaigns and settings surfaces both need.
  *
@@ -127,6 +130,8 @@ export type ActionButtonProps = {
   disabled?: boolean;
   tone?: 'primary' | 'default' | 'danger';
   busy?: boolean;
+  /** Drawn before the label, at Twenty's own button icon scale. */
+  icon?: IconName;
 };
 
 /**
@@ -140,10 +145,12 @@ export const ActionButton = ({
   disabled = false,
   tone = 'default',
   busy = false,
+  icon,
 }: ActionButtonProps) => (
   <Button
     title={label}
     ariaLabel={label}
+    Icon={icon === undefined ? undefined : ICON[icon]}
     onClick={onClick}
     disabled={disabled || busy}
     isLoading={busy}
@@ -153,24 +160,157 @@ export const ActionButton = ({
   />
 );
 
+export type StatusTone = {
+  /** A `twenty-ui` tag colour, never a hex. */
+  color: 'green' | 'red' | 'orange' | 'blue' | 'gray';
+  icon: IconName;
+  /** The copy key for the word, or null when the status is not one we know. */
+  key: string | null;
+};
+
+/**
+ * What a campaign status looks like, in one table (review §"campaign status").
+ *
+ * Pure and exported because it is the whole mapping and the only part worth a
+ * test: the previous inline expression made `CANCELLED` red, which put a
+ * campaign somebody deliberately stopped in the same colour as one that broke.
+ * Red is reserved for the states that need someone to act.
+ *
+ * A status this table does not know keeps its machine code on screen rather
+ * than becoming a blank or a lie — the same choice `translateWith` makes for a
+ * missing key, and for the same reason.
+ */
+export const campaignStatusTone = (status: string | null): StatusTone => {
+  switch (status) {
+    case 'DRAFT':
+      return { color: 'gray', icon: 'draft', key: 'campaign.status.DRAFT' };
+    case 'SNAPSHOTTING':
+      return { color: 'blue', icon: 'pending', key: 'campaign.status.SNAPSHOTTING' };
+    case 'READY':
+      return { color: 'blue', icon: 'completed', key: 'campaign.status.READY' };
+    case 'SCHEDULED':
+      return { color: 'blue', icon: 'scheduled', key: 'campaign.status.SCHEDULED' };
+    case 'RUNNING':
+      return { color: 'green', icon: 'running', key: 'campaign.status.RUNNING' };
+    case 'PAUSED':
+      return { color: 'orange', icon: 'paused', key: 'campaign.status.PAUSED' };
+    case 'TIER_WAITING':
+      return { color: 'orange', icon: 'pending', key: 'campaign.status.TIER_WAITING' };
+    case 'COMPLETED':
+      return { color: 'green', icon: 'completed', key: 'campaign.status.COMPLETED' };
+    case 'CANCELLED':
+      return { color: 'gray', icon: 'dismiss', key: 'campaign.status.CANCELLED' };
+    case 'FAILED':
+      return { color: 'red', icon: 'failed', key: 'campaign.status.FAILED' };
+    default:
+      return { color: 'gray', icon: 'consentUnknown', key: null };
+  }
+};
+
 /**
  * Twenty's `Tag`, so statuses read at the scale and shape of every other
- * status in the workspace. Never colour alone: the tag always carries its own
- * word, so a reader who cannot tell amber from green still reads "PAUSED".
+ * status in the workspace. Never colour alone, and now never icon alone
+ * either: the tag carries colour, mark *and* word, so a reader who cannot tell
+ * amber from green still reads "Em pausa".
  */
-export const StatusPill = ({ status }: { status: string | null }) => (
-  <Tag
-    color={
-      status === 'RUNNING' || status === 'COMPLETED'
-        ? 'green'
-        : status === 'FAILED' || status === 'CANCELLED'
-          ? 'red'
-          : 'gray'
-    }
-    text={status ?? '—'}
-    weight="medium"
-  />
-);
+export const StatusPill = ({ status, t }: { status: string | null; t?: Translate }) => {
+  const tone = campaignStatusTone(status);
+
+  return (
+    <Tag
+      color={tone.color}
+      Icon={ICON[tone.icon]}
+      text={
+        tone.key === null || t === undefined ? (status ?? '—') : t(tone.key)
+      }
+      weight="medium"
+    />
+  );
+};
+
+/**
+ * The state a surface is in when it has nothing to list.
+ *
+ * An empty state is a screen with a job: say what belongs here, and offer the
+ * one thing that would put something here. "Nenhuma conversa neste filtro." on
+ * its own does the first half and leaves the reader to guess the second, which
+ * is why every caller of this now passes an action.
+ */
+export const EmptyState = ({
+  icon,
+  title,
+  body,
+  actions,
+}: {
+  icon: IconName;
+  title: string;
+  body?: string;
+  actions?: React.ReactNode;
+}) => {
+  const theme = useTheme();
+  const Icon = ICON[icon];
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: theme.spacing[2],
+        padding: theme.spacing[6],
+        textAlign: 'center',
+        margin: 'auto',
+        maxWidth: '420px',
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '40px',
+          height: '40px',
+          borderRadius: theme.border.radius.rounded,
+          background: theme.background.transparent.light,
+          color: theme.font.color.tertiary,
+        }}
+      >
+        <Icon size={theme.icon.size.lg} stroke={theme.icon.stroke.sm} color="currentColor" />
+      </span>
+
+      <span
+        style={{
+          fontSize: theme.font.size.md,
+          fontWeight: theme.font.weight.medium,
+          color: theme.font.color.primary,
+        }}
+      >
+        {title}
+      </span>
+
+      {body === undefined ? null : (
+        <span style={{ fontSize: theme.font.size.sm, color: theme.font.color.tertiary }}>
+          {body}
+        </span>
+      )}
+
+      {actions === undefined ? null : (
+        <div
+          style={{
+            display: 'flex',
+            gap: theme.spacing[2],
+            flexWrap: 'wrap',
+            justifyContent: 'center',
+          }}
+        >
+          {actions}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const Banner = ({
   tone = 'info',

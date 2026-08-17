@@ -182,6 +182,9 @@ const COPY = {
   'common.yes': { pt: 'sim', en: 'yes' },
   'common.no': { pt: 'não', en: 'no' },
   'common.dismiss': { pt: 'Fechar aviso', en: 'Dismiss' },
+  'common.clear': { pt: 'Limpar', en: 'Clear' },
+  'common.more': { pt: 'Mais', en: 'More' },
+  'common.less': { pt: 'Menos', en: 'Less' },
 
   // ─── Chat ─────────────────────────────────────────────────────────────────
   'chat.windowOpen': { pt: 'Janela aberta', en: 'Window open' },
@@ -232,6 +235,65 @@ const COPY = {
   },
   'chat.missing': { pt: 'Em falta', en: 'Missing' },
   'chat.noPermission': { pt: 'Sem permissão para enviar.', en: 'You may not send messages.' },
+  'chat.detailsHide': { pt: 'Ocultar detalhes', en: 'Hide details' },
+  'chat.file': { pt: 'ficheiro', en: 'file' },
+  'chat.quoted': { pt: 'Em resposta a uma mensagem', en: 'In reply to a message' },
+  'chat.detail.address': { pt: 'Morada', en: 'Address' },
+  'chat.detail.coordinates': { pt: 'Coordenadas', en: 'Coordinates' },
+  'chat.detail.contact': { pt: 'Contacto', en: 'Contact' },
+  'chat.detail.phone': { pt: 'Telefone', en: 'Phone' },
+  'chat.detail.description': { pt: 'Descrição', en: 'Description' },
+
+  // ─── The conversation's own empty states (review §"empty state") ──────────
+  'chat.emptyBody': {
+    pt: 'Escreva a primeira mensagem, ou escolha um modelo aprovado.',
+    en: 'Write the first message, or pick an approved template.',
+  },
+  'chat.noThreadBody': {
+    pt: 'Envie um modelo aprovado para começar. A resposta do contacto abre a janela de 24 horas e a partir daí pode escrever livremente.',
+    en: 'Send an approved template to begin. The contact’s reply opens the 24-hour window, and from then on you can write freely.',
+  },
+  'chat.startWithTemplate': { pt: 'Começar com um modelo', en: 'Start with a template' },
+  'chat.windowClosedTitle': { pt: 'A janela de 24 horas fechou', en: 'The 24-hour window has closed' },
+  'chat.windowClosedBody': {
+    pt: 'Fora da janela só um modelo aprovado chega ao contacto. A resposta dele reabre a janela.',
+    en: 'Outside the window only an approved template reaches the contact. Their reply reopens it.',
+  },
+  'chat.consentTitle': { pt: 'Este contacto não pode ser contactado', en: 'This contact cannot be messaged' },
+  'chat.reviewConsent': { pt: 'Rever consentimento', en: 'Review consent' },
+  'chat.reviewConsentBody': {
+    pt: 'O consentimento vive no registo da Pessoa, no campo de subscrição de WhatsApp.',
+    en: 'Consent lives on the Person record, in the WhatsApp subscription field.',
+  },
+  'chat.setupTitle': { pt: 'Falta ligar um número', en: 'No number is connected' },
+  'chat.setupBody': {
+    pt: 'Um administrador liga o número em Definições → Aplicações → WhatsApp. Até lá não é possível enviar nem receber.',
+    en: 'An admin connects the number in Settings → Applications → WhatsApp. Until then nothing can be sent or received.',
+  },
+  'chat.blockedTitle': {
+    pt: 'Não é possível enviar agora',
+    en: 'Sending is not possible right now',
+  },
+  'chat.blockedBody': {
+    pt: 'O servidor recusou o envio para este contacto.',
+    en: 'The server refused a send to this contact.',
+  },
+  'chat.noPhoneTitle': { pt: 'Sem número utilizável', en: 'No usable number' },
+  'chat.noPhoneBody': {
+    pt: 'Este contacto não tem um telefone que possa ser convertido num número de WhatsApp. Corrija-o no registo da Pessoa.',
+    en: 'This contact has no phone that converts to a WhatsApp number. Fix it on the Person record.',
+  },
+
+  // ─── Who is handling a conversation (FR-THR-3) ────────────────────────────
+  'chat.assignedToYou': { pt: 'Sua', en: 'Yours' },
+  'chat.assignedToOther': { pt: 'Com responsável', en: 'Assigned' },
+  'chat.unassigned': { pt: 'Sem responsável', en: 'Unassigned' },
+  'chat.assignToMe': { pt: 'Atribuir a mim', en: 'Assign to me' },
+  'chat.unassign': { pt: 'Remover responsável', en: 'Unassign' },
+  'chat.assignFailed': {
+    pt: 'Não foi possível mudar o responsável.',
+    en: 'The owner could not be changed.',
+  },
 
   // ─── Inbox ────────────────────────────────────────────────────────────────
   'inbox.mine': { pt: 'Minhas', en: 'Mine' },
@@ -241,8 +303,69 @@ const COPY = {
   'inbox.window_expiring': { pt: 'A fechar', en: 'Closing soon' },
   'inbox.closed': { pt: 'Fechadas', en: 'Closed' },
   'inbox.pick': { pt: 'Escolha uma conversa', en: 'Pick a conversation' },
+  'inbox.pickBody': {
+    pt: 'A conversa escolhida abre aqui, com o histórico e a caixa de escrita.',
+    en: 'The conversation you pick opens here, with its history and the composer.',
+  },
   'inbox.conversations': { pt: 'Conversas', en: 'Conversations' },
   'inbox.empty': { pt: 'Nenhuma conversa neste filtro.', en: 'No conversations in this filter.' },
+
+  'inbox.search': { pt: 'Procurar conversas', en: 'Search conversations' },
+  'inbox.searchScope': {
+    pt: 'A procurar nas {count} conversas já carregadas.',
+    en: 'Searching the {count} conversations already loaded.',
+  },
+  'inbox.noMatches': { pt: 'Nada corresponde a “{query}”.', en: 'Nothing matches “{query}”.' },
+  'inbox.clearSearch': { pt: 'Limpar a procura', en: 'Clear the search' },
+  'inbox.moreFilters': { pt: 'Mais filtros', en: 'More filters' },
+  'inbox.fewerFilters': { pt: 'Menos filtros', en: 'Fewer filters' },
+  'inbox.filterCount': { pt: '{label}, {count} conversas', en: '{label}, {count} conversations' },
+
+  'inbox.empty.mine': { pt: 'Nada atribuído a si.', en: 'Nothing assigned to you.' },
+  'inbox.empty.mineBody': {
+    pt: 'As conversas de que se encarregar aparecem aqui. Comece pelas que ainda não têm responsável.',
+    en: 'Conversations you take on appear here. Start with the ones nobody owns yet.',
+  },
+  'inbox.empty.unassigned': {
+    pt: 'Todas as conversas têm responsável.',
+    en: 'Every conversation has an owner.',
+  },
+  'inbox.empty.unassignedBody': {
+    pt: 'Nada está à espera de alguém a quem chamar.',
+    en: 'Nothing is waiting for someone to claim it.',
+  },
+  'inbox.empty.all': { pt: 'Ainda não há conversas.', en: 'No conversations yet.' },
+  'inbox.empty.allBody': {
+    pt: 'Uma conversa começa quando um cliente escreve para o seu número, ou quando envia um modelo a partir de um contacto.',
+    en: 'A conversation starts when a customer writes to your number, or when you send a template from a contact.',
+  },
+  'inbox.empty.campaign_replies': {
+    pt: 'Ainda ninguém respondeu a uma campanha.',
+    en: 'Nobody has replied to a campaign yet.',
+  },
+  'inbox.empty.campaign_repliesBody': {
+    pt: 'As respostas a mensagens de campanha juntam-se aqui, separadas do resto da caixa.',
+    en: 'Replies to campaign messages collect here, kept apart from the rest of the inbox.',
+  },
+  'inbox.empty.window_expiring': {
+    pt: 'Nenhuma janela fecha nas próximas duas horas.',
+    en: 'No window closes in the next two hours.',
+  },
+  'inbox.empty.window_expiringBody': {
+    pt: 'Este filtro mostra as conversas que perdem a janela de 24 horas em breve — as que valem uma resposta antes de exigirem um modelo.',
+    en: 'This filter shows conversations about to lose their 24-hour window — the ones worth answering before they need a template.',
+  },
+  'inbox.empty.closed': { pt: 'Nenhuma conversa fechada.', en: 'No closed conversations.' },
+  'inbox.empty.closedBody': {
+    pt: 'Fechar uma conversa é só uma etiqueta: qualquer mensagem nova volta a abri-la.',
+    en: 'Closing a conversation is only a label: any new message reopens it.',
+  },
+  'inbox.seeAll': { pt: 'Ver todas', en: 'See all' },
+  'inbox.seeUnassigned': { pt: 'Ver sem responsável', en: 'See unassigned' },
+  'inbox.keyboardHint': {
+    pt: 'Teclado: J e K mudam de conversa, A atribui-a a si.',
+    en: 'Keyboard: J and K move between conversations, A assigns one to you.',
+  },
 
   // ─── Live toasts (D-10 layer 2) ───────────────────────────────────────────
   'toast.newMessage': { pt: 'Nova mensagem de {name}', en: 'New message from {name}' },
@@ -255,6 +378,41 @@ const COPY = {
   'campaign.title': { pt: 'Campanhas', en: 'Campaigns' },
   'campaign.new': { pt: 'Nova campanha', en: 'New campaign' },
   'campaign.none': { pt: 'Ainda não há campanhas.', en: 'No campaigns yet.' },
+  'campaign.noneBody': {
+    pt: 'Uma campanha envia um modelo aprovado a uma audiência escolhida, e mostra entregas, respostas e custo à medida que decorre.',
+    en: 'A campaign sends an approved template to a chosen audience, and shows deliveries, replies and cost as it runs.',
+  },
+
+  'campaign.status.DRAFT': { pt: 'Rascunho', en: 'Draft' },
+  'campaign.status.SNAPSHOTTING': { pt: 'A construir audiência', en: 'Building audience' },
+  'campaign.status.READY': { pt: 'Pronta', en: 'Ready' },
+  'campaign.status.SCHEDULED': { pt: 'Agendada', en: 'Scheduled' },
+  'campaign.status.RUNNING': { pt: 'A decorrer', en: 'Running' },
+  'campaign.status.PAUSED': { pt: 'Em pausa', en: 'Paused' },
+  'campaign.status.TIER_WAITING': { pt: 'À espera do escalão', en: 'Waiting on the tier' },
+  'campaign.status.COMPLETED': { pt: 'Concluída', en: 'Completed' },
+  'campaign.status.CANCELLED': { pt: 'Cancelada', en: 'Cancelled' },
+  'campaign.status.FAILED': { pt: 'Falhou', en: 'Failed' },
+
+  'campaign.search': { pt: 'Procurar campanhas', en: 'Search campaigns' },
+  'campaign.noMatches': {
+    pt: 'Nenhuma campanha corresponde a este filtro.',
+    en: 'No campaign matches this filter.',
+  },
+  'campaign.filter.all': { pt: 'Todas', en: 'All' },
+  'campaign.filter.drafts': { pt: 'Rascunhos', en: 'Drafts' },
+  'campaign.filter.scheduled': { pt: 'Agendadas', en: 'Scheduled' },
+  'campaign.filter.running': { pt: 'A decorrer', en: 'Running' },
+  'campaign.filter.completed': { pt: 'Concluídas', en: 'Completed' },
+  'campaign.filter.attention': { pt: 'A precisar de atenção', en: 'Needs attention' },
+  'campaign.open': { pt: 'Abrir campanha', en: 'Open campaign' },
+  'campaign.progress': { pt: '{done} de {total} enviadas', en: '{done} of {total} sent' },
+  'campaign.updated': { pt: 'Actualizado {when}', en: 'Updated {when}' },
+  'campaign.funnel': { pt: 'Funil de entrega', en: 'Delivery funnel' },
+  'campaign.funnelNote': {
+    pt: 'Cada barra é uma percentagem dos destinatários da campanha.',
+    en: 'Each bar is a share of the campaign’s recipients.',
+  },
   'campaign.running': {
     pt: 'Uma campanha está a decorrer — os números actualizam sozinhos.',
     en: 'A campaign is running — the figures update by themselves.',
@@ -269,6 +427,60 @@ const COPY = {
   'campaign.step.template': { pt: 'Modelo', en: 'Template' },
   'campaign.step.audience': { pt: 'Audiência', en: 'Audience' },
   'campaign.step.variables': { pt: 'Variáveis', en: 'Variables' },
+  'campaign.step.review': { pt: 'Rever', en: 'Review' },
+  'campaign.stepOf': { pt: 'Passo {step} de {total}', en: 'Step {step} of {total}' },
+
+  'campaign.previewTitle': { pt: 'Como fica a mensagem', en: 'How the message reads' },
+  /**
+   * No braces in this one, deliberately. `{{marcador}}` and `{{placeholder}}`
+   * are not the same token, and the parallel-placeholder test reads every
+   * `{…}` in a string as an interpolation slot — so a sentence *about*
+   * placeholders written with placeholders fails it, correctly.
+   */
+  'campaign.previewPlaceholders': {
+    pt: 'As variáveis por preencher ficam à vista, entre chavetas duplas.',
+    en: 'Unfilled variables stay visible, in double braces.',
+  },
+  'campaign.previewSample': {
+    pt: 'Com os valores de {name}, um contacto real desta audiência.',
+    en: 'With the values of {name}, a real contact from this audience.',
+  },
+  'campaign.previewUnavailable': {
+    pt: 'Ainda não foi possível ler um contacto de exemplo desta audiência.',
+    en: 'No sample contact could be read from this audience yet.',
+  },
+  'campaign.reviewMissing': {
+    pt: '{count} de {total} contactos da amostra ficam sem variáveis e seriam excluídos: {keys}.',
+    en: '{count} of {total} sampled contacts are missing variables and would be excluded: {keys}.',
+  },
+  'campaign.reviewNoMissing': {
+    pt: 'Todos os contactos da amostra têm as variáveis preenchidas.',
+    en: 'Every sampled contact has its variables filled.',
+  },
+  'campaign.reviewAudienceView': { pt: 'Vista “{name}”', en: 'View “{name}”' },
+  'campaign.reviewAudienceManual': { pt: '{count} ids indicados à mão', en: '{count} ids given by hand' },
+  'campaign.reviewScheduleNow': { pt: 'Assim que for lançada', en: 'As soon as it is launched' },
+  'campaign.reviewCountUnknown': {
+    pt: 'O número exacto de destinatários, o custo e as exclusões saem da construção da audiência — aparecem no ecrã seguinte, antes de haver botão de lançamento.',
+    en: 'The exact recipient count, the cost and the exclusions come out of the audience build — they appear on the next screen, before there is any launch button.',
+  },
+  'campaign.reviewWarnings': { pt: 'Avisos', en: 'Warnings' },
+  'campaign.warnNotConnected': {
+    pt: 'O número de envio não está ligado. A campanha não arranca assim.',
+    en: 'The sending number is not connected. The campaign will not start like this.',
+  },
+  'campaign.warnQualityRed': {
+    pt: 'A qualidade do número está em vermelho — o lançamento vai exigir uma confirmação explícita.',
+    en: 'The number’s quality is red — launching will need an explicit acknowledgement.',
+  },
+  'campaign.warnQualityYellow': {
+    pt: 'A qualidade do número está em amarelo. Vale rever o modelo antes de enviar a muita gente.',
+    en: 'The number’s quality is yellow. Worth reviewing the template before sending to many people.',
+  },
+  'campaign.warnTestAccount': {
+    pt: 'Este é um número de teste: a Meta só entrega a destinatários registados.',
+    en: 'This is a test number: Meta only delivers to registered recipients.',
+  },
 
   'campaign.name': { pt: 'Nome', en: 'Name' },
   'campaign.account': { pt: 'Número de envio', en: 'Sending number' },
@@ -426,9 +638,14 @@ const COPY = {
     pt: 'configurado na variável de servidor META_VERIFY_TOKEN',
     en: 'configured in the META_VERIFY_TOKEN server variable',
   },
+  /**
+   * The warning mark used to live in the string. It is an icon in the
+   * component now, so the sentence is only a sentence — a translator changing
+   * the wording can no longer delete the alert by accident.
+   */
   'settings.verifyTokenMissing': {
-    pt: '⚠ em falta — defina META_VERIFY_TOKEN',
-    en: '⚠ missing — set META_VERIFY_TOKEN',
+    pt: 'em falta — defina META_VERIFY_TOKEN',
+    en: 'missing — set META_VERIFY_TOKEN',
   },
   'settings.requiredFields': { pt: 'Campos a subscrever', en: 'Fields to subscribe' },
   'settings.copyFields': { pt: 'Copiar lista de campos', en: 'Copy the field list' },

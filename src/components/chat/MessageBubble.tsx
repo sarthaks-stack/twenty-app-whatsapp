@@ -4,6 +4,8 @@ import { useTheme } from 'twenty-ui/theme-constants';
 import type { MessageProjection } from '../../domain/feed/projection';
 import { errorCopy, type Lang, type Translate } from '../common/copy';
 import { clockTime, fileSize } from '../common/format';
+import { DeliveryTicks, Glyph } from '../common/icons';
+import { messageDetails } from './details';
 
 /**
  * One message (specs/08 §3.2, FR-UI-1).
@@ -16,6 +18,12 @@ import { clockTime, fileSize } from '../common/format';
  *
  * Status is never conveyed by colour alone: every tick carries an `aria-label`
  * and a failure carries an icon *and* a sentence.
+ *
+ * **Nothing in a bubble is `xxs`.** That size measured ~8px in the rendered
+ * page — a timestamp, a template name and a failure reason were all set in it,
+ * and the failure reason is the single most important sentence in the whole
+ * conversation. The metadata line is `xs`, the content is `sm`, and every
+ * button in here clears a 24px target.
  */
 
 export type MessageBubbleProps = {
@@ -24,17 +32,6 @@ export type MessageBubbleProps = {
   t: Translate;
   onRetry?: (message: MessageProjection) => void;
   onDownload?: (message: MessageProjection) => void;
-};
-
-/** Text, because a tick is a glyph and a glyph is not an accessible name. */
-const TICKS: Record<string, string> = {
-  QUEUED: '🕓',
-  ACCEPTED: '✓',
-  SENT: '✓',
-  DELIVERED: '✓✓',
-  READ: '✓✓',
-  PLAYED: '✓✓',
-  FAILED: '⚠',
 };
 
 const isBlue = (status: string | null): boolean =>
@@ -53,6 +50,7 @@ export const MessageBubble = ({
   const outbound = message.direction === 'OUTBOUND';
   const failed = message.status === 'FAILED';
   const media = message.media;
+  const details = messageDetails(message);
 
   const bubble: React.CSSProperties = {
     alignSelf: outbound ? 'flex-end' : 'flex-start',
@@ -73,7 +71,7 @@ export const MessageBubble = ({
   };
 
   const meta: React.CSSProperties = {
-    fontSize: theme.font.size.xxs,
+    fontSize: theme.font.size.xs,
     color: theme.font.color.tertiary,
     display: 'flex',
     gap: theme.spacing[1],
@@ -82,12 +80,36 @@ export const MessageBubble = ({
   };
 
   const chip: React.CSSProperties = {
-    fontSize: theme.font.size.xxs,
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: theme.spacing[1],
+    fontSize: theme.font.size.xs,
     color: theme.font.color.secondary,
     background: theme.background.transparent.light,
     borderRadius: theme.border.radius.sm,
-    padding: `0 ${theme.spacing[1]}`,
+    padding: `${theme.spacing[0.5]} ${theme.spacing[1]}`,
     alignSelf: 'flex-start',
+  };
+
+  /**
+   * Every button in a bubble, at one size.
+   *
+   * 24px is the floor rather than the target: these sit inside a message, next
+   * to text, and a 40px button would own the bubble. What they must not be is
+   * the 8px-type, zero-padding hit areas the review measured — "Repetir" was a
+   * link-shaped thing a quarter the height of a fingertip.
+   */
+  const action: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: theme.spacing[1],
+    minHeight: '24px',
+    borderRadius: theme.border.radius.sm,
+    background: 'transparent',
+    cursor: 'pointer',
+    fontFamily: theme.font.family,
+    fontSize: theme.font.size.xs,
+    padding: `0 ${theme.spacing[1]}`,
   };
 
   const renderMedia = () => {
@@ -105,18 +127,21 @@ export const MessageBubble = ({
           onClick={() => onDownload?.(message)}
           aria-label={t('chat.download', { size: fileSize(media.sizeBytes) })}
           style={{
-            border: `1px solid ${theme.border.color.medium}`,
-            background: 'transparent',
-            borderRadius: theme.border.radius.sm,
-            padding: theme.spacing[1],
-            color: theme.font.color.secondary,
-            cursor: 'pointer',
-            fontSize: theme.font.size.xs,
+            ...action,
+            alignSelf: 'flex-start',
+            minHeight: '28px',
+            border: `1px solid ${
+              media.downloadFailed ? theme.border.color.danger : theme.border.color.medium
+            }`,
+            color: media.downloadFailed
+              ? theme.font.color.danger
+              : theme.font.color.secondary,
+            padding: `0 ${theme.spacing[2]}`,
           }}
         >
-          {media.downloadFailed ? `⚠ ${t('error.MEDIA_UNAVAILABLE')}` : null}
+          <Glyph name={media.downloadFailed ? 'warning' : 'download'} />
           {media.downloadFailed
-            ? null
+            ? t('error.MEDIA_UNAVAILABLE')
             : t('chat.download', { size: fileSize(media.sizeBytes) })}
         </button>
       );
@@ -144,7 +169,7 @@ export const MessageBubble = ({
     if (kind === 'AUDIO') {
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing[1] }}>
-          <span style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+          <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
             {t('chat.voiceNote')}
           </span>
           <audio controls src={media.url} style={{ maxWidth: '100%' }} />
@@ -168,9 +193,17 @@ export const MessageBubble = ({
         href={media.url}
         target="_blank"
         rel="noreferrer"
-        style={{ color: theme.font.color.secondary, fontSize: theme.font.size.xs }}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: theme.spacing[1],
+          minHeight: '24px',
+          color: theme.font.color.secondary,
+          fontSize: theme.font.size.sm,
+        }}
       >
-        📎 {media.fileName ?? 'ficheiro'} · {fileSize(media.sizeBytes)}
+        <Glyph name="attachment" />
+        {media.fileName ?? t('chat.file')} · {fileSize(media.sizeBytes)}
       </a>
     );
   };
@@ -183,11 +216,17 @@ export const MessageBubble = ({
     <div className="wa-bubble" style={bubble}>
       {message.templateName === null ? null : (
         <span style={chip}>
+          <Glyph name="template" />
           {t('chat.template')}: {message.templateName}
         </span>
       )}
 
-      {message.lane === 'CAMPAIGN' ? <span style={chip}>{t('chat.campaign')}</span> : null}
+      {message.lane === 'CAMPAIGN' ? (
+        <span style={chip}>
+          <Glyph name="campaign_replies" />
+          {t('chat.campaign')}
+        </span>
+      ) : null}
 
       {/*
         The quoted message, as an inset strip. Only the id is on the wire — the
@@ -197,13 +236,17 @@ export const MessageBubble = ({
       {message.contextWamid === null ? null : (
         <div
           style={{
+            display: 'flex',
+            alignItems: 'center',
             borderLeft: `2px solid ${theme.border.color.medium}`,
             paddingLeft: theme.spacing[1],
-            fontSize: theme.font.size.xxs,
+            gap: theme.spacing[1],
             color: theme.font.color.tertiary,
+            fontSize: theme.font.size.xs,
           }}
         >
-          ↪
+          <Glyph name="replies" />
+          {t('chat.quoted')}
         </div>
       )}
 
@@ -222,17 +265,25 @@ export const MessageBubble = ({
       {unsupported ? (
         <span
           style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: theme.spacing[1],
             fontStyle: 'italic',
             color: theme.font.color.tertiary,
-            fontSize: theme.font.size.xs,
+            fontSize: theme.font.size.sm,
           }}
         >
+          <Glyph name="consentUnknown" />
           {t('chat.unsupported')}
         </span>
       ) : null}
 
       {message.reactions.length === 0 ? null : (
         <div style={{ display: 'flex', gap: theme.spacing[1] }}>
+          {/*
+            The one place an emoji belongs: it is not decoration the app chose,
+            it is what the customer pressed.
+          */}
           {message.reactions.map((reaction) => (
             <span key={`${reaction.waId}-${reaction.emoji}`} style={chip}>
               {reaction.emoji}
@@ -244,30 +295,32 @@ export const MessageBubble = ({
       {failed ? (
         <div
           style={{
-            fontSize: theme.font.size.xxs,
+            fontSize: theme.font.size.xs,
             color: theme.font.color.danger,
             display: 'flex',
             flexDirection: 'column',
             gap: theme.spacing[1],
           }}
         >
-          <span>⚠ {errorCopy(t, message.errorCode, message.errorDetail)}</span>
+          <span style={{ display: 'flex', alignItems: 'flex-start', gap: theme.spacing[1] }}>
+            <Glyph name="warning" />
+            {errorCopy(t, message.errorCode, message.errorDetail)}
+          </span>
           {message.isRetryable && onRetry !== undefined ? (
             <button
               type="button"
               onClick={() => onRetry(message)}
               aria-label={t('chat.retry')}
               style={{
+                ...action,
                 alignSelf: 'flex-start',
+                minHeight: '28px',
                 border: `1px solid ${theme.border.color.danger}`,
-                background: 'transparent',
-                borderRadius: theme.border.radius.sm,
                 color: theme.font.color.danger,
-                cursor: 'pointer',
-                fontSize: theme.font.size.xxs,
-                padding: `0 ${theme.spacing[1]}`,
+                padding: `0 ${theme.spacing[2]}`,
               }}
             >
+              <Glyph name="retry" />
               {t('chat.retry')}
             </button>
           ) : null}
@@ -278,51 +331,85 @@ export const MessageBubble = ({
         <span>{clockTime(message.waTimestamp ?? message.createdAt, lang)}</span>
         {outbound ? (
           <span
+            role="img"
             aria-label={t(`status.${message.status ?? 'QUEUED'}`)}
             title={t(`status.${message.status ?? 'QUEUED'}`)}
-            style={{
-              color: isBlue(message.status)
-                ? theme.color.blue
-                : failed
-                  ? theme.font.color.danger
-                  : theme.font.color.tertiary,
-            }}
+            style={{ display: 'inline-flex', alignItems: 'center' }}
           >
-            {TICKS[message.status ?? 'QUEUED'] ?? ''}
+            <DeliveryTicks
+              status={message.status}
+              color={
+                isBlue(message.status)
+                  ? theme.color.blue
+                  : failed
+                    ? theme.font.color.danger
+                    : theme.font.color.tertiary
+              }
+            />
           </span>
         ) : null}
-        {unsupported || message.payload === null ? null : (
+        {/*
+          The button exists only when there is something to show. It used to
+          appear for any message with a payload, which is nearly all of them,
+          and answered with the raw webhook object.
+        */}
+        {details.length === 0 ? null : (
           <button
             type="button"
             onClick={() => setShowDetails((current) => !current)}
-            aria-label={t('chat.details')}
+            aria-expanded={showDetails}
+            aria-label={t(showDetails ? 'chat.detailsHide' : 'chat.details')}
+            title={t(showDetails ? 'chat.detailsHide' : 'chat.details')}
             style={{
+              ...action,
+              minWidth: '24px',
+              justifyContent: 'center',
               border: 'none',
-              background: 'transparent',
               color: theme.font.color.tertiary,
-              cursor: 'pointer',
-              fontSize: theme.font.size.xxs,
-              padding: 0,
             }}
           >
-            ⋯
+            <Glyph name="more" />
           </button>
         )}
       </div>
 
-      {showDetails ? (
-        <pre
+      {showDetails && details.length > 0 ? (
+        <dl
           style={{
-            fontSize: theme.font.size.xxs,
-            color: theme.font.color.tertiary,
-            overflowX: 'auto',
+            display: 'grid',
+            gridTemplateColumns: 'auto 1fr',
+            gap: `${theme.spacing[0.5]} ${theme.spacing[2]}`,
             margin: 0,
-            maxWidth: '100%',
+            fontSize: theme.font.size.xs,
           }}
         >
-          {JSON.stringify(message.payload, null, 1)}
-        </pre>
+          {details.map((detail, index) => (
+            <ContiguousRow
+              key={`${detail.key}-${index}`}
+              label={t(detail.key)}
+              value={detail.value}
+            />
+          ))}
+        </dl>
       ) : null}
     </div>
+  );
+};
+
+/**
+ * One `dt`/`dd` pair. A fragment rather than a wrapper element, so the grid
+ * above lays the label and the value into its own two columns instead of
+ * receiving one opaque child per row.
+ */
+const ContiguousRow = ({ label, value }: { label: string; value: string }) => {
+  const theme = useTheme();
+
+  return (
+    <>
+      <dt style={{ color: theme.font.color.tertiary }}>{label}</dt>
+      <dd style={{ margin: 0, color: theme.font.color.secondary, wordBreak: 'break-word' }}>
+        {value}
+      </dd>
+    </>
   );
 };

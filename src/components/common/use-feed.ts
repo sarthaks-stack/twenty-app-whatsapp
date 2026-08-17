@@ -5,6 +5,7 @@ import { getApplicationVariable } from 'twenty-sdk/front-component';
 import type {
   AccountProjection,
   MessageProjection,
+  PersonProjection,
   ThreadProjection,
 } from '../../domain/feed/projection';
 import { mergeMessages, settleOptimisticMessages } from './merge';
@@ -69,7 +70,13 @@ export type FeedEnvelope = {
   account?: AccountProjection | null;
   accounts?: AccountProjection[];
   thread?: ThreadProjection | null;
+  /** Person scope with no conversation yet: the contact the empty state is about. */
+  person?: PersonProjection | null;
+  /** The identifiers a first send needs when there is no thread to name. */
+  start?: { accountId: string | null; waId: string | null };
   threads?: ThreadProjection[];
+  /** One total per inbox filter; only present when `counts` was requested. */
+  counts?: Record<string, number>;
   messages?: MessageProjection[];
   olderCursor?: string | null;
   nextCursor?: string | null;
@@ -89,6 +96,18 @@ export type UseFeedOptions = {
   intervalMs?: number;
   /** Set false while a surface is not mounted or has nothing to ask for. */
   enabled?: boolean;
+  /**
+   * Ask the inbox scope for a total per filter.
+   *
+   * Costs six extra reads on the server, so it belongs on a feed with a slow
+   * `intervalMs` of its own rather than on the one driving the list.
+   */
+  counts?: boolean;
+  /**
+   * Page size. Left to the server's default unless a caller wants less — the
+   * counts feed asks for one row rather than fifty it would throw away.
+   */
+  limit?: number;
 };
 
 export type UseFeedResult = {
@@ -137,6 +156,31 @@ export type UseFeedResult = {
   };
 };
 
+/**
+ * The new envelope, keeping what a delta deliberately left out.
+ *
+ * The thread scope sends the template catalogue **only on a full load** — an
+ * intentional saving, since re-sending sixty templates every three seconds to
+ * say nothing changed is exactly the cost D-6 exists to control. The client
+ * then replaced the whole envelope on every poll, so the catalogue survived
+ * for one interval and vanished: **"Escolher modelo" opened an empty picker
+ * saying "no published templates for this number" for anyone who took longer
+ * than three seconds to press it**, however many were published.
+ *
+ * So the omission has to mean "unchanged" on this side too, which is what the
+ * server intended it to mean. `??` and not a spread: a delta that sends an
+ * *empty* catalogue is saying every template was unpublished, and that must
+ * replace, not merge.
+ *
+ * Pure and exported because it is the whole of the rule, and because a hook
+ * that polls on a timer is not something a test can pin down.
+ */
+export const mergeEnvelope = (
+  current: FeedEnvelope | null,
+  next: FeedEnvelope,
+): FeedEnvelope =>
+  current === null ? next : { ...next, templates: next.templates ?? current.templates };
+
 const numberVariable = (name: string, fallback: number): number => {
   const raw = getApplicationVariable(name);
   const parsed = raw === undefined ? Number.NaN : Number(raw);
@@ -157,6 +201,8 @@ export const useFeed = ({
   filter,
   intervalMs,
   enabled = true,
+  counts = false,
+  limit,
 }: UseFeedOptions): UseFeedResult => {
   const [data, setData] = useState<FeedEnvelope | null>(null);
   const [messages, setMessages] = useState<MessageProjection[]>([]);
@@ -202,6 +248,8 @@ export const useFeed = ({
         if (id !== null) query.id = id;
         if (by !== undefined) query.by = by;
         if (filter !== undefined) query.filter = filter;
+        if (counts) query.counts = '1';
+        if (limit !== undefined) query.limit = String(limit);
         if (mode === 'delta' && since.current !== null) query.since = since.current;
         if (mode === 'older' && olderCursor.current !== null) {
           query.before = olderCursor.current;
@@ -233,7 +281,7 @@ export const useFeed = ({
           return;
         }
 
-        setData(envelope);
+        setData((current) => mergeEnvelope(current, envelope));
 
         if (mode === 'full') {
           olderCursor.current = envelope.olderCursor ?? null;
@@ -261,7 +309,7 @@ export const useFeed = ({
         setIsLoading(false);
       }
     },
-    [by, client, filter, id, scope],
+    [by, client, counts, filter, id, limit, scope],
   );
 
   const refresh = useCallback(() => {

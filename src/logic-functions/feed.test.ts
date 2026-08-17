@@ -35,7 +35,41 @@ const matches = (row: Row, filter: Record<string, Row> | undefined): boolean => 
   if (filter === undefined) return true;
 
   return Object.entries(filter).every(([field, condition]) => {
+    /**
+     * `and` / `or` are filter combinators, not fields. A two-sided range has
+     * to be written as an `and` of two one-sided filters (see the operator
+     * rule below), so a fake that did not understand them could not exercise
+     * the one filter that needs one.
+     */
+    if (field === 'and') {
+      return (condition as unknown as Row[]).every((nested) =>
+        matches(row, nested as Record<string, Row>),
+      );
+    }
+
+    if (field === 'or') {
+      return (condition as unknown as Row[]).some((nested) =>
+        matches(row, nested as Record<string, Row>),
+      );
+    }
+
     const value = row[field] ?? null;
+
+    /**
+     * **One operator per field, exactly as the server insists.**
+     *
+     * This fake used to accept `{ gte, lte }` on a single field and filter by
+     * both, which is not what the platform does — it answers
+     * `INVALID_ARGS_FILTER` and fails the entire read. The inbox's
+     * `window_expiring` filter was written that way and 500'd in production
+     * while this test reported it working. A fake that is more permissive than
+     * the thing it stands in for does not catch bugs, it hides them.
+     */
+    if (Object.keys(condition).length !== 1) {
+      throw new Error(
+        `fake client: filter for field "${field}" must have exactly one operator`,
+      );
+    }
 
     return Object.entries(condition).every(([operator, operand]) => {
       switch (operator) {
@@ -397,6 +431,70 @@ describe('scope=thread', () => {
     expect(body.templates).toEqual([]);
   });
 
+  /**
+   * The empty state can only be actionable if it knows *why* it is empty, and
+   * every one of those reasons is the server's to decide (AR-17). A contact
+   * with no conversation is outside a window that never opened, so the policy
+   * says `WINDOW_CLOSED` — which is the instruction to open with a template,
+   * not a refusal.
+   */
+  it('sends a policy for a Person with no conversation, not just an empty shell', async () => {
+    seedAccount();
+    store.people.push({
+      id: 'p-9',
+      name: { firstName: 'Ana', lastName: 'Paula' },
+      phones: { primaryPhoneCallingCode: '+244', primaryPhoneNumber: '923456789' },
+      whatsappOptInStatus: 'OPTED_IN',
+    });
+
+    const { body } = await call({ scope: 'thread', id: 'p-9', by: 'person' });
+
+    expect(body.policy).toMatchObject({ allowed: false, reason: 'WINDOW_CLOSED' });
+    expect(body.person).toMatchObject({ id: 'p-9', firstName: 'Ana' });
+  });
+
+  it('reports an opted-out contact as opted out rather than as a closed window', async () => {
+    seedAccount();
+    store.people.push({
+      id: 'p-9',
+      name: { firstName: 'Ana' },
+      phones: { primaryPhoneCallingCode: '+244', primaryPhoneNumber: '923456789' },
+      whatsappOptInStatus: 'OPTED_OUT',
+    });
+
+    const { body } = await call({ scope: 'thread', id: 'p-9', by: 'person' });
+
+    expect(body.policy.reason).toBe('OPTED_OUT');
+  });
+
+  /**
+   * The browser must never assemble this itself. Stripping punctuation from a
+   * display string turns a contact stored without a calling code into a
+   * national number, and the template goes to whoever owns it in the default
+   * country.
+   */
+  it('resolves the waId a first send needs, in E.164 digits', async () => {
+    seedAccount();
+    store.people.push({
+      id: 'p-9',
+      name: { firstName: 'Ana' },
+      phones: { primaryPhoneCallingCode: '+244', primaryPhoneNumber: '923 456 789' },
+    });
+
+    const { body } = await call({ scope: 'thread', id: 'p-9', by: 'person' });
+
+    expect(body.start).toEqual({ accountId: 'acc-1', waId: '244923456789' });
+  });
+
+  it('answers a null waId for a contact with no usable phone', async () => {
+    seedAccount();
+    store.people.push({ id: 'p-9', name: { firstName: 'Ana' } });
+
+    const { body } = await call({ scope: 'thread', id: 'p-9', by: 'person' });
+
+    expect(body.start.waId).toBeNull();
+  });
+
   it('resolves the Person’s most recent conversation when there are two', async () => {
     seedAccount();
     seedThread({ id: 'old', personId: 'p-1', lastMessageAt: '2026-01-01T00:00:00.000Z' });
@@ -484,6 +582,51 @@ describe('scope=inbox', () => {
     // Answering "here is everything" to "show me mine" is the wrong answer to
     // a question about ownership.
     expect(status).toBe(400);
+  });
+
+  /**
+   * The badges beside the filter names. Opt-in because they cost six reads,
+   * and the inbox polls every eight seconds — see `FeedQuery.counts`.
+   */
+  it('counts nothing unless asked', async () => {
+    seedFour();
+
+    const { body } = await call({ scope: 'inbox', filter: 'all' });
+
+    expect(body.counts).toBeUndefined();
+  });
+
+  it('counts every filter when asked, including the ones not being shown', async () => {
+    seedFour();
+
+    const { body } = await call({ scope: 'inbox', filter: 'all', counts: '1' });
+
+    expect(body.counts).toMatchObject({
+      mine: 1,
+      unassigned: 1,
+      all: 3,
+      closed: 1,
+    });
+  });
+
+  /**
+   * A count is a badge, and a badge is not the place to report that a caller
+   * has no workspace member — the list itself already says so when they select
+   * the filter. Answering zero keeps the other five usable.
+   */
+  it('answers zero for a filter this caller cannot use, rather than failing the read', async () => {
+    seedFour();
+
+    const previous = caller;
+    caller = { ...previous, workspaceMemberId: null };
+
+    const { status, body } = await call({ scope: 'inbox', filter: 'all', counts: '1' });
+
+    caller = previous;
+
+    expect(status).toBe(200);
+    expect(body.counts.mine).toBe(0);
+    expect(body.counts.all).toBe(3);
   });
 
   it('refuses an unknown filter', async () => {

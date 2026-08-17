@@ -5,10 +5,13 @@ import type { MessageProjection } from '../../domain/feed/projection';
 import type { ResolvedParameters } from '../../domain/template-render';
 import { newClientToken, useActions, type SendOutcome } from '../common/actions';
 import { useCopy } from '../common/copy';
+import { Glyph } from '../common/icons';
 import { SURFACE_MAX_HEIGHT, SURFACE_MIN_HEIGHT } from '../common/surface';
+import { ActionButton, Banner, EmptyState } from '../common/ui';
 import { useFeed } from '../common/use-feed';
 import { Composer } from './Composer';
 import { MessageList } from './MessageList';
+import { StartConversation } from './StartConversation';
 import { ThreadHeader } from './ThreadHeader';
 
 /**
@@ -78,6 +81,12 @@ export const ThreadView = ({
 
   const [isSending, setIsSending] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+  /**
+   * A failure from an action that is not an ordinary send, so it has no bubble
+   * to settle onto — assigning, or opening a conversation that does not exist
+   * yet. It renders as a banner rather than disappearing into a log.
+   */
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const feed = useFeed({
     scope: 'thread',
@@ -90,6 +99,7 @@ export const ThreadView = ({
   const account = feed.data?.account ?? null;
   const templates = feed.data?.templates ?? [];
   const canSend = feed.data?.permissions.canSend === true;
+  const viewerId = feed.data?.permissions.workspaceMemberId ?? null;
 
   /**
    * Recomputed on every render rather than ticked on a timer: the countdown
@@ -221,6 +231,74 @@ export const ThreadView = ({
     feed.refresh();
   }, [actions, feed, thread]);
 
+  /**
+   * Take the conversation, or give it back.
+   *
+   * `assigneeId: null` is the unassign, which is why the route documents the
+   * null rather than offering a second action. The button is only rendered
+   * when the server named the caller — with no `workspaceMemberId` there is
+   * nobody to assign *to*, and a button that silently assigned to null would
+   * look like it had worked.
+   */
+  const toggleAssign = useCallback(async () => {
+    if (thread === null || viewerId === null) return;
+
+    const mine = thread.assigneeId === viewerId;
+    const outcome = await actions.threadAction('assign', {
+      threadId: thread.id,
+      assigneeId: mine ? null : viewerId,
+    });
+
+    if (!outcome.ok) setActionError(outcome.error ?? t('chat.assignFailed'));
+    else setActionError(null);
+
+    feed.refresh();
+  }, [actions, feed, t, thread, viewerId]);
+
+  /**
+   * Opening a conversation with a contact who has none.
+   *
+   * There is no thread to name, so the send route is addressed by account and
+   * `waId` instead — both resolved by the server, because a `waId` assembled in
+   * the browser from a display string is how a template reaches the wrong
+   * person (see the feed route's person branch).
+   */
+  const startWithTemplate = useCallback(
+    async (templateId: string, parameters: ResolvedParameters) => {
+      const start = feed.data?.start;
+
+      if (start?.waId === null || start?.waId === undefined) return;
+
+      const clientToken = newClientToken();
+
+      setIsSending(true);
+
+      try {
+        const outcome = await actions.sendTemplate({
+          ...(start.accountId === null ? {} : { accountId: start.accountId }),
+          waId: start.waId,
+          templateId,
+          parameters,
+          clientToken,
+        });
+
+        if (outcome.ok) {
+          setRefusal(null);
+          // The conversation now exists; the next read is what makes it appear.
+          feed.refresh();
+        } else if (outcome.kind === 'denied') {
+          setRefusal(outcome.code);
+        } else {
+          setRefusal(null);
+          setActionError(outcome.message);
+        }
+      } finally {
+        setIsSending(false);
+      }
+    },
+    [actions, feed],
+  );
+
   const shell: React.CSSProperties = {
     display: 'flex',
     flexDirection: 'column',
@@ -246,39 +324,14 @@ export const ThreadView = ({
   if (feed.isUnavailable) {
     return (
       <div className="wa-thread-view" style={{ ...shell, justifyContent: 'center' }}>
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: theme.spacing[2],
-            textAlign: 'center',
-            padding: theme.spacing[4],
-          }}
-        >
-          <span style={{ color: theme.font.color.danger, fontSize: theme.font.size.sm }}>
-            {t('common.unavailable')}
-          </span>
-          <span style={{ color: theme.font.color.tertiary, fontSize: theme.font.size.xs }}>
-            {feed.error}
-          </span>
-          <button
-            type="button"
-            onClick={feed.refresh}
-            style={{
-              border: `1px solid ${theme.border.color.medium}`,
-              borderRadius: theme.border.radius.sm,
-              background: 'transparent',
-              color: theme.font.color.secondary,
-              cursor: 'pointer',
-              fontFamily: theme.font.family,
-              fontSize: theme.font.size.xs,
-              padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-            }}
-          >
-            {t('common.retry')}
-          </button>
-        </div>
+        <EmptyState
+          icon="warning"
+          title={t('common.unavailable')}
+          body={feed.error ?? undefined}
+          actions={
+            <ActionButton label={t('common.retry')} icon="retry" onClick={feed.refresh} />
+          }
+        />
       </div>
     );
   }
@@ -286,16 +339,19 @@ export const ThreadView = ({
   if (feed.data !== null && thread === null) {
     return (
       <div className="wa-thread-view" style={{ ...shell, justifyContent: 'center' }}>
-        <div
-          style={{
-            textAlign: 'center',
-            color: theme.font.color.tertiary,
-            fontSize: theme.font.size.sm,
-            padding: theme.spacing[4],
-          }}
-        >
-          {t('chat.noThread')}
-        </div>
+        {actionError === null ? null : <Banner tone="danger">{actionError}</Banner>}
+        {refusal === null ? null : <Banner tone="danger">{t(`policy.${refusal}`)}</Banner>}
+        <StartConversation
+          policy={feed.data.policy}
+          templates={templates}
+          start={feed.data.start}
+          canSend={canSend}
+          isSending={isSending}
+          t={t}
+          onSendTemplate={(templateId, parameters) =>
+            void startWithTemplate(templateId, parameters)
+          }
+        />
       </div>
     );
   }
@@ -309,7 +365,7 @@ export const ThreadView = ({
             alignItems: 'center',
             gap: theme.spacing[2],
             padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-            fontSize: theme.font.size.xxs,
+            fontSize: theme.font.size.xs,
             background: theme.background.transparent.light,
             color: theme.font.color.secondary,
           }}
@@ -320,15 +376,21 @@ export const ThreadView = ({
             onClick={feed.resume}
             aria-label={t('chat.reconnect')}
             style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: theme.spacing[1],
+              minHeight: '24px',
               border: `1px solid ${theme.border.color.medium}`,
               borderRadius: theme.border.radius.sm,
               background: 'transparent',
               color: theme.font.color.secondary,
               cursor: 'pointer',
-              fontSize: theme.font.size.xxs,
-              padding: `0 ${theme.spacing[1]}`,
+              fontFamily: theme.font.family,
+              fontSize: theme.font.size.xs,
+              padding: `0 ${theme.spacing[2]}`,
             }}
           >
+            <Glyph name="retry" />
             {t('chat.reconnect')}
           </button>
         </div>
@@ -338,15 +400,21 @@ export const ThreadView = ({
         <div
           role="status"
           style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: theme.spacing[1],
             padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-            fontSize: theme.font.size.xxs,
+            fontSize: theme.font.size.xs,
             background: theme.background.transparent.danger,
             color: theme.font.color.danger,
           }}
         >
+          <Glyph name="warning" />
           {t('chat.offline')}
         </div>
       ) : null}
+
+      {actionError === null ? null : <Banner tone="danger">{actionError}</Banner>}
 
       {thread === null ? null : (
         <ThreadHeader
@@ -354,8 +422,10 @@ export const ThreadView = ({
           account={account}
           t={t}
           now={now}
+          viewerId={viewerId}
           onToggleBlock={canSend ? toggleBlock : undefined}
           onClose={canSend ? toggleClose : undefined}
+          onAssign={canSend && viewerId !== null ? toggleAssign : undefined}
         />
       )}
 

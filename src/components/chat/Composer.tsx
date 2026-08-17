@@ -4,6 +4,7 @@ import { useTheme } from 'twenty-ui/theme-constants';
 import type { Translate } from '../common/copy';
 import type { FeedPolicy, FeedTemplate } from '../common/use-feed';
 import type { ResolvedParameters } from '../../domain/template-render';
+import { Glyph } from '../common/icons';
 import { TemplatePicker } from './TemplatePicker';
 
 /**
@@ -23,6 +24,12 @@ import { TemplatePicker } from './TemplatePicker';
  * (`.focus()` throws), Enter sends and Shift+Enter breaks the line, and a
  * refusal renders inline rather than as a toast — a toast that has faded cannot
  * be re-read.
+ *
+ * **Both actions live on the same row.** Template used to sit below the box as
+ * an 8px-type link when the window was open, and jump up beside Send when it
+ * closed — so the control moved, changed size and changed shape at the exact
+ * moment a rep needed to find it. It is one row now, and only the emphasis
+ * moves: whichever action the policy allows is the filled one.
  */
 
 export type ComposerProps = {
@@ -39,6 +46,44 @@ export type ComposerProps = {
 };
 
 export const MAX_TEXT_LENGTH = 4096;
+
+/**
+ * The two composer buttons, at one size.
+ *
+ * 32px matches the textarea's own box and Twenty's `medium` button, so the row
+ * lines up along the bottom edge instead of the send button floating a few
+ * pixels above it. `loud` is the action the policy is steering the rep towards;
+ * `quiet` is the other one, still a full-size button rather than a link.
+ */
+const actionStyle = (
+  theme: ReturnType<typeof useTheme>,
+  emphasis: 'loud' | 'quiet' | 'disabled',
+): React.CSSProperties => ({
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: theme.spacing[1],
+  minHeight: '32px',
+  border:
+    emphasis === 'quiet' ? `1px solid ${theme.border.color.medium}` : '1px solid transparent',
+  borderRadius: theme.border.radius.sm,
+  background:
+    emphasis === 'loud'
+      ? theme.color.blue
+      : emphasis === 'disabled'
+        ? theme.background.transparent.light
+        : 'transparent',
+  color:
+    emphasis === 'loud'
+      ? theme.font.color.inverted
+      : emphasis === 'disabled'
+        ? theme.font.color.tertiary
+        : theme.font.color.secondary,
+  cursor: emphasis === 'disabled' ? 'default' : 'pointer',
+  fontFamily: theme.font.family,
+  fontSize: theme.font.size.sm,
+  padding: `0 ${theme.spacing[2]}`,
+  whiteSpace: 'nowrap',
+});
 
 export const Composer = ({
   policy,
@@ -95,15 +140,22 @@ export const Composer = ({
         <div
           style={{
             display: 'flex',
+            flexWrap: 'wrap',
             gap: theme.spacing[2],
             padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-            fontSize: theme.font.size.xxs,
+            fontSize: theme.font.size.xs,
             color: theme.font.color.secondary,
             background: theme.background.transparent.light,
           }}
         >
           {(policy?.warnings ?? []).map((warning) => (
-            <span key={warning}>⚠ {t(`warning.${warning}`)}</span>
+            <span
+              key={warning}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: theme.spacing[1] }}
+            >
+              <Glyph name="warning" />
+              {t(`warning.${warning}`)}
+            </span>
           ))}
         </div>
       )}
@@ -116,24 +168,35 @@ export const Composer = ({
             alignItems: 'center',
             gap: theme.spacing[2],
             padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-            fontSize: theme.font.size.xs,
+            fontSize: theme.font.size.sm,
             color: theme.font.color.danger,
             background: theme.background.transparent.danger,
           }}
         >
-          <span>⚠ {t(`policy.${refusal}`)}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: theme.spacing[1] }}>
+            <Glyph name="warning" />
+            {t(`policy.${refusal}`)}
+          </span>
+          <span style={{ flex: '1 1 auto' }} />
           <button
             type="button"
             onClick={onDismissRefusal}
             aria-label={t('common.dismiss')}
+            title={t('common.dismiss')}
             style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: '24px',
+              minHeight: '24px',
               border: 'none',
+              borderRadius: theme.border.radius.sm,
               background: 'transparent',
               color: theme.font.color.danger,
               cursor: 'pointer',
             }}
           >
-            ✕
+            <Glyph name="dismiss" />
           </button>
         </div>
       )}
@@ -159,7 +222,16 @@ export const Composer = ({
           }}
         >
           {disabledReason === null ? null : (
-            <div style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: theme.spacing[1],
+                fontSize: theme.font.size.xs,
+                color: theme.font.color.tertiary,
+              }}
+            >
+              <Glyph name={windowClosed ? 'windowClosed' : 'warning'} />
               {disabledReason}
             </div>
           )}
@@ -194,72 +266,38 @@ export const Composer = ({
               }}
             />
 
+            {/*
+              Template first, Send second, always in that order and always in
+              this row. `emphasis` is the only thing the policy moves.
+            */}
+            {templateAvailable ? (
+              <button
+                type="button"
+                onClick={() => setShowPicker(true)}
+                aria-label={t('chat.chooseTemplate')}
+                style={actionStyle(theme, allowed ? 'quiet' : 'loud')}
+              >
+                <Glyph name="template" size="md" />
+                {t('chat.chooseTemplate')}
+              </button>
+            ) : null}
+
             {allowed && canSend ? (
               <button
                 type="button"
                 onClick={submit}
                 disabled={draft.trim().length === 0 || isSending}
                 aria-label={t('chat.send')}
-                style={{
-                  border: 'none',
-                  borderRadius: theme.border.radius.sm,
-                  background:
-                    draft.trim().length === 0
-                      ? theme.background.transparent.light
-                      : theme.color.blue,
-                  color:
-                    draft.trim().length === 0
-                      ? theme.font.color.tertiary
-                      : theme.font.color.inverted,
-                  cursor: draft.trim().length === 0 ? 'default' : 'pointer',
-                  fontSize: theme.font.size.xs,
-                  padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-                  whiteSpace: 'nowrap',
-                }}
+                style={actionStyle(
+                  theme,
+                  draft.trim().length === 0 || isSending ? 'disabled' : 'loud',
+                )}
               >
+                <Glyph name="send" size="md" />
                 {isSending ? t('chat.sending') : t('chat.send')}
               </button>
             ) : null}
-
-            {templateAvailable && !allowed ? (
-              <button
-                type="button"
-                onClick={() => setShowPicker(true)}
-                aria-label={t('chat.chooseTemplate')}
-                style={{
-                  border: 'none',
-                  borderRadius: theme.border.radius.sm,
-                  background: theme.color.blue,
-                  color: theme.font.color.inverted,
-                  cursor: 'pointer',
-                  fontSize: theme.font.size.xs,
-                  padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {t('chat.chooseTemplate')}
-              </button>
-            ) : null}
           </div>
-
-          {templateAvailable && allowed ? (
-            <button
-              type="button"
-              onClick={() => setShowPicker(true)}
-              aria-label={t('chat.chooseTemplate')}
-              style={{
-                alignSelf: 'flex-start',
-                border: 'none',
-                background: 'transparent',
-                color: theme.font.color.tertiary,
-                cursor: 'pointer',
-                fontSize: theme.font.size.xxs,
-                padding: 0,
-              }}
-            >
-              {t('chat.chooseTemplate')}
-            </button>
-          ) : null}
         </div>
       )}
     </div>

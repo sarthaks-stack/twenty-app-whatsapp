@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from 'twenty-ui/theme-constants';
 
-import { useCopy } from '../common/copy';
+import { useCopy, type Translate } from '../common/copy';
 import { relativeTime } from '../common/format';
-import { ActionButton, Banner, Card, StatusPill } from '../common/ui';
+import { Glyph } from '../common/icons';
+import { ActionButton, Banner, Card, EmptyState, StatusPill } from '../common/ui';
 import { useFeed } from '../common/use-feed';
 import { CampaignBuilder } from './CampaignBuilder';
 import { CampaignDetail } from './CampaignDetail';
+import {
+  CAMPAIGN_FILTERS,
+  RUNNING_STATUSES,
+  visibleCampaigns,
+  type CampaignFilter,
+} from './list';
 
 /**
  * The campaigns page (FR-CAM-10, specs/08 §5).
@@ -18,14 +25,17 @@ import { CampaignDetail } from './CampaignDetail';
  * is exactly the budget D-6 exists to protect.
  */
 
-const RUNNING = new Set(['RUNNING', 'SNAPSHOTTING', 'TIER_WAITING', 'SCHEDULED']);
-
 /**
  * Below this the nine-column table cannot hold real names and counts without
  * colliding, so the list switches to stacked cards. Measured the same way the
- * inbox measures itself: `clientWidth` re-read every render, because
- * `ResizeObserver` is undefined here and `getBoundingClientRect` returns 0×0
- * (P-6).
+ * inbox used to: `clientWidth` re-read every render, because `ResizeObserver`
+ * is undefined here and `getBoundingClientRect` returns 0×0 (P-6).
+ *
+ * The inbox has since moved to a container query, which is the better answer
+ * and would suit this too. It is not converted here because the table/card
+ * switch changes *what is rendered* — nine columns or three lines, not one
+ * layout reflowed — and rendering both so CSS can hide one would double the
+ * rows in the accessibility tree for every campaign in the workspace.
  */
 export const TABLE_MIN_WIDTH = 640;
 
@@ -36,6 +46,8 @@ export const CampaignsView = () => {
   const [screen, setScreen] = useState<'list' | 'builder'>('list');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [wide, setWide] = useState(true);
+  const [filter, setFilter] = useState<CampaignFilter>('all');
+  const [search, setSearch] = useState('');
 
   const measured = useRef<boolean | null>(null);
   const node = useRef<HTMLDivElement | null>(null);
@@ -100,8 +112,13 @@ export const CampaignsView = () => {
   const now = new Date(list.data?.serverTime ?? Date.now());
 
   const anyRunning = useMemo(
-    () => campaigns.some((campaign) => RUNNING.has(String(campaign.status))),
+    () => campaigns.some((campaign) => RUNNING_STATUSES.has(String(campaign.status))),
     [campaigns],
+  );
+
+  const visible = useMemo(
+    () => visibleCampaigns(campaigns, filter, search),
+    [campaigns, filter, search],
   );
 
   if (screen === 'builder') {
@@ -154,6 +171,8 @@ export const CampaignsView = () => {
             recipients={(detail.data?.recipients ?? []) as Record<string, any>[]}
             canManage={canManage}
             t={t}
+            lang={lang}
+            now={new Date(detail.data?.serverTime ?? Date.now())}
             onBack={() => setSelectedId(null)}
             onChanged={() => {
               detail.refresh();
@@ -192,6 +211,7 @@ export const CampaignsView = () => {
           <ActionButton
             label={t('campaign.new')}
             tone="primary"
+            icon="newCampaign"
             onClick={() => setScreen('builder')}
           />
         ) : null}
@@ -206,26 +226,138 @@ export const CampaignsView = () => {
         </Banner>
       ) : null}
 
-      {anyRunning ? (
-        <Banner>{t('campaign.running')}</Banner>
-      ) : null}
+      {anyRunning ? <Banner>{t('campaign.running')}</Banner> : null}
+
+      {/*
+        The toolbar appears only once there is something to navigate. A search
+        box above "Ainda não há campanhas." is furniture.
+      */}
+      {campaigns.length === 0 ? null : (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: theme.spacing[2],
+            flexWrap: 'wrap',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: theme.spacing[1],
+              border: `1px solid ${theme.border.color.medium}`,
+              borderRadius: theme.border.radius.sm,
+              background: theme.background.primary,
+              padding: `0 ${theme.spacing[2]}`,
+              minHeight: '32px',
+              flex: '1 1 220px',
+              maxWidth: '320px',
+            }}
+          >
+            <Glyph name="search" />
+            <input
+              type="search"
+              value={search}
+              placeholder={t('campaign.search')}
+              aria-label={t('campaign.search')}
+              onChange={(event) => setSearch(event.target.value)}
+              style={{
+                flex: '1 1 auto',
+                minWidth: 0,
+                border: 'none',
+                outline: 'none',
+                background: 'transparent',
+                color: theme.font.color.primary,
+                fontFamily: theme.font.family,
+                fontSize: theme.font.size.md,
+                padding: `${theme.spacing[1]} 0`,
+              }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: theme.spacing[1], flexWrap: 'wrap' }}>
+            {CAMPAIGN_FILTERS.map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setFilter(key)}
+                aria-pressed={filter === key}
+                style={{
+                  minHeight: '28px',
+                  border: `1px solid ${
+                    filter === key ? theme.border.color.strong : theme.border.color.light
+                  }`,
+                  borderRadius: theme.border.radius.pill,
+                  background:
+                    filter === key ? theme.background.transparent.light : 'transparent',
+                  color:
+                    filter === key ? theme.font.color.primary : theme.font.color.secondary,
+                  cursor: 'pointer',
+                  fontFamily: theme.font.family,
+                  fontSize: theme.font.size.sm,
+                  fontWeight:
+                    filter === key ? theme.font.weight.medium : theme.font.weight.regular,
+                  padding: `0 ${theme.spacing[2]}`,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {t(`campaign.filter.${key}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {campaigns.length === 0 ? (
         <Card>
-          <div
-            style={{
-              padding: theme.spacing[4],
-              textAlign: 'center',
-              color: theme.font.color.tertiary,
-              fontSize: theme.font.size.md,
-            }}
-          >
-            {list.isUnavailable
-              ? t('common.unavailable')
-              : list.isLoading && list.data === null
-                ? t('common.loading')
-                : t('campaign.none')}
-          </div>
+          {list.isUnavailable ? (
+            <EmptyState icon="warning" title={t('common.unavailable')} />
+          ) : list.isLoading && list.data === null ? (
+            <div
+              style={{
+                padding: theme.spacing[4],
+                textAlign: 'center',
+                color: theme.font.color.tertiary,
+                fontSize: theme.font.size.md,
+              }}
+            >
+              {t('common.loading')}
+            </div>
+          ) : (
+            <EmptyState
+              icon="newCampaign"
+              title={t('campaign.none')}
+              body={t('campaign.noneBody')}
+              actions={
+                canManage ? (
+                  <ActionButton
+                    label={t('campaign.new')}
+                    tone="primary"
+                    icon="newCampaign"
+                    onClick={() => setScreen('builder')}
+                  />
+                ) : undefined
+              }
+            />
+          )}
+        </Card>
+      ) : visible.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon="search"
+            title={t('campaign.noMatches')}
+            actions={
+              <ActionButton
+                label={t('common.clear')}
+                icon="dismiss"
+                onClick={() => {
+                  setSearch('');
+                  setFilter('all');
+                }}
+              />
+            }
+          />
         </Card>
       ) : wide ? (
         <Card>
@@ -270,78 +402,15 @@ export const CampaignsView = () => {
                 </tr>
               </thead>
               <tbody>
-                {campaigns.map((campaign) => (
-                  <tr key={String(campaign.id)}>
-                    <td
-                      style={{
-                        padding: theme.spacing[2],
-                        borderTop: `1px solid ${theme.border.color.light}`,
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setSelectedId(String(campaign.id))}
-                        aria-label={String(campaign.name ?? '')}
-                        style={{
-                          border: 'none',
-                          background: 'transparent',
-                          color: theme.font.color.primary,
-                          cursor: 'pointer',
-                          fontFamily: theme.font.family,
-                          fontSize: theme.font.size.md,
-                          padding: 0,
-                          textAlign: 'left',
-                          textDecoration: 'underline',
-                        }}
-                      >
-                        {String(campaign.name ?? '—')}
-                      </button>
-                    </td>
-                    <td
-                      style={{
-                        padding: theme.spacing[2],
-                        borderTop: `1px solid ${theme.border.color.light}`,
-                      }}
-                    >
-                      <StatusPill status={(campaign.status ?? null) as string | null} />
-                    </td>
-                    {(
-                      [
-                        'recipientCount',
-                        'deliveredCount',
-                        'readCount',
-                        'failedCount',
-                        'respondedCount',
-                      ] as const
-                    ).map((key) => (
-                      <td
-                        key={key}
-                        style={{
-                          padding: theme.spacing[2],
-                          borderTop: `1px solid ${theme.border.color.light}`,
-                        }}
-                      >
-                        {Number(campaign[key] ?? 0)}
-                      </td>
-                    ))}
-                    <td
-                      style={{
-                        padding: theme.spacing[2],
-                        borderTop: `1px solid ${theme.border.color.light}`,
-                      }}
-                    >
-                      ${Number(campaign.actualCostUsd ?? campaign.estimatedCostUsd ?? 0).toFixed(2)}
-                    </td>
-                    <td
-                      style={{
-                        padding: theme.spacing[2],
-                        borderTop: `1px solid ${theme.border.color.light}`,
-                        color: theme.font.color.tertiary,
-                      }}
-                    >
-                      {relativeTime(campaign.createdAt as string | null, now, lang)}
-                    </td>
-                  </tr>
+                {visible.map((campaign) => (
+                  <CampaignRow
+                    key={String(campaign.id)}
+                    campaign={campaign}
+                    now={now}
+                    lang={lang}
+                    t={t}
+                    onOpen={() => setSelectedId(String(campaign.id))}
+                  />
                 ))}
               </tbody>
             </table>
@@ -353,12 +422,12 @@ export const CampaignsView = () => {
          * into detail. Name, status, and the counters that matter; the rest
          * lives in the detail screen it opens.
          */
-        campaigns.map((campaign) => (
+        visible.map((campaign) => (
           <button
             key={String(campaign.id)}
             type="button"
             onClick={() => setSelectedId(String(campaign.id))}
-            aria-label={String(campaign.name ?? '')}
+            aria-label={`${t('campaign.open')}: ${String(campaign.name ?? '')}`}
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -387,20 +456,210 @@ export const CampaignsView = () => {
               >
                 {String(campaign.name ?? '—')}
               </span>
-              <StatusPill status={(campaign.status ?? null) as string | null} />
+              <StatusPill status={(campaign.status ?? null) as string | null} t={t} />
+              {/*
+                The affordance the card was missing: nothing on it said it was
+                a button, so the whole row read as a summary card.
+              */}
+              <Glyph name="chevron" />
             </span>
-            <span style={{ fontSize: theme.font.size.sm, color: theme.font.color.secondary }}>
-              {t('campaign.counter.deliveredCount')} {Number(campaign.deliveredCount ?? 0)}/
-              {Number(campaign.recipientCount ?? 0)} ·{' '}
-              {t('campaign.counter.respondedCount')} {Number(campaign.respondedCount ?? 0)} · $
-              {Number(campaign.actualCostUsd ?? campaign.estimatedCostUsd ?? 0).toFixed(2)}
+
+            <span
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: theme.spacing[3],
+                fontSize: theme.font.size.sm,
+                color: theme.font.color.secondary,
+              }}
+            >
+              <Metric
+                icon="audience"
+                label={t('campaign.counter.deliveredCount')}
+                value={`${Number(campaign.deliveredCount ?? 0)}/${Number(campaign.recipientCount ?? 0)}`}
+              />
+              <Metric
+                icon="replies"
+                label={t('campaign.counter.respondedCount')}
+                value={String(Number(campaign.respondedCount ?? 0))}
+              />
+              <Metric
+                icon="cost"
+                label={t('campaign.counter.actualCost')}
+                value={Number(
+                  campaign.actualCostUsd ?? campaign.estimatedCostUsd ?? 0,
+                ).toFixed(2)}
+              />
             </span>
-            <span style={{ fontSize: theme.font.size.sm, color: theme.font.color.tertiary }}>
-              {relativeTime(campaign.createdAt as string | null, now, lang)}
-            </span>
+
+            <Freshness campaign={campaign} now={now} lang={lang} t={t} />
           </button>
         ))
       )}
     </div>
+  );
+};
+
+/**
+ * One table row, clickable across its whole width.
+ *
+ * The name used to be the only target — an underlined button inside the first
+ * cell — so eight of the nine columns did nothing when clicked. A `<tr>`
+ * cannot be a `<button>`, so the row carries the click and the name cell keeps
+ * a real button for the keyboard: `onClick` on a row is a mouse affordance,
+ * and a mouse affordance on its own is not an affordance.
+ */
+const CampaignRow = ({
+  campaign,
+  now,
+  lang,
+  t,
+  onOpen,
+}: {
+  campaign: Record<string, any>;
+  now: Date;
+  lang: 'pt' | 'en';
+  t: Translate;
+  onOpen: () => void;
+}) => {
+  const theme = useTheme();
+  const [hover, setHover] = useState(false);
+
+  const cell: React.CSSProperties = {
+    padding: theme.spacing[2],
+    borderTop: `1px solid ${theme.border.color.light}`,
+  };
+
+  return (
+    <tr
+      onClick={onOpen}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        cursor: 'pointer',
+        background: hover ? theme.background.transparent.light : 'transparent',
+      }}
+    >
+      <td style={cell}>
+        <button
+          type="button"
+          onClick={(event) => {
+            // The row handles it; letting it through would open twice.
+            event.stopPropagation();
+            onOpen();
+          }}
+          aria-label={`${t('campaign.open')}: ${String(campaign.name ?? '')}`}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            gap: theme.spacing[0.5],
+            minHeight: '28px',
+            border: 'none',
+            background: 'transparent',
+            color: theme.font.color.primary,
+            cursor: 'pointer',
+            fontFamily: theme.font.family,
+            fontSize: theme.font.size.md,
+            padding: 0,
+            textAlign: 'left',
+          }}
+        >
+          <span style={{ textDecoration: hover ? 'underline' : 'none' }}>
+            {String(campaign.name ?? '—')}
+          </span>
+          <Freshness campaign={campaign} now={now} lang={lang} t={t} />
+        </button>
+      </td>
+      <td style={cell}>
+        <StatusPill status={(campaign.status ?? null) as string | null} t={t} />
+      </td>
+      {(
+        [
+          'recipientCount',
+          'deliveredCount',
+          'readCount',
+          'failedCount',
+          'respondedCount',
+        ] as const
+      ).map((key) => (
+        <td key={key} style={cell}>
+          {Number(campaign[key] ?? 0)}
+        </td>
+      ))}
+      <td style={cell}>
+        ${Number(campaign.actualCostUsd ?? campaign.estimatedCostUsd ?? 0).toFixed(2)}
+      </td>
+      <td style={{ ...cell, color: theme.font.color.tertiary }}>
+        {relativeTime(campaign.createdAt as string | null, now, lang)}
+      </td>
+    </tr>
+  );
+};
+
+/**
+ * Progress and recency, for a campaign that is moving.
+ *
+ * Only rendered while something is actually happening. "Actualizado há 4
+ * meses" under a completed campaign is noise; under a running one, "12 de 400
+ * enviadas · actualizado há 20 s" is the difference between a screen that is
+ * live and a screen that might be stuck.
+ */
+const Freshness = ({
+  campaign,
+  now,
+  lang,
+  t,
+}: {
+  campaign: Record<string, any>;
+  now: Date;
+  lang: 'pt' | 'en';
+  t: Translate;
+}) => {
+  const theme = useTheme();
+
+  if (!RUNNING_STATUSES.has(String(campaign.status))) return null;
+
+  const total = Number(campaign.recipientCount ?? 0);
+  const done = Number(campaign.sentCount ?? 0);
+  const updated = (campaign.updatedAt ?? campaign.createdAt ?? null) as string | null;
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: theme.spacing[1],
+        fontSize: theme.font.size.xs,
+        color: theme.font.color.tertiary,
+        fontWeight: theme.font.weight.regular,
+      }}
+    >
+      <Glyph name="running" />
+      {total === 0 ? null : `${t('campaign.progress', { done, total })} · `}
+      {t('campaign.updated', { when: relativeTime(updated, now, lang) })}
+    </span>
+  );
+};
+
+const Metric = ({
+  icon,
+  label,
+  value,
+}: {
+  icon: 'audience' | 'replies' | 'cost';
+  label: string;
+  value: string;
+}) => {
+  const theme = useTheme();
+
+  return (
+    <span
+      style={{ display: 'inline-flex', alignItems: 'center', gap: theme.spacing[1] }}
+      title={label}
+    >
+      <Glyph name={icon} label={label} />
+      {value}
+    </span>
   );
 };

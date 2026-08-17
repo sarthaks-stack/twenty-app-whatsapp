@@ -9,6 +9,7 @@ import {
 } from '../../domain/template-render';
 import type { VariableSpec } from '../../domain/template-spec';
 import type { Translate } from '../common/copy';
+import { Glyph } from '../common/icons';
 import type { FeedTemplate } from '../common/use-feed';
 
 /**
@@ -107,7 +108,7 @@ export const TemplatePicker = ({
         </div>
       ) : (
         <label style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing[1] }}>
-          <span style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+          <span style={{ fontSize: theme.font.size.sm, color: theme.font.color.tertiary }}>
             {t('chat.chooseTemplate')}
           </span>
           <select
@@ -135,7 +136,7 @@ export const TemplatePicker = ({
           key={label}
           style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing[1] }}
         >
-          <span style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+          <span style={{ fontSize: theme.font.size.sm, color: theme.font.color.tertiary }}>
             {label}
           </span>
           <input
@@ -173,7 +174,7 @@ export const TemplatePicker = ({
           )}
           <div>{preview.body}</div>
           {preview.footer === null ? null : (
-            <div style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+            <div style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
               {preview.footer}
             </div>
           )}
@@ -181,7 +182,7 @@ export const TemplatePicker = ({
       )}
 
       {validation !== null && !validation.ok ? (
-        <div style={{ fontSize: theme.font.size.xxs, color: theme.font.color.tertiary }}>
+        <div style={{ fontSize: theme.font.size.sm, color: theme.font.color.tertiary }}>
           {t('chat.missing')}: {validation.missingKeys.join(', ')}
         </div>
       ) : null}
@@ -197,6 +198,10 @@ export const TemplatePicker = ({
           disabled={selected === null || validation?.ok !== true || isSending}
           aria-label={t('chat.send')}
           style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: theme.spacing[1],
+            minHeight: '32px',
             border: 'none',
             borderRadius: theme.border.radius.sm,
             background:
@@ -208,10 +213,12 @@ export const TemplatePicker = ({
                 ? theme.font.color.tertiary
                 : theme.font.color.inverted,
             cursor: selected === null || validation?.ok !== true ? 'default' : 'pointer',
-            fontSize: theme.font.size.xs,
-            padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
+            fontFamily: theme.font.family,
+            fontSize: theme.font.size.sm,
+            padding: `0 ${theme.spacing[2]}`,
           }}
         >
+          <Glyph name="send" size="md" />
           {isSending ? t('chat.sending') : t('chat.send')}
         </button>
         <button
@@ -219,13 +226,17 @@ export const TemplatePicker = ({
           onClick={onCancel}
           aria-label={t('common.cancel')}
           style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            minHeight: '32px',
             border: `1px solid ${theme.border.color.medium}`,
             borderRadius: theme.border.radius.sm,
             background: 'transparent',
             color: theme.font.color.secondary,
             cursor: 'pointer',
-            fontSize: theme.font.size.xs,
-            padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
+            fontFamily: theme.font.family,
+            fontSize: theme.font.size.sm,
+            padding: `0 ${theme.spacing[2]}`,
           }}
         >
           {t('common.cancel')}

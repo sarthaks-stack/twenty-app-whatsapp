@@ -26,14 +26,17 @@ import {
   projectThread,
   type AccountProjection,
   type MessageProjection,
+  type PersonProjection,
   type ThreadProjection,
 } from '../domain/feed/projection';
+import { toE164, toWaId } from '../domain/phone/normalise';
 import {
   evaluateSendPermission,
   type SendContext,
   type SendVerdict,
 } from '../domain/policy/send-permission';
 import { authErrorResponse, requireCaller, requireRole, type Caller } from '../server/auth';
+import { config, forAccount } from '../server/config';
 import { describeError, logger } from '../server/logger';
 import { findAccountById, listAccounts } from '../server/repositories/accounts';
 import { toDate } from '../server/repositories/base';
@@ -46,6 +49,7 @@ import {
 import { findPersonById } from '../server/repositories/people';
 import { listTemplatesForAccount } from '../server/repositories/templates';
 import {
+  countInboxThreads,
   findThreadById,
   findThreadsForPerson,
   listInboxThreads,
@@ -103,7 +107,13 @@ export type FeedEnvelope = {
   permissions: FeedPermissions;
   account?: AccountProjection | null;
   thread?: ThreadProjection | null;
+  /** Only on the person scope when there is no conversation to carry it. */
+  person?: PersonProjection | null;
+  /** What `POST /whatsapp/send` needs to open a conversation from a contact. */
+  start?: { accountId: string | null; waId: string | null };
   threads?: ThreadProjection[];
+  /** Inbox scope with `counts=1`: one total per filter, keyed by filter name. */
+  counts?: Record<string, number>;
   messages?: MessageProjection[];
   olderCursor?: string | null;
   nextCursor?: string | null;
@@ -263,9 +273,40 @@ const threadScope = async (
      * A Person with no conversation is not an error — it is the side panel's
      * empty state, which offers "Iniciar conversa" (specs/08 §7). Answering 404
      * would make the component treat a normal contact as a failure.
+     *
+     * The empty state is only *actionable* if it knows why. It used to receive
+     * the account and the templates and nothing else, so it could say no more
+     * than "this contact has no conversation yet" — true, useless, and
+     * identical whether the contact had unsubscribed, the number was down, or
+     * one click would have started the conversation. Three things fix that,
+     * and all three are the server's to decide (AR-17):
+     *
+     * - `policy`, evaluated against a conversation that does not exist yet:
+     *   no window, not blocked, and the person's own consent. A first message
+     *   therefore answers `WINDOW_CLOSED` — which is not a refusal but the
+     *   instruction to use a template (FR-OUT-5) — or `OPTED_OUT`, or
+     *   `ACCOUNT_NOT_CONNECTED`, each of which is a different screen.
+     * - `person`, so the state can name the consent it is describing.
+     * - `start`, the pair the send route needs to open a conversation from a
+     *   contact. The browser must not assemble a `waId` by stripping
+     *   punctuation from a display string: a contact stored without a calling
+     *   code would resolve to a national number and the template would go to
+     *   whoever owns it in the default country.
      */
     if (query.by === FEED_BY.PERSON) {
       const fallback = await resolveAccount(null);
+      const person = await findPersonById(id);
+
+      const e164 =
+        person === null
+          ? null
+          : toE164(
+              `${person.phones?.primaryPhoneCallingCode ?? ''}${person.phones?.primaryPhoneNumber ?? ''}`,
+              forAccount(
+                fallback?.defaultCountryCallingCode,
+                config.defaultCountryCallingCode,
+              ),
+            );
 
       return {
         serverTime: now.toISOString(),
@@ -273,9 +314,20 @@ const threadScope = async (
         scope: FEED_SCOPE.THREAD,
         permissions: permissionsFor(caller),
         thread: null,
+        person: projectPerson(person),
         messages: [],
         account: projectAccount(fallback),
         templates: await publishedTemplates(fallback?.id),
+        policy: threadPolicy(
+          { serviceWindowExpiresAt: null, isBlocked: false },
+          fallback,
+          person,
+          now,
+        ),
+        start: {
+          accountId: fallback?.id ?? null,
+          waId: e164 === null ? null : toWaId(e164),
+        },
       };
     }
 
@@ -315,6 +367,43 @@ const threadScope = async (
   };
 };
 
+/**
+ * How many conversations each filter holds (review §"strengthen list navigation").
+ *
+ * Six reads, run together, and only when `counts=1` asked for them. A filter
+ * the caller cannot use answers zero rather than erroring: `mine` needs a
+ * workspace member, and a badge is not the place to report that a caller has
+ * no identity — the list itself already says so when they select it.
+ */
+const inboxCounts = async (
+  caller: Caller,
+  now: Date,
+): Promise<Record<string, number>> => {
+  const specs = Object.values(INBOX_FILTER).map(
+    (filter) => [filter, inboxSpecFor({ ...EMPTY_QUERY, filter }, caller, now)] as const,
+  );
+
+  const counted = await Promise.all(
+    specs.map(async ([filter, spec]) =>
+      'error' in spec ? ([filter, 0] as const) : ([filter, await countInboxThreads(spec)] as const),
+    ),
+  );
+
+  return Object.fromEntries(counted);
+};
+
+/** The fields `inboxSpecFor` ignores, so a filter can be counted on its own. */
+const EMPTY_QUERY: FeedQuery = {
+  scope: FEED_SCOPE.INBOX,
+  id: null,
+  by: FEED_BY.THREAD,
+  since: null,
+  filter: INBOX_FILTER.ALL,
+  before: null,
+  limit: DEFAULT_THREAD_PAGE,
+  counts: false,
+};
+
 const inboxScope = async (
   query: FeedQuery,
   caller: Caller,
@@ -339,6 +428,7 @@ const inboxScope = async (
     account: projectAccount(account),
     threads: page.threads.map((thread) => projectThread(thread)),
     nextCursor: page.nextCursor,
+    ...(query.counts ? { counts: await inboxCounts(caller, now) } : {}),
   };
 };
 

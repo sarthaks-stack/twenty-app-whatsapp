@@ -4,6 +4,7 @@ import { useTheme } from 'twenty-ui/theme-constants';
 import type { MessageProjection } from '../../domain/feed/projection';
 import type { Lang, Translate } from '../common/copy';
 import { dayKey, daySeparator } from '../common/format';
+import { EmptyState } from '../common/ui';
 import { MessageBubble } from './MessageBubble';
 
 /**
@@ -117,17 +118,13 @@ export const MessageList = ({
         padding: theme.spacing[2],
       }}
     >
-      {messages.length === 0 ? (
-        <div
-          style={{
-            color: theme.font.color.tertiary,
-            fontSize: theme.font.size.sm,
-            textAlign: 'center',
-            padding: theme.spacing[4],
-          }}
-        >
-          {t('chat.empty')}
-        </div>
+      {/*
+        `isLoading` guards the claim. "No messages in this conversation yet" is
+        a statement about the data, and a list that has not finished its first
+        read is not entitled to make it.
+      */}
+      {messages.length === 0 && !isLoading ? (
+        <EmptyState icon="inbox" title={t('chat.empty')} body={t('chat.emptyBody')} />
       ) : null}
 
       {messages.map((message) => {
@@ -149,7 +146,7 @@ export const MessageList = ({
               <div
                 style={{
                   alignSelf: 'center',
-                  fontSize: theme.font.size.xxs,
+                  fontSize: theme.font.size.xs,
                   color: theme.font.color.tertiary,
                   background: theme.background.transparent.light,
                   borderRadius: theme.border.radius.pill,
@@ -176,14 +173,18 @@ export const MessageList = ({
           disabled={isLoading}
           aria-label={t('chat.loadOlder')}
           style={{
+            display: 'inline-flex',
+            alignItems: 'center',
             alignSelf: 'center',
+            minHeight: '28px',
             border: `1px solid ${theme.border.color.medium}`,
             background: 'transparent',
             borderRadius: theme.border.radius.pill,
             color: theme.font.color.secondary,
             cursor: isLoading ? 'default' : 'pointer',
-            fontSize: theme.font.size.xs,
-            padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
+            fontFamily: theme.font.family,
+            fontSize: theme.font.size.sm,
+            padding: `0 ${theme.spacing[3]}`,
           }}
         >
           {t('chat.loadOlder')}

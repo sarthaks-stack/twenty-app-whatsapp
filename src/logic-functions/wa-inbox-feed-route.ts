@@ -25,6 +25,8 @@ import {
   type ThreadCapabilities,
 } from '../domain/feed/capabilities';
 import {
+  attachSenderLabels,
+  memberLabel,
   projectAccount,
   projectMessage,
   projectPerson,
@@ -64,6 +66,7 @@ import {
   findPersonById,
 } from '../server/repositories/people';
 import { listTemplatesForAccount } from '../server/repositories/templates';
+import { findWorkspaceMembersByIds } from '../server/repositories/workspace-members';
 import {
   countInboxThreads,
   findThreadById,
@@ -500,12 +503,35 @@ const threadScope = async (
   const quoted = attachQuotes(projected, resolved, viewer.contactLabel);
 
   /**
+   * Who sent each outbound message, by name.
+   *
+   * One read for the whole page, and only when the page contains a message a
+   * person sent by hand — a conversation of inbound messages and campaign sends
+   * asks for nothing.
+   */
+  const senderIds = quoted
+    .map((message) => message.sentById)
+    .filter((id): id is string => id !== null);
+
+  const senderLabels = new Map<string, string>();
+
+  if (senderIds.length > 0) {
+    for (const member of await findWorkspaceMembersByIds(senderIds)) {
+      const label = memberLabel(member);
+
+      if (label !== null) senderLabels.set(member.id, label);
+    }
+  }
+
+  const named = attachSenderLabels(quoted, senderLabels);
+
+  /**
    * Shared contact cards, matched against the CRM in one batched query.
    *
    * Skipped entirely when the page carries no contact card, which is nearly
    * every page — the cost is paid only by the conversations that share one.
    */
-  const messages = await withContactMatches(quoted, account);
+  const messages = await withContactMatches(named, account);
 
   return {
     serverTime: now.toISOString(),

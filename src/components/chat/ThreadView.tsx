@@ -762,7 +762,17 @@ export const ThreadView = ({
      * alone did not achieve that — the pane sizes itself to us, not the other
      * way round — so the cap is what actually holds. See `SURFACE_MAX_HEIGHT`.
      */
-    maxHeight: SURFACE_MAX_HEIGHT,
+    /**
+     * Only the record *tab* needs the cap.
+     *
+     * There the parent is a page-layout grid row sized from our content, so a
+     * percentage means nothing and the cap is the only thing holding. In the
+     * inbox and the side panel the parent is already a bounded flex child, and
+     * applying the cap there does the opposite of its job: it clamps the
+     * conversation to 72vh inside a pane that is taller, leaving dead space
+     * under the composer.
+     */
+    ...(variant === 'tab' ? { maxHeight: SURFACE_MAX_HEIGHT } : {}),
     minHeight: variant === 'tab' ? SURFACE_MIN_HEIGHT : 0,
     background: theme.background.primary,
     color: theme.font.color.primary,

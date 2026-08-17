@@ -21,5 +21,22 @@
  */
 export const SURFACE_MAX_HEIGHT = '72vh';
 
+/**
+ * The same workaround for a surface that owns a **whole page**.
+ *
+ * The inbox is not a widget beside a record's fields — it is the page. Giving
+ * it the embedded cap left roughly a quarter of the viewport empty below the
+ * composer: dead grey space a rep cannot use, under the one control they use
+ * most. 72vh is the right answer for something sharing a record page and the
+ * wrong one for something that *is* the page.
+ *
+ * The subtraction is the page's own chrome — its title bar — and it is
+ * deliberately generous. Overshooting is the failure this module exists to
+ * prevent: a surface taller than the space available scrolls the *page*, and
+ * puts the composer below the fold. Undershooting costs a thin strip nobody
+ * notices.
+ */
+export const SURFACE_PAGE_HEIGHT = 'calc(100vh - 4rem)';
+
 /** Below this a chat is a viewport, not a conversation. */
 export const SURFACE_MIN_HEIGHT = '420px';

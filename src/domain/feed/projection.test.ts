@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { isRetryableError, projectMessage, projectThread } from './projection';
+import {
+  attachSenderLabels,
+  isRetryableError,
+  memberLabel,
+  projectMessage,
+  projectThread,
+} from './projection';
 
 /**
  * What the components are allowed to believe.
@@ -220,5 +226,66 @@ describe('projectThread', () => {
     expect(projected.linkCandidates).toEqual({
       candidates: [{ personId: 'p1' }, { personId: 'p2' }],
     });
+  });
+});
+
+/**
+ * Two reps working the same conversation saw an identical column of blue
+ * bubbles with nothing to tell them apart. `sentById` answered "who" for an
+ * audit and for nobody reading a conversation.
+ */
+describe('naming the colleague who sent a message', () => {
+  it('joins the parts of a workspace member’s name', () => {
+    expect(memberLabel({ name: { firstName: 'Ana', lastName: 'Silva' } })).toBe('Ana Silva');
+    expect(memberLabel({ name: { firstName: 'Ana', lastName: null } })).toBe('Ana');
+  });
+
+  /**
+   * Nothing rather than a placeholder: a member with no name filled in should
+   * leave the line absent, not print "Unknown" under everything they send.
+   */
+  it('answers nothing rather than a placeholder', () => {
+    expect(memberLabel({ name: { firstName: '  ', lastName: null } })).toBeNull();
+    expect(memberLabel({})).toBeNull();
+    expect(memberLabel(null)).toBeNull();
+  });
+
+  it('attaches each name to the messages that member sent', () => {
+    const messages = [
+      projectMessage({ id: 'a', direction: 'OUTBOUND', sentById: 'wm-1' }),
+      projectMessage({ id: 'b', direction: 'OUTBOUND', sentById: 'wm-2' }),
+      projectMessage({ id: 'c', direction: 'INBOUND' }),
+    ];
+
+    const named = attachSenderLabels(
+      messages,
+      new Map([
+        ['wm-1', 'Ana Silva'],
+        ['wm-2', 'Marcos Lisboa'],
+      ]),
+    );
+
+    expect(named.map((message) => message.sentByLabel)).toEqual([
+      'Ana Silva',
+      'Marcos Lisboa',
+      null,
+    ]);
+  });
+
+  /**
+   * A campaign or a workflow has no author worth naming, and a member the
+   * lookup could not resolve must not inherit the previous message's name —
+   * attributing one rep's message to another is worse than showing none.
+   */
+  it('leaves an unresolved or automated sender unnamed', () => {
+    const named = attachSenderLabels(
+      [
+        projectMessage({ id: 'a', sentById: 'wm-gone' }),
+        projectMessage({ id: 'b', sourceKind: 'CAMPAIGN' }),
+      ],
+      new Map([['wm-1', 'Ana Silva']]),
+    );
+
+    expect(named.map((message) => message.sentByLabel)).toEqual([null, null]);
   });
 });

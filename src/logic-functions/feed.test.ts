@@ -26,6 +26,7 @@ const store: Record<string, Row[]> = {
   whatsappCampaigns: [],
   whatsappCampaignRecipients: [],
   people: [],
+  workspaceMembers: [],
 };
 
 /** Every `__args.filter` the route sent, so a test can assert on the query itself. */
@@ -646,6 +647,48 @@ describe('scope=thread, for the rich transcript', () => {
     const { body } = await call({ scope: 'thread', id: 'thr-1' });
 
     expect(body.messages[0].quote).toBeNull();
+  });
+
+  /**
+   * Two reps working the same conversation saw an identical column of blue
+   * bubbles with nothing to tell them apart.
+   */
+  it('names the colleague who sent each outbound message, in one read', async () => {
+    seedAccount();
+    seedThread();
+    store.workspaceMembers.push(
+      { id: 'wm-1', name: { firstName: 'Ana', lastName: 'Silva' } },
+      { id: 'wm-2', name: { firstName: 'Marcos', lastName: 'Lisboa' } },
+    );
+    seedMessage({ id: 'm-in', direction: 'INBOUND' });
+    seedMessage({ id: 'm-ana', direction: 'OUTBOUND', sentById: 'wm-1' });
+    seedMessage({ id: 'm-marcos', direction: 'OUTBOUND', sentById: 'wm-2' });
+
+    const { body } = await call({ scope: 'thread', id: 'thr-1' });
+    const byId = Object.fromEntries(
+      body.messages.map((message: Envelope) => [message.id, message.sentByLabel]),
+    );
+
+    expect(byId).toEqual({
+      'm-in': null,
+      'm-ana': 'Ana Silva',
+      'm-marcos': 'Marcos Lisboa',
+    });
+
+    // One query for the page, not one per message.
+    expect(filters.filter((entry) => entry.collection === 'workspaceMembers')).toHaveLength(
+      1,
+    );
+  });
+
+  it('asks for no members at all when nobody sent anything by hand', async () => {
+    seedAccount();
+    seedThread();
+    seedMessage({ direction: 'INBOUND' });
+
+    await call({ scope: 'thread', id: 'thr-1' });
+
+    expect(filters.filter((entry) => entry.collection === 'workspaceMembers')).toEqual([]);
   });
 
   it('projects each message as a content union the renderer switches on', async () => {

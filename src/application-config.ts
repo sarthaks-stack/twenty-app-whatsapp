@@ -25,7 +25,22 @@ export default defineApplication({
   universalIdentifier: APPLICATION_UNIVERSAL_IDENTIFIER,
   displayName: APP_DISPLAY_NAME,
   description: APP_DESCRIPTION,
-  logo: 'public/logo.svg',
+  /**
+   * The filename carries the cache bust, and it has to.
+   *
+   * Public assets are served from a path-derived URL with
+   * `Cache-Control: public, max-age=3600` and no content hash, so replacing the
+   * bytes at `public/logo.svg` leaves every browser that had already loaded it
+   * showing the old icon for up to an hour — with the server serving the new one
+   * the whole time, which is an unfalsifiable bug report. A new filename is a new
+   * URL. Rename this file whenever the logo actually changes.
+   *
+   * The logo matters more than a marketplace tile: Twenty renders it in the
+   * header of every workflow step this app contributes, so it is what an author
+   * sees above "Send WhatsApp template". `workflowActionTriggerSettings.icon` is
+   * *not* used there.
+   */
+  logo: 'public/logo-whatsapp.svg',
   category: 'Communication',
   serverVariables: {
     META_APP_ID: {

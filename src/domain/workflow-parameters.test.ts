@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type { VariableSpec } from './template-spec';
-import { bindWorkflowParameters } from './workflow-parameters';
+import {
+  BODY_VARIABLE_SLOTS,
+  bindWorkflowParameters,
+  combineVariableInputs,
+} from './workflow-parameters';
 
 /**
  * The one place in the app where variables are supplied by a caller who never
@@ -64,6 +68,25 @@ describe('binding a body', () => {
   });
 
   /**
+   * A number binds a named template too, by position. The step's numbered fields
+   * can only send positions — the builder has no way to know the names — so
+   * without this they bound nothing at all on every named template.
+   */
+  it('reads a number as a position on a named template', () => {
+    expect(bindWorkflowParameters(named(), { 1: 'Ana', 2: 'AO-4471' }).body).toEqual([
+      'Ana',
+      'AO-4471',
+    ]);
+  });
+
+  /** The name still wins where both are given. */
+  it('prefers the name over the position', () => {
+    expect(
+      bindWorkflowParameters(named(), { nome: 'Ana', 1: 'Marcos' }).body,
+    ).toEqual(['Ana', '']);
+  });
+
+  /**
    * Order comes from the spec, never from the object. `Object.keys` on
    * `{ 2: …, 1: … }` happens to sort numeric keys, but on `{ referencia, nome }`
    * it does not — and a body bound in insertion order would put the reference
@@ -102,9 +125,94 @@ describe('binding a body', () => {
     expect(bindWorkflowParameters(positional(), raw).body).toEqual(['', '']);
   });
 
+  /**
+   * The builder's `Variables` field is a string, because an `object` input gets
+   * no variable binding in Twenty — so the value that arrives is JSON text with
+   * `{{…}}` already interpolated by the engine.
+   */
+  it('parses the JSON text the builder actually sends', () => {
+    expect(
+      bindWorkflowParameters(positional(), '{"1": "Ana", "2": "AO-4471"}').body,
+    ).toEqual(['Ana', 'AO-4471']);
+
+    expect(bindWorkflowParameters(named(), '{"nome": "Ana"}').body).toEqual(['Ana', '']);
+  });
+
+  /**
+   * A typo in the JSON must not send a message with gaps in it. Empty values are
+   * named missing variables, which refuses the send — the only safe reading.
+   */
+  it.each(['{"1": Ana}', 'Ana', '{', ''])('refuses rather than send on %p', (raw) => {
+    expect(bindWorkflowParameters(positional(), raw).body).toEqual(['', '']);
+  });
+
   it('survives a Variables input that is not an object at all', () => {
-    expect(bindWorkflowParameters(positional(), 'Ana').body).toEqual(['', '']);
     expect(bindWorkflowParameters(positional(), null).body).toEqual(['', '']);
+    expect(bindWorkflowParameters(positional(), 42).body).toEqual(['', '']);
+  });
+});
+
+describe('folding the per-variable fields', () => {
+  it('numbers the filled fields the way Meta numbers them', () => {
+    expect(combineVariableInputs(['Ana', 'AO-4471'], undefined)).toEqual({
+      1: 'Ana',
+      2: 'AO-4471',
+    });
+  });
+
+  /**
+   * An untouched box must not become an empty variable. Five slots are always
+   * sent, so counting them all would make every template with fewer than five
+   * variables look like it had missing ones.
+   */
+  it('drops the boxes the author left alone', () => {
+    expect(combineVariableInputs(['Ana', '', '   ', undefined, null], undefined)).toEqual({
+      1: 'Ana',
+    });
+  });
+
+  it('lets the advanced JSON override a numbered field', () => {
+    expect(combineVariableInputs(['Ana'], '{"1": "Marcos", "header": "x"}')).toEqual({
+      1: 'Marcos',
+      header: 'x',
+    });
+  });
+
+  it('adds what the numbered fields cannot express', () => {
+    expect(
+      combineVariableInputs(['Ana'], '{"buttons": {"0": "AO-4471"}}'),
+    ).toEqual({ 1: 'Ana', buttons: { 0: 'AO-4471' } });
+  });
+
+  /**
+   * An already-resolved payload replaces the fields rather than merging. Merging
+   * positions into an ordered array would silently reorder someone's message.
+   */
+  it('lets an already-resolved body replace the fields outright', () => {
+    expect(combineVariableInputs(['Ana'], { body: ['Marcos', 'X'] })).toEqual({
+      body: ['Marcos', 'X'],
+    });
+  });
+
+  it('binds the folded result through the spec', () => {
+    const combined = combineVariableInputs(['Ana', 'AO-4471'], undefined);
+
+    expect(bindWorkflowParameters(positional(), combined).body).toEqual([
+      'Ana',
+      'AO-4471',
+    ]);
+  });
+
+  /** Named templates take the fields positionally, in template order. */
+  it('fills a named template from the numbered fields', () => {
+    const combined = combineVariableInputs(['Ana', 'AO-4471'], undefined);
+
+    expect(bindWorkflowParameters(named(), combined).body).toEqual(['Ana', 'AO-4471']);
+  });
+
+  it('offers enough slots to be useful without being a form', () => {
+    expect(BODY_VARIABLE_SLOTS).toBeGreaterThanOrEqual(4);
+    expect(BODY_VARIABLE_SLOTS).toBeLessThanOrEqual(8);
   });
 });
 

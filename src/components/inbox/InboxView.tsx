@@ -7,7 +7,7 @@ import { useCopy, type Translate } from '../common/copy';
 import { Glyph, type IconName } from '../common/icons';
 import { ActionButton, Banner, EmptyState } from '../common/ui';
 import { countdown, displayPhone, relativeTime } from '../common/format';
-import { SURFACE_MAX_HEIGHT, SURFACE_MIN_HEIGHT } from '../common/surface';
+import { SURFACE_MIN_HEIGHT, SURFACE_PAGE_HEIGHT } from '../common/surface';
 import { InboundToaster } from './InboundToaster';
 import { filterThreads, nextThreadId, threadName } from './list';
 import { useFeed } from '../common/use-feed';
@@ -256,12 +256,27 @@ const layoutCss = (borderColor: string): string => `
   container query below has to be able to hide it.
 */
 .wa-inbox-back { display: inline-flex; align-items: center; }
+/*
+  The collapse toggle only means anything in the two-pane layout: in the narrow
+  one the list and the conversation are already alternatives, and Back is how
+  you move between them.
+*/
+.wa-inbox-collapse { display: none; }
 @container wa-inbox (min-width: ${TWO_PANE_MIN_WIDTH}px) {
   .wa-inbox[data-detail="open"] .wa-inbox-list { display: flex; flex: 0 0 320px; }
   .wa-inbox[data-detail="closed"] .wa-inbox-list { flex: 0 0 320px; }
   .wa-inbox-list { border-right: 1px solid ${borderColor}; }
   .wa-inbox[data-detail="closed"] .wa-inbox-detail { display: flex; }
   .wa-inbox-back { display: none; }
+  .wa-inbox-collapse { display: inline-flex; align-items: center; }
+  /*
+    Collapsed: the list goes, the conversation takes the whole width.
+
+    Only ever while a conversation is open — collapsing the list with nothing
+    selected would leave a pane showing an empty state and no way back to the
+    thing that was hidden.
+  */
+  .wa-inbox[data-list="collapsed"][data-detail="open"] .wa-inbox-list { display: none; }
 }
 `;
 
@@ -274,6 +289,16 @@ export const InboxView = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [showAllFilters, setShowAllFilters] = useState(false);
+  /**
+   * Hides the conversation list so the transcript has the whole width.
+   *
+   * A reader working through one long conversation does not need a column of
+   * other conversations beside it, and on a wide screen that column is 320px of
+   * permanent furniture. Local state, not a preference: it is a per-sitting
+   * choice, and persisting it would mean a rep who collapsed it once opens the
+   * inbox tomorrow to no list and no obvious reason why.
+   */
+  const [listCollapsed, setListCollapsed] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const feed = useFeed({ scope: 'inbox', filter });
@@ -371,6 +396,7 @@ export const InboxView = () => {
     <div
       className="wa-inbox"
       data-detail={selectedId === null ? 'closed' : 'open'}
+      data-list={listCollapsed ? 'collapsed' : 'expanded'}
       {...feed.rootProps}
       onKeyDown={(event) => {
         feed.rootProps.onKeyDown();
@@ -384,9 +410,13 @@ export const InboxView = () => {
          * the other way round, so `100%` resolves to `auto` and the inbox would
          * be as tall as its content — a two-row list in a 400px box on a
          * 1400px screen, and a page-scrolling column when the list is long.
-         * See `SURFACE_MAX_HEIGHT`.
+         *
+         * The *page* height, not the embedded one: the inbox is not a widget
+         * beside a record's fields, it is the whole page, and the embedded cap
+         * left a quarter of the viewport empty under the composer.
+         * See `SURFACE_PAGE_HEIGHT`.
          */
-        height: SURFACE_MAX_HEIGHT,
+        height: SURFACE_PAGE_HEIGHT,
         minHeight: SURFACE_MIN_HEIGHT,
         background: theme.background.primary,
         color: theme.font.color.primary,
@@ -691,6 +721,38 @@ export const InboxView = () => {
             >
               <Glyph name="back" size="md" />
               {t('inbox.conversations')}
+            </button>
+          )}
+
+          {/*
+            The wide-layout counterpart of Back: same place, same job — control
+            over how much of the widget the conversation gets — but it hides the
+            list rather than returning to it. The container query decides which
+            of the two is on screen; neither is ever both.
+          */}
+          {selectedId === null ? null : (
+            <button
+              type="button"
+              className="wa-inbox-collapse"
+              onClick={() => setListCollapsed((current) => !current)}
+              aria-pressed={listCollapsed}
+              aria-label={t(listCollapsed ? 'inbox.showList' : 'inbox.hideList')}
+              title={t(listCollapsed ? 'inbox.showList' : 'inbox.hideList')}
+              style={{
+                gap: theme.spacing[1],
+                alignSelf: 'flex-start',
+                minHeight: '32px',
+                border: 'none',
+                background: 'transparent',
+                color: theme.font.color.tertiary,
+                cursor: 'pointer',
+                fontFamily: theme.font.family,
+                fontSize: theme.font.size.sm,
+                padding: `${theme.spacing[1]} ${theme.spacing[2]}`,
+              }}
+            >
+              <Glyph name={listCollapsed ? 'chevron' : 'back'} />
+              {t(listCollapsed ? 'inbox.showList' : 'inbox.hideList')}
             </button>
           )}
 

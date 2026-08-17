@@ -375,6 +375,26 @@ export const MessageShell = ({
               {t('chat.action.copied')}
             </span>
           ) : null}
+          {/*
+            Who sent it, once per group, beside the time.
+
+            Two reps working the same conversation saw an identical column of
+            blue bubbles with nothing to tell them apart — "did I send that, or
+            did Ana?" is a question the transcript should never make anyone ask.
+            It rides on the metadata line rather than taking one of its own,
+            because a name is the same *kind* of fact as the time and the ticks:
+            about the message, not part of it.
+
+            Only outbound, and only for a message a person sent by hand. A
+            campaign has no author worth naming, and the lane tag above the
+            bubble already says what it was.
+          */}
+          {outbound && message.sentByLabel !== null ? (
+            <>
+              <span>{message.sentByLabel}</span>
+              <span aria-hidden="true">·</span>
+            </>
+          ) : null}
           <span>{clockTime(message.waTimestamp ?? message.createdAt, lang)}</span>
           {outbound ? (
             <span

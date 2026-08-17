@@ -140,7 +140,7 @@ const input = (overrides: Record<string, unknown> = {}) => ({
   personId: 'p1',
   accountId: ACCOUNT_ID,
   templateId: TEMPLATE_ID,
-  parameters: { 1: 'Ana' },
+  bodyVariable1: 'Ana',
   ...overrides,
 });
 
@@ -150,6 +150,67 @@ describe('reading the step’s inputs', () => {
     expect(personIdOf({ personId: { id: 'p1' } })).toBe('p1');
     expect(personIdOf({ person: { id: 'p1' } })).toBe('p1');
     expect(personIdOf({})).toBeNull();
+  });
+
+  /**
+   * The number and the template are record pickers too, so both hand back the
+   * same shapes `Person` does. A picked template arriving as an object and read
+   * as a string would be looked up as a template *named* `[object Object]`.
+   */
+  it('accepts the number and the template as picked records', async () => {
+    const result = await runAction({
+      personId: { id: 'p1', name: { firstName: 'Ana' } },
+      accountId: { id: ACCOUNT_ID, name: 'Pixel' },
+      templateId: { id: TEMPLATE_ID, name: 'encomenda_pronta' },
+      parameters: '{"1": "Ana"}',
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(findAccountById).toHaveBeenCalledWith(ACCOUNT_ID);
+    expect(findTemplateById).toHaveBeenCalledWith(TEMPLATE_ID);
+  });
+
+  /** The builder sends JSON text, with `{{…}}` already interpolated. */
+  it('reads the variables as the JSON string the builder sends', async () => {
+    await runAction(input({ bodyVariable1: undefined, advancedParameters: '{"1": "Ana"}' }));
+
+    expect(
+      (queueOutbound.mock.calls[0]![0] as Record<string, unknown>).body,
+    ).toBe('Olá Ana, está pronta.');
+  });
+
+  /** The normal path: one labelled box per variable, each independently bindable. */
+  it('reads a variable from its own field', async () => {
+    await runAction(input({ bodyVariable1: 'Ana' }));
+
+    expect(
+      (queueOutbound.mock.calls[0]![0] as Record<string, unknown>).body,
+    ).toBe('Olá Ana, está pronta.');
+  });
+
+  it('lets the advanced JSON override a field', async () => {
+    await runAction(
+      input({ bodyVariable1: 'Ana', advancedParameters: '{"1": "Marcos"}' }),
+    );
+
+    expect(
+      (queueOutbound.mock.calls[0]![0] as Record<string, unknown>).body,
+    ).toBe('Olá Marcos, está pronta.');
+  });
+
+  /**
+   * A step configured before the per-variable fields existed stores its values
+   * under `parameters`. Dropping that key would silently blank every variable in
+   * every workflow already running.
+   */
+  it('still honours the original parameters key', async () => {
+    await runAction(
+      input({ bodyVariable1: undefined, parameters: '{"1": "Marcos"}' }),
+    );
+
+    expect(
+      (queueOutbound.mock.calls[0]![0] as Record<string, unknown>).body,
+    ).toBe('Olá Marcos, está pronta.');
   });
 
   /**
@@ -317,7 +378,7 @@ describe('a refusal is a result, never an exception', () => {
    * re-read every box; `{{1}}` tells them which one they left unbound.
    */
   it('names the variables it could not bind', async () => {
-    const result = await runAction(input({ parameters: {} }));
+    const result = await runAction(input({ bodyVariable1: undefined }));
 
     expect(result.denialReason).toBe(ACTION_REFUSAL.MISSING_VARIABLES);
     expect(result.missingVariables).toEqual(['{{1}}']);

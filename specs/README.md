@@ -30,6 +30,7 @@ recorded in [`00-architecture-decisions.md`](00-architecture-decisions.md) — r
 | 14 | [Open questions](14-open-questions.md) | Q-1…Q-16 with owners and deadlines |
 | 15 | [Implementation task plan](15-implementation-tasks.md) | **Live build status** — what is done, what remains, critical path, remaining probes |
 | 16 | [Release checklist](16-release-checklist.md) | The signed, human-run part: install rehearsal, the scripted E2E loop, the operational procedures, the load run |
+| 17 | [Twenty MCP agent messaging](17-twenty-mcp-agent-messaging.md) | Agent contact discovery, eligible-template tool, idempotent guarded send tool, MCP permissions and rollout |
 | A | [Meta Cloud API surface](appendix-a-meta-api.md) | Exact requests, payloads and webhook shapes used |
 | B | [Error catalog](appendix-b-error-catalog.md) | Meta error codes → system behaviour → user-facing copy |
 | C | [UUID registry](appendix-c-uuid-registry.md) | Every hand-assigned universal identifier |
@@ -68,3 +69,4 @@ These were checked against the installed SDK and the docs, not assumed:
 | `timelineActivity` is a writable standard object with `targetPerson`, `linkedRecordId`, `linkedObjectMetadataId`, `name`, `happensAt`, `properties` | `STANDARD_OBJECT.timelineActivity` field list |
 | Twenty now ships `messageCampaign` / `messageList` / `messageListMember` standard objects (email-oriented) | `STANDARD_OBJECT` — newer than the TRD's platform survey; see D-13 |
 | There is **no** notification standard object exposed to apps | Full `STANDARD_OBJECT` enumeration; see D-10 |
+| `toolTriggerSettings` exposes a logic function to Twenty chat, MCP and function calling; in SDK 2.31.0 it accepts a JSON input schema and no output schema/caller-header settings | `twenty-sdk/define` declarations; Twenty logic-functions documentation; see 17 |

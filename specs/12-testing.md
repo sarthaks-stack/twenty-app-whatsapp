@@ -278,6 +278,11 @@ Legend: **U** unit · **I** integration · **C** contract · **L** load · **E**
 | FR-UI-6 | E: countdown chip, quality banner, inline retry |
 | FR-WF-1 | I: action sends, and denies with a reason |
 | FR-WF-2 | I: `whatsappMessage.created` carries `body` and `type` (single-write rule, 09 §2) |
+| FR-MCP-1 | E: Twenty MCP resolves one Person; ambiguous matches require clarification (17 §11.3) |
+| FR-MCP-2 | U/I: sendable-template query predicates, pagination and parameter-contract projection |
+| FR-MCP-3..4 | I: tool queues through the shared policy/scheduler path; AR-11 import guard remains green |
+| FR-MCP-5 | U/I/E: sequential and concurrent replay, uncertain-response retry and changed-intent conflict |
+| FR-MCP-6..7 | I: `AI_AGENT` attribution, audit event and structured accepted/denied/replayed results |
 | FR-TL-1 | I: activities written for each catalog event, respecting `WA_TIMELINE_MODE` |
 | FR-TL-2 | I: aggregate query over `whatsappMessage` returns expected counts |
 | FR-CAM-1..14 | §1.6 U + §2 I as listed; L: 10 k campaign |
@@ -290,10 +295,14 @@ Legend: **U** unit · **I** integration · **C** contract · **L** load · **E**
 | SEC-8 | I: erasure removes content, leaves a tombstone |
 | SEC-9 | I: purge blanks bodies, keeps counts; retention below 7 days rejected |
 | SEC-10/12 | I: audit entries for each action in the 10 §5 table |
+| SEC-MCP-1..3 | U/I: no phone/free-form/override fields; direct ineligible-template id is denied |
+| SEC-MCP-4 | E: P-MCP-1 invalid/unprivileged/agent credential matrix — release blocking |
+| SEC-MCP-5 | U/I: public schema has no actor field; attribution is platform-derived or null |
 | NFR-P1..P4 | L + I latency assertions |
 | NFR-R1 | I: processor failure leaves a replayable `failed` row |
 | NFR-R2 | I: 429 from the Core API triggers backoff, not data loss |
 | NFR-R3 | I: stuck `queued` message is recovered |
 | NFR-M2 | CI: weekly compat job |
+| NFR-MCP-1..3 | U/I: 50-row clamp + opaque cursor; acceptance latency; manifest snapshot pins names/schemas |
 
 Requirements with no row here are MAY items; picking one up requires adding its row.

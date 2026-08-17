@@ -564,6 +564,8 @@ const COPY = {
   },
 
   // ─── Inbox ────────────────────────────────────────────────────────────────
+  'inbox.hideList': { pt: 'Ocultar lista', en: 'Hide list' },
+  'inbox.showList': { pt: 'Mostrar lista', en: 'Show list' },
   'inbox.mine': { pt: 'Minhas', en: 'Mine' },
   'inbox.unassigned': { pt: 'Sem responsável', en: 'Unassigned' },
   'inbox.all': { pt: 'Todas', en: 'All' },

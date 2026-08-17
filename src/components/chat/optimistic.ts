@@ -66,6 +66,13 @@ export const optimisticMessage = ({
   payload: null,
   clientToken,
   sentById: null,
+  /**
+   * Left null even though the sender is by definition the rep looking at the
+   * screen. Their own name under their own message, for the two seconds before
+   * the server's row replaces it, is noise — and the delivered bubble carries
+   * it, so nothing is lost.
+   */
+  sentByLabel: null,
   threadId,
 });
 

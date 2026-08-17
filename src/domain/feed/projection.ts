@@ -94,6 +94,16 @@ export type MessageProjection = {
   payload: Record<string, unknown> | null;
   clientToken: string | null;
   sentById: string | null;
+  /**
+   * The colleague who sent it, by name (FR-THR-3's companion on the transcript).
+   *
+   * `sentById` is a UUID, which answers "who" for an audit and for nobody
+   * reading a conversation — two reps working the same thread saw an identical
+   * column of blue bubbles with no way to tell whose was whose. Resolved by the
+   * feed route in one batched read, like quotes; null for anything a person did
+   * not send by hand (a campaign, a workflow, the consent keyword handler).
+   */
+  sentByLabel: string | null;
   threadId: string | null;
 };
 
@@ -311,6 +321,9 @@ export const projectMessage = (
     payload,
     clientToken: stringOrNull(source.clientToken),
     sentById: stringOrNull(source.sentById),
+    // Filled in by the feed route's batched lookup; a bare projection has no
+    // way to read another table and must not pretend otherwise.
+    sentByLabel: null,
     threadId: stringOrNull(source.threadId),
   };
 };
@@ -368,6 +381,44 @@ type PersonSource = {
   whatsappOptInUpdatedAt?: string | null;
   companyId?: string | null;
 };
+
+/**
+ * A workspace member's display name, or nothing.
+ *
+ * Nothing rather than a placeholder: a member whose name has not been filled in
+ * should leave the line absent, not print "Unknown" under every message they
+ * send. The transcript reads better with one fewer line than with a label that
+ * says less than silence.
+ */
+export const memberLabel = (
+  member: { name?: { firstName?: string | null; lastName?: string | null } | null } | null,
+): string | null => {
+  const joined = [member?.name?.firstName, member?.name?.lastName]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+    .join(' ')
+    .trim();
+
+  return joined.length === 0 ? null : joined;
+};
+
+/**
+ * Writes each message's sender name onto it, from one already-resolved map.
+ *
+ * Pure, and separate from the lookup, because "which name goes on which
+ * message" is the part with a wrong answer — attributing one rep's message to
+ * another is worse than showing no name at all.
+ */
+export const attachSenderLabels = <T extends { sentById: string | null; sentByLabel: string | null }>(
+  messages: T[],
+  labels: ReadonlyMap<string, string>,
+): T[] =>
+  messages.map((message) => {
+    if (message.sentById === null) return message;
+
+    const label = labels.get(message.sentById);
+
+    return label === undefined ? message : { ...message, sentByLabel: label };
+  });
 
 export const projectPerson = (source: PersonSource | null): PersonProjection | null => {
   if (source === null) return null;

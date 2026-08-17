@@ -56,10 +56,69 @@ found by building it:
   named missing variable that refuses the send, while a stringified `null` is a message a customer
   reads.
 
-`Template` accepts a record id or a template *name*: a select's options must be resolved at design
-time and the template list is not known then, so what an author can see and type is the name. Two
-templates sharing a name in different languages are two different messages, so that is refused
-rather than guessed at.
+### Making the step configurable (revised 2026-08-17)
+
+The first build shipped `WhatsApp account` and `Template` as `string` inputs, following this spec's
+own "select, resolved at design time". Nothing *can* be resolved at design time — the numbers and
+templates live in the workspace, not in the manifest — so what an author actually got was two text
+boxes and an instruction to paste a WABA id. That was the app's mistake, not the platform's
+limitation:
+
+- **`whatsappAccount` and `whatsappTemplate` are ordinary Twenty objects**, so declaring both
+  inputs as `type: 'record'` with their `objectUniversalIdentifier` gives the builder the same
+  picker `Person` gets, listing the real rows by their `name`. Neither needs an enum.
+- **The picker lists every template**, including unapproved and unpublished ones — there is no
+  filter on a record input. The gate still refuses those with `TEMPLATE_UNAVAILABLE`, and the input
+  label says which are usable. A visible refusal beats an invisible filter here: an author whose
+  template is missing from a filtered list has nothing to read.
+- **Variables are five labelled fields, not a JSON box.** Twenty cannot load a template's variables
+  on demand — the schema is in the manifest and there is no resolver it calls to recompute one from
+  a half-filled step — so "field by field" has to mean a *fixed* set of fields.
+  `bodyVariable1…bodyVariable5` covers essentially every template Meta approves, and each is a
+  plain `string`, which is also the only type Twenty gives an `(x)` binding to: an `object` input
+  renders as a bare box with none, which had made the field that most needs
+  `{{trigger.record.name.firstName}}` the only one unable to take it. Five empty boxes on a
+  template with no variables is the cost, and it is the right way round — an author who cannot find
+  where to type is stuck, one looking at a box they do not need just leaves it.
+- **`advancedParameters` is the escape hatch** for a header image, a button URL, a named variable or
+  a sixth: a multiline JSON string merged *over* the numbered fields, so it overrides rather than
+  competes. Malformed JSON resolves every variable to empty, which refuses the send with each one
+  named rather than sending a message with gaps in it.
+- **A number binds a named template by position.** The numbered fields can only send positions, so
+  without a positional fallback in `bodyValueFor` they bound nothing at all on a `{{nome}}`
+  template — a silent failure of the whole feature for that family of templates. Caught by a test,
+  not by the UI, because it fails safe: an unbound variable refuses the send.
+- **The property names set the field order**, which is why they look padded. Step inputs are stored
+  as Postgres `jsonb`, which orders keys by length then bytewise, and the builder renders them in
+  stored order — so 8 · 9 · 10 · 13 · 18 · 21 characters reads top to bottom in the order an author
+  fills it in. Observed, not assumed: the first build declared `parameters` before `templateId` and
+  the panel showed Variables above Template.
+- **`parameters` is still read** so a step configured before the fields existed keeps working.
+- **All three record inputs go through the same `idOf`.** A picked record arrives as an object, so
+  reading `templateId` as a string would look up a template *named* `[object Object]`.
+
+`Template` still accepts a bare name as a fallback, for a value bound from a workflow variable
+rather than picked. Two templates sharing a name in different languages are two different messages,
+so that is refused rather than guessed at.
+
+**The step icon is the application logo, not `workflowActionTriggerSettings.icon`.**
+Twenty renders the app's logo in the step header, so `IconBrandWhatsapp` had no effect and what an
+author saw above "Send WhatsApp template" was `create-twenty-app`'s four-grey-squares placeholder.
+The icon name is kept because it is correct and costs nothing if a later version does read it.
+
+Replacing the file was not enough on its own: public assets are served from a path-derived URL with
+`Cache-Control: public, max-age=3600` and no content hash, so every browser that had already loaded
+`public/logo.svg` kept showing the old icon for up to an hour *while the server served the new one*
+— an unfalsifiable bug report. The asset is therefore named `public/logo-whatsapp.svg`: a new
+filename is a new URL. **Rename it whenever the logo changes.**
+
+**Nothing needs to be done about "Expected Output Body".** It looks like an unfilled required field
+and is not: the step's `settings.outputSchema` is already populated from the declared `outputSchema`
+— `status`, `messageId`, `threadId`, `denialReason`, `missingVariables`, `warnings`, each with its
+type and label — so downstream steps can reference them today. The box is an optional override whose
+only added value is *sample* values for the builder's preview, and `InputSchemaProperty` has no
+field for an example, so the app cannot supply them. Verified by reading the stored step JSON on a
+live server rather than inferred.
 
 ---
 

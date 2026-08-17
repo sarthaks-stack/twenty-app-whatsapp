@@ -431,6 +431,27 @@ nine operational procedures. None of them can be run without the number and a pe
 
 ---
 
+## Phase 11 — Twenty MCP agent messaging ⬜
+
+Specified in [17-twenty-mcp-agent-messaging.md](17-twenty-mcp-agent-messaging.md). This phase is an
+additive post-v0.1 capability: Twenty MCP finds the Person, and two app tool logic functions list
+eligible templates and queue one guarded, idempotent template send.
+
+| Task | Status | Release gate |
+|---|---|---|
+| 11.1–11.3 scaffold ids, add `AI_AGENT`, extract shared template-send service | ⬜ | workflow/UI regression green |
+| 11.4–11.6 paginated eligible-template query + discovery tool | ⬜ | no ineligible template exposed |
+| 11.7–11.9 request-id semantics + send tool + manifest guards | ⬜ | concurrency/replay/conflict green |
+| 11.10 P-MCP-1/P-MCP-2 on pinned Twenty | ⬜ | **P-MCP-1 is blocking** |
+| 11.11 restricted-credential Meta E2E | ⬜ | one send, replay, conflict, opt-out, delivery loop |
+| 11.12 setup/runbook/release documentation | ⬜ | revocation and rollback rehearsed |
+
+The implementation does not start by adding `toolTriggerSettings` to the workflow action. That
+would misattribute MCP sends as workflows and has no retry token. The shared service lands first,
+then the two dedicated wrappers, then the real MCP authorisation probe before production exposure.
+
+---
+
 ## Remaining probes
 
 Only P-1 has been answered. The rest still gate design decisions:
@@ -445,6 +466,8 @@ Only P-1 has been answered. The rest still gate design decisions:
 | P-6 | Front-component chat feasibility | — | ✅ **answered and acted on**: the chat is buildable. Three doc'd APIs were wrong, the widget needed an explicit height, `clientWidth` measures where `getBoundingClientRect` does not, and `/s/*` auth was broken for every human until the caller's own token was forwarded (D-53) |
 | P-7 | Row-level permission predicates | SEC-7 enforcement | route-level filtering, limitation documented |
 | P-8 | Does `cronTriggerSettings.pattern` accept a six-field (seconds) pattern? | 07 §10's 30 s freshness | one-minute ticks, ≤ 60 s freshness (as built) |
+| **P-MCP-1** | Does Twenty enforce the intended role before exposing/invoking an app tool through MCP? | Phase 11 production exposure | no safe caller-id fallback; do not ship the send tool |
+| P-MCP-2 | Does a tool handler receive platform-authenticated member/agent identity? | AI-agent `sentBy` attribution | actor null, `sourceKind: AI_AGENT`, `channel: TWENTY_MCP` |
 
 ---
 
@@ -457,9 +480,10 @@ Phases 0–8 ✅ ──► Phase 9 ✅ ──► Phase 10 ✅ (code) ──┐
                     (A install rehearsal · B handset loop · C procedures · D real-infra load)
 ```
 
-**Zero engineering days remain on the plan.** Every task in phases 0–10 that is code is written,
-typechecked, linted and unit-tested; the suite is 74 files and ~1 690 assertions and runs in about
-two seconds.
+**The original phases 0–10 have zero engineering days remaining.** Phase 11 is the separately
+specified Twenty MCP extension and is not part of the current v0.1 release gate. Every task in
+phases 0–10 that is code is written, typechecked, linted and unit-tested; the suite is 74 files and
+~1 690 assertions and runs in about two seconds.
 
 The release gate is now a **scheduling** problem rather than a build one. What stands between here
 and it is [16-release-checklist.md](16-release-checklist.md): a fresh-workspace install rehearsal,

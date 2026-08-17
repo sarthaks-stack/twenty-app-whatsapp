@@ -41,6 +41,30 @@ the release gate is the human-run part, scripted in
 
 ### Changed
 
+- **The workflow step is configurable from the builder.** `WhatsApp account` and `Template` were
+  text boxes — an author had to paste a WABA id and a template id by hand. Both are now `record`
+  pickers over `whatsappAccount` and `whatsappTemplate`, listing the real rows by name, which works
+  because those are ordinary Twenty objects.
+- **Template variables are five labelled fields** (`Variable {{1}}` … `{{5}}`), each a plain string
+  so each takes an `(x)` workflow variable, plus an `Advanced` JSON field for a header image, a
+  button URL or a named variable. Twenty cannot load a template's variables on demand — the input
+  schema is in the manifest and nothing recomputes it from a half-filled step — so a fixed set of
+  fields is as close to field-by-field as the platform allows. Field order is controlled through the
+  property *names*, because step inputs are stored as `jsonb`, whose keys order by length.
+- **The app logo is WhatsApp's mark**, at `public/logo-whatsapp.svg`. Twenty renders the
+  *application* logo in every workflow step header, so `workflowActionTriggerSettings.icon` was never
+  going to appear there and the four grey squares were what an author saw above "Send WhatsApp
+  template". The filename carries the cache bust: public assets are served with
+  `max-age=3600` and no content hash, so replacing the bytes in place left browsers showing the old
+  icon for an hour while the server served the new one.
+
+### Fixed (found while doing the above)
+
+- **A number bound nothing on a template with named placeholders.** `{ "1": "Ana" }` against
+  `{{nome}}` resolved to empty, which meant the step's numbered variable fields — which can only
+  send positions — silently failed for every named template. `bodyValueFor` now falls back to the
+  1-based position. It failed safe (an unbound variable refuses the send) and was caught by a test
+  rather than by the UI.
 - **CI is pinned.** `.twenty-version` holds the Twenty version production runs and `ci.yml` reads
   it, so a pull request no longer fails because Twenty shipped upstream this morning. Watching
   `latest` is `compat.yml`'s job.

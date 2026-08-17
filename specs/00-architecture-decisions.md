@@ -1199,3 +1199,34 @@ Verified in the browser: the feed, the account admin route and the settings surf
 signed-in workspace administrator, and `permissions.workspaceMemberId` comes back populated —
 which is also why that field is now on the wire, so a null on a signed-in human is *visible*
 rather than indistinguishable from having no roles.
+
+---
+
+## D-54 — Twenty MCP orchestrates; it does not become a second outbound pipeline
+
+**Status: SPECIFIED, with a release-blocking authorisation probe** · See
+[17-twenty-mcp-agent-messaging.md](17-twenty-mcp-agent-messaging.md).
+
+An AI agent may use Twenty MCP's ordinary record tools to find a Person, then two app-owned tool
+logic functions to list eligible templates and queue one chosen template. It may not create a
+`whatsappMessage`, supply a raw phone number, publish a template or call Meta directly.
+
+The existing workflow action is not made dual-surface. It records `WORKFLOW`, accepts workflow
+builder shapes and has no mandatory idempotency token. MCP gets a dedicated wrapper that records
+`AI_AGENT`, requires a UUID-v4 request id and reuses one shared template-send service. Discovery is
+also dedicated: it returns only templates that are approved, published, usable and allowed by the
+current 1:1 policy, plus the parameter contract the agent must fill.
+
+This preserves AR-11 and AR-17 mechanically:
+
+```text
+Twenty MCP tool → shared template-send service → queued interactive message
+                                                    │
+                                                    ▼
+                                          wa-outbound-sender → Meta
+```
+
+`toolTriggerSettings` is the correct Twenty surface, but SDK 2.31.0 exposes no forwarded caller
+headers or tool-level identity parameter to the handler. Therefore production exposure is gated on
+P-MCP-1 proving that Twenty refuses the tool to a credential without the intended WhatsApp role.
+If it does not, the send tool does not ship; caller-supplied identity is not an acceptable fallback.

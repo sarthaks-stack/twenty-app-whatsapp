@@ -47,6 +47,33 @@ const record = (value: unknown): Record<string, unknown> =>
     : {};
 
 /**
+ * The `Variables` input is a **string** in the workflow builder, not an object.
+ *
+ * Twenty offers no variable binding on an `object` input, which made the one
+ * field that most needs `{{trigger.record.name.firstName}}` the only one that
+ * could not take it. As a multiline string the engine interpolates first and the
+ * handler receives JSON text — so parsing is the top of this module rather than
+ * a caller's job.
+ *
+ * Malformed JSON yields `{}`, which resolves every variable to empty and refuses
+ * the send with each one named. That is the correct failure: a typo in the JSON
+ * is exactly when an author must not have a message go out with gaps in it.
+ */
+const parsed = (value: unknown): unknown => {
+  if (typeof value !== 'string') return value;
+
+  const trimmed = value.trim();
+
+  if (trimmed.length === 0) return {};
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return {};
+  }
+};
+
+/**
  * The keys a template's body variables answer to, in send order.
  *
  * Both forms are accepted for a positional template — `"1"` because that is
@@ -66,20 +93,29 @@ const firstDefined = (source: Record<string, unknown>, keys: string[]): unknown 
 };
 
 /**
- * Where a body value for `key` may be written.
+ * Where a body value for the variable at `position` may be written.
  *
- * Three shapes, because three are plausible and only one of them is obvious:
- * flat at the top level (`{ "1": "Ana" }`), nested under `body`
- * (`{ body: { "1": "Ana" } }`), and — for named templates — under the token
- * with or without braces, since an author copying from the template text copies
- * `{{nome}}` along with them.
+ * Four shapes, because four are plausible and only one is obvious: flat at the
+ * top level (`{ "1": "Ana" }`), nested under `body`
+ * (`{ body: { "1": "Ana" } }`), under the token with or without braces — an
+ * author copying from the template text copies `{{nome}}` along with them — and
+ * finally by **1-based position**.
+ *
+ * The positional fallback is what makes a *number* work on a named template.
+ * Without it `{ "1": "Ana" }` bound nothing on `{{nome}}`, which is how the
+ * step's five numbered fields silently failed for every named template — they
+ * can only send positions, since the builder has no way to know the names. It
+ * fails safe (an unbound variable refuses the send) but it fails.
  */
-const bodyValueFor = (raw: Record<string, unknown>, key: string): unknown => {
+const bodyValueFor = (
+  raw: Record<string, unknown>,
+  key: string,
+  position: number,
+): unknown => {
   const nested = record(raw.body);
+  const keys = [key, `{{${key}}}`, String(position)];
 
-  return (
-    firstDefined(nested, [key, `{{${key}}}`]) ?? firstDefined(raw, [key, `{{${key}}}`])
-  );
+  return firstDefined(nested, keys) ?? firstDefined(raw, keys);
 };
 
 const headerFor = (
@@ -183,6 +219,54 @@ const buttonsFor = (spec: VariableSpec, raw: Record<string, unknown>): ButtonPar
 };
 
 /**
+ * How many body variables the step offers as their own labelled fields.
+ *
+ * The builder cannot ask the template how many it has: the input schema lives in
+ * the manifest and Twenty never re-derives it from a half-filled step, so the
+ * count is fixed at build time or it does not exist. Five covers essentially
+ * every template Meta approves in practice, and `advancedParameters` is the
+ * escape hatch for the rest — a header image, a button URL, a sixth variable.
+ *
+ * Five empty boxes on a template with no variables is the cost of that, and it
+ * is the right way round: an author who cannot find where to type a value is
+ * stuck, while an author looking at a box they do not need simply leaves it.
+ */
+export const BODY_VARIABLE_SLOTS = 5;
+
+/**
+ * Folds the numbered fields and the advanced JSON into one object to bind.
+ *
+ * Only non-empty numbered values are carried, so an untouched box neither
+ * shadows a value the JSON supplies nor counts as a variable the author meant to
+ * leave blank. The JSON is applied last and therefore wins on any key it names —
+ * which is what makes it an override rather than a second, competing input.
+ */
+export const combineVariableInputs = (
+  numbered: readonly unknown[],
+  advanced: unknown,
+): Record<string, unknown> => {
+  const extra = record(parsed(advanced));
+
+  /**
+   * An advanced payload that is already resolved — a `body` array, as one step's
+   * output feeding the next — replaces the numbered fields rather than merging
+   * with them. Merging positions into an ordered array would silently reorder
+   * someone's message.
+   */
+  if (Array.isArray(extra.body)) return extra;
+
+  const byPosition: Record<string, unknown> = {};
+
+  numbered.forEach((value, index) => {
+    const text = asText(value);
+
+    if (text.trim().length > 0) byPosition[String(index + 1)] = text;
+  });
+
+  return { ...byPosition, ...extra };
+};
+
+/**
  * Binds a workflow step's `Variables` object to the template it names.
  *
  * Never throws and never guesses a value: anything it cannot find comes back
@@ -194,7 +278,7 @@ export const bindWorkflowParameters = (
   spec: VariableSpec,
   raw: unknown,
 ): ResolvedParameters => {
-  const source = record(raw);
+  const source = record(parsed(raw));
   const header = headerFor(spec, source);
 
   /**
@@ -204,7 +288,7 @@ export const bindWorkflowParameters = (
    */
   const body = Array.isArray(source.body)
     ? source.body.map(asText)
-    : bodyKeys(spec).map((key) => asText(bodyValueFor(source, key)));
+    : bodyKeys(spec).map((key, index) => asText(bodyValueFor(source, key, index + 1)));
 
   return {
     ...emptyParameters(),

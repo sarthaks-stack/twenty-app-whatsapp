@@ -57,6 +57,8 @@ placeholder page in the sidebar.
 | `LF_OUTBOUND_SENDER` | `317c4b9a-8a01-4813-b085-9874b5502457` | queued |
 | `LF_SEND_MESSAGE_ROUTE` | `7dfb20e7-f1bc-4a1a-8dfb-a8106007f31a` | httpRoute `POST /s/whatsapp/send` |
 | `LF_SEND_TEMPLATE_ACTION` | `eae099e6-aa2a-4d17-ab28-46ff3ab7b2e7` | workflowAction |
+| `LF_LIST_SENDABLE_TEMPLATES_TOOL` | `35216977-0ac5-47ce-9610-f3e47fd37d37` | AI tool — Twenty chat/MCP template discovery |
+| `LF_SEND_TEMPLATE_TOOL` | `fb044e6d-5195-4c71-98c0-d5f60ad18cf4` | AI tool — Twenty chat/MCP guarded template send |
 | `LF_TEMPLATE_SYNC` | `4640b582-2185-4c2b-95f0-af63a52cf893` | cron `0 */6 * * *` + invoked |
 | `LF_WINDOW_SWEEPER` | `d673bc2e-a865-42c5-a230-48e213e37c95` | cron `*/15 * * * *` |
 | `LF_HEALTH_CHECK` | `841025d1-5a05-4a12-9180-753d7f7f5292` | cron `0 * * * *` |

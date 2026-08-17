@@ -2,6 +2,8 @@ import { defineLogicFunction } from 'twenty-sdk/define';
 
 import {
   LF_SEND_TEMPLATE_ACTION,
+  OBJ_ACCOUNT,
+  OBJ_TEMPLATE,
   PERSON_OBJECT_UID,
 } from '../constants/universal-identifiers';
 import {
@@ -28,7 +30,11 @@ import {
   validateParameters,
 } from '../domain/template-render';
 import type { VariableSpec } from '../domain/template-spec';
-import { bindWorkflowParameters } from '../domain/workflow-parameters';
+import {
+  BODY_VARIABLE_SLOTS,
+  bindWorkflowParameters,
+  combineVariableInputs,
+} from '../domain/workflow-parameters';
 import { AUDIT_ACTION, audit } from '../server/audit';
 import { personPhones } from '../server/audience';
 import { config, forAccount } from '../server/config';
@@ -85,16 +91,26 @@ export const ACTION_REFUSAL = {
 } as const;
 export type ActionRefusal = (typeof ACTION_REFUSAL)[keyof typeof ACTION_REFUSAL] | Denial;
 
+/**
+ * Every input is `unknown` on purpose.
+ *
+ * Three of them are declared as `record`, so each arrives as the record *or* its
+ * id depending on how the step was wired, and the two remaining ones arrive as
+ * strings whenever they are bound to a workflow variable — including the
+ * boolean. Typing them as what they are *declared* as would be typing them as
+ * what they are not.
+ */
 export type SendTemplateActionInput = {
-  /** Declared as a `record`, so it arrives as the record *or* its id. */
   personId?: unknown;
   /** The same value under the name an older step or a hand-built call may use. */
   person?: unknown;
-  accountId?: string;
-  templateId?: string;
+  accountId?: unknown;
+  templateId?: unknown;
+  advancedParameters?: unknown;
+  /** What the field was called before it became the advanced escape hatch. */
   parameters?: unknown;
   createThreadIfMissing?: unknown;
-};
+} & { [K in `bodyVariable${1 | 2 | 3 | 4 | 5}`]?: unknown };
 
 export type SendTemplateActionResult = {
   status: 'accepted' | 'denied';
@@ -113,6 +129,10 @@ export type SendTemplateActionResult = {
  * and a record picker to either. Reading all of them is six lines; reading one
  * is a step that fails for most of the ways an author can build it, with
  * `PERSON_UNKNOWN` as the only clue.
+ *
+ * Used for all three record inputs, not just `Person`. The account and template
+ * pickers hand back the same shapes, and a picked template arriving as an object
+ * would otherwise be read as a template *named* `[object Object]`.
  */
 const idOf = (value: unknown): string | null => {
   if (typeof value === 'string') {
@@ -174,11 +194,11 @@ const refuse = (
  * would make that arbitrary and invisible.
  */
 const resolveAccount = async (
-  accountId: string | undefined,
+  accountId: unknown,
 ): Promise<
   { ok: true; account: WhatsappAccountRecord } | { ok: false; reason: ActionRefusal }
 > => {
-  const named = typeof accountId === 'string' ? accountId.trim() : '';
+  const named = idOf(accountId) ?? '';
 
   if (named.length > 0) {
     /**
@@ -270,7 +290,7 @@ export const runAction = async (
 
   const account = resolved.account;
 
-  const templateId = typeof input.templateId === 'string' ? input.templateId.trim() : '';
+  const templateId = idOf(input.templateId) ?? '';
 
   if (templateId.length === 0) return refuse(ACTION_REFUSAL.TEMPLATE_UNKNOWN);
 
@@ -309,7 +329,23 @@ export const runAction = async (
   const { thread } = await upsertThread({ account, waId, personId: person.id });
 
   const variableSpec = asJson<VariableSpec>(template.variableSpec, EMPTY_VARIABLE_SPEC);
-  const parameters = bindWorkflowParameters(variableSpec, input.parameters);
+
+  /**
+   * The five numbered fields, then the advanced JSON over the top. `parameters`
+   * is still read so a step configured before the fields existed keeps working.
+   */
+  const parameters = bindWorkflowParameters(
+    variableSpec,
+    combineVariableInputs(
+      Array.from(
+        { length: BODY_VARIABLE_SLOTS },
+        (_unused, index) =>
+          (input as Record<string, unknown>)[`bodyVariable${index + 1}`],
+      ),
+      input.advancedParameters ?? input.parameters,
+    ),
+  );
+
   const validation = validateParameters(variableSpec, parameters);
 
   if (!validation.ok) {
@@ -451,6 +487,20 @@ export default defineLogicFunction({
    * type literal. Writing the five inputs as five array entries — the shape the
    * spec sketched — would declare a five-argument handler and bind none of them
    * to the single object this one receives.
+   *
+   * **`icon` does not reach the step header.** Twenty renders the
+   * *application's* logo there, so the icon an author sees above this step comes
+   * from `application-config.ts`'s `logo`. The name is kept because it is
+   * correct and costs nothing if a future version does use it.
+   *
+   * **The property *names* set the field order in the panel**, which is why they
+   * look padded. The step's inputs are stored as Postgres `jsonb`, which orders
+   * keys by length and then bytewise, and the builder renders them in stored
+   * order — so `personId` (8) · `accountId` (9) · `templateId` (10) ·
+   * `bodyVariable1…5` (13) · `advancedParameters` (18) ·
+   * `createThreadIfMissing` (21) reads top to bottom in the order an author fills
+   * it in. Observed rather than assumed: the first build declared `parameters`
+   * before `templateId` and the panel showed Variables above Template.
    */
   workflowActionTriggerSettings: {
     label: 'Send WhatsApp template',
@@ -464,9 +514,60 @@ export default defineLogicFunction({
             label: 'Person',
             objectUniversalIdentifier: PERSON_OBJECT_UID,
           },
-          accountId: { type: 'string', label: 'WhatsApp account' },
-          templateId: { type: 'string', label: 'Template' },
-          parameters: { type: 'object', label: 'Variables' },
+          /**
+           * Record pickers, not text boxes.
+           *
+           * These were declared as `string` because the spec said a select whose
+           * options are "resolved at design time" — and nothing can be, since
+           * the numbers and templates live in the workspace, not in the
+           * manifest. But `whatsappAccount` and `whatsappTemplate` are ordinary
+           * Twenty objects, so `record` gives the builder the same picker
+           * `Person` gets, listing the real rows, for free. Asking an author to
+           * paste a WABA id into a text field was the app's mistake, not the
+           * platform's limitation.
+           */
+          accountId: {
+            type: 'record',
+            label: 'WhatsApp number (optional if only one is connected)',
+            objectUniversalIdentifier: OBJ_ACCOUNT,
+          },
+          templateId: {
+            type: 'record',
+            label: 'Template (must be approved and published)',
+            objectUniversalIdentifier: OBJ_TEMPLATE,
+          },
+          /**
+           * One field per variable, because a JSON box is not an input — it is
+           * homework.
+           *
+           * Twenty cannot load a template's variables on demand: the schema is
+           * in the manifest and there is no resolver it calls to recompute one
+           * from a half-filled step, so "field by field" has to mean a fixed set
+           * of fields. Each is a plain `string`, which is also the only type
+           * Twenty gives an `(x)` variable binding to — an `object` input renders
+           * as a bare box with none, which had made the field that most needs
+           * `{{trigger.record.name.firstName}}` the only one unable to take it.
+           *
+           * `{{1}}` … `{{5}}` is Meta's own body numbering. For a template using
+           * named placeholders these are still positional — first variable in the
+           * template, second, and so on — which `bindWorkflowParameters` maps
+           * onto the names from the stored spec.
+           */
+          bodyVariable1: { type: 'string', label: 'Variable {{1}}' },
+          bodyVariable2: { type: 'string', label: 'Variable {{2}}' },
+          bodyVariable3: { type: 'string', label: 'Variable {{3}}' },
+          bodyVariable4: { type: 'string', label: 'Variable {{4}}' },
+          bodyVariable5: { type: 'string', label: 'Variable {{5}}' },
+          /**
+           * The escape hatch: a header image, a button URL, a named variable, a
+           * sixth body variable. Merged over the numbered fields, so it overrides
+           * rather than competes.
+           */
+          advancedParameters: {
+            type: 'string',
+            label: 'Advanced — header, buttons or named variables (JSON)',
+            multiline: true,
+          },
           createThreadIfMissing: {
             type: 'boolean',
             label: 'Create conversation if missing',

@@ -9,9 +9,6 @@ on:
 permissions:
   contents: read
 
-env:
-  TWENTY_VERSION: latest
-
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -23,11 +20,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # The pinned version, read from one file rather than repeated here.
+      #
+      # CI runs against the version production runs (R-2, NFR-M2): a PR that
+      # cannot break must not start failing because Twenty shipped upstream
+      # this morning. `compat.yml` is what watches `latest`, weekly, where a
+      # break is news rather than an interruption.
+      - name: Read the pinned Twenty version
+        id: pin
+        run: echo "version=$(tr -d '[:space:]' < .twenty-version)" >> "$GITHUB_OUTPUT"
+
       - name: Spawn Twenty test instance
         id: twenty
         uses: twentyhq/twenty/.github/actions/spawn-twenty-app-dev-test@044fc2d38908f711f5f073c345b656e13b541b8b # main 2026-08-16
         with:
-          twenty-version: ${{ env.TWENTY_VERSION }}
+          twenty-version: ${{ steps.pin.outputs.version }}
 
       - name: Enable Corepack
         run: corepack enable

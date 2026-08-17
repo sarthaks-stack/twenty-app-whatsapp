@@ -9,6 +9,7 @@ import {
   ACCOUNT_STATUS,
   MESSAGING_TIER,
   QUALITY,
+  REQUIRED_WEBHOOK_FIELDS,
   type MessagingTier,
   type Quality,
 } from '../domain/constants';
@@ -19,6 +20,7 @@ import { authErrorResponse, requireCaller, requireRole } from '../server/auth';
 import { listVariables, setVariable } from '../server/variables';
 import { config } from '../server/config';
 import { describeError, logger } from '../server/logger';
+import { provisionNotificationWorkflow } from '../server/notification-workflow';
 import { budgetForAccount, tierFor } from '../server/tier-ledger';
 import { currentWorkspaceId } from '../server/workspace';
 import { syncAccount } from './wa-template-sync';
@@ -56,7 +58,8 @@ export type AccountAction =
   | 'syncTemplates'
   | 'diagnostics'
   | 'variables'
-  | 'setVariable';
+  | 'setVariable'
+  | 'createNotificationWorkflow';
 
 export type AccountRouteBody = {
   action?: AccountAction;
@@ -322,15 +325,7 @@ const diagnostics = async () => {
       directUrl: base === '' ? null : `${base}/webhooks/server/${LF_WEBHOOK_RESOLVER}`,
       verifyUrl: base === '' ? null : `${base}/s/whatsapp/verify`,
       verifyTokenConfigured: (process.env.META_VERIFY_TOKEN ?? '').length > 0,
-      requiredFields: [
-        'messages',
-        'message_template_status_update',
-        'message_template_quality_update',
-        'message_template_components_update',
-        'account_update',
-        'phone_number_quality_update',
-        'business_capability_update',
-      ],
+      requiredFields: [...REQUIRED_WEBHOOK_FIELDS],
     },
     failedEvents: recentFailures.slice(0, 20),
     stuckOutbound: stuck.slice(0, 20).map((message) => ({
@@ -441,6 +436,28 @@ export const handler = async (
 
       case 'diagnostics':
         return new Response(await diagnostics(), { status: 200 });
+
+      /**
+       * D-10 layer 3, made real (specs/09 §6).
+       *
+       * The only layer that reaches a rep who is not looking at Twenty, and the
+       * only one the app cannot build for them — there is no notification API,
+       * so it has to be a workflow the workspace owns. This provisions it as a
+       * **draft** the operator reviews and activates; the response names what
+       * they still have to decide rather than pretending it is finished.
+       */
+      case 'createNotificationWorkflow': {
+        const outcome = await provisionNotificationWorkflow();
+
+        if (!outcome.ok) return new Response({ error: outcome.error }, { status: 502 });
+
+        log.info('wa.account.notification_workflow', {
+          workflowId: outcome.result.workflowId,
+          existed: outcome.result.existed,
+        });
+
+        return new Response(outcome.result, { status: 200 });
+      }
 
       /**
        * The app's own application variables (FR-CON-3, NFR-M1).

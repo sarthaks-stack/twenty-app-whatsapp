@@ -185,4 +185,38 @@ export const METRIC = {
   API_CORE_CALL: 'wa.api.core_call',
   API_CORE_ERROR: 'wa.api.core_error',
   API_CORE_429: 'wa.api.core_429',
+
+  RETENTION_EVENTS_PURGED: 'wa.retention.events_purged',
+  RETENTION_MESSAGES_PURGED: 'wa.retention.messages_purged',
+  /** A purge stopped at its pass limit with rows still outstanding. */
+  RETENTION_TRUNCATED: 'wa.retention.truncated',
+
+  REPLAY_REQUESTED: 'wa.replay.requested',
+  REPLAY_JOBS: 'wa.replay.jobs',
 } as const;
+
+/**
+ * Deletes every counter written on one day (SEC-9's fixed 90-day window).
+ *
+ * `kv` has no scan, so the keys cannot be enumerated — they have to be
+ * *reconstructed*, which is only possible because `METRIC` is the closed list of
+ * names this app writes. A counter added there and forgotten here would leak for
+ * ever; running over `Object.values(METRIC)` rather than a hand-kept copy is
+ * what makes that impossible.
+ *
+ * Returns how many keys actually held a value, so a run that purges nothing can
+ * be told from one that purges a day's worth.
+ */
+export const purgeMetricsForDay = async (day: Date): Promise<number> => {
+  let removed = 0;
+
+  for (const event of Object.values(METRIC)) {
+    try {
+      if (await kv.delete(metricKey(event, day), { scope: 'WORKSPACE' })) removed += 1;
+    } catch (error) {
+      logger.debug('metric.purge_failed', { event, ...describeError(error) });
+    }
+  }
+
+  return removed;
+};

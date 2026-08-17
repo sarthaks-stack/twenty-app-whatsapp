@@ -1,7 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTheme } from 'twenty-ui/theme-constants';
 
-import { bodyVariableHints, buttonLabels } from '../../domain/template-hints';
+import {
+  bodyVariableHints,
+  buttonLabels,
+  buttonVariableHints,
+  headerVariableHints,
+} from '../../domain/template-hints';
 import {
   emptyParameters,
   isBlank,
@@ -78,32 +83,58 @@ export const TemplatePicker = ({
   const theme = useTheme();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [values, setValues] = useState<string[]>([]);
+  const [headerValues, setHeaderValues] = useState<string[]>([]);
+  /** Keyed by button index, because the indices are Meta's and need not be dense. */
+  const [buttonValues, setButtonValues] = useState<Record<number, string>>({});
   /** Empty fields are marked only once a send has been attempted. */
   const [attempted, setAttempted] = useState(false);
+  /** The preview is clamped by default; this opens it in full. See below. */
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   /**
    * One template is not a choice.
    *
    * The list opened on `—` even when there was exactly one thing to pick, so
-   * the first act of every template send was a decision with one option. It
-   * also meant the panel opened showing nothing at all, which is the worst
-   * possible answer to "why did my conversation disappear".
+   * the first act of every template send was a decision with one option — and
+   * the panel opened showing nothing at all, which is the worst possible answer
+   * to "why did my conversation disappear".
+   *
+   * **Derived, not written by an effect.** An effect that calls `setState` on a
+   * prop it also depends on is one stale dependency away from a render loop,
+   * and a render loop in a front component freezes the whole CRM tab. Reading
+   * the default instead cannot loop: there is no write.
    */
-  useEffect(() => {
-    if (selectedId === null && templates.length === 1) {
-      setSelectedId(templates[0]!.id);
-    }
-  }, [selectedId, templates]);
+  const effectiveId = selectedId ?? (templates.length === 1 ? templates[0]!.id : null);
 
-  const selected = templates.find((template) => template.id === selectedId) ?? null;
+  const selected = templates.find((template) => template.id === effectiveId) ?? null;
   const spec = specOf(selected);
 
   const hints = useMemo(() => bodyVariableHints(spec), [spec]);
+  const headerHints = useMemo(() => headerVariableHints(spec), [spec]);
+  const buttonHints = useMemo(() => buttonVariableHints(spec), [spec]);
   const buttons = useMemo(() => buttonLabels(spec), [spec]);
 
+  /**
+   * Everything the validator counts, not just the body.
+   *
+   * The form used to build `{ body }` alone while `validateParameters` also
+   * checked the header and the buttons — so a template with either could never
+   * satisfy it, and Send stayed disabled however many boxes were filled.
+   */
   const parameters: ResolvedParameters = useMemo(
-    () => ({ ...emptyParameters(), body: values }),
-    [values],
+    () => ({
+      ...emptyParameters(),
+      body: values,
+      ...(headerHints.length === 0
+        ? {}
+        : { header: { kind: 'text' as const, values: headerValues } }),
+      buttons: buttonHints.map((button) => ({
+        index: button.index,
+        subType: button.subType,
+        value: buttonValues[button.index] ?? '',
+      })),
+    }),
+    [values, headerValues, buttonValues, headerHints, buttonHints],
   );
 
   const validation = useMemo(
@@ -167,6 +198,102 @@ export const TemplatePicker = ({
     padding: `0 ${theme.spacing[2]}`,
   });
 
+  /**
+   * One labelled input, shared by the header, body and button variables.
+   *
+   * A closure rather than a component so it keeps the picker's own `control`
+   * style and `attempted` flag without threading either through props — there
+   * is exactly one caller and three call sites.
+   */
+  const field = ({
+    id,
+    hint,
+    value,
+    badge,
+    onChange,
+  }: {
+    id: string;
+    hint: { token: string; context: string | null; example: string | null };
+    value: string;
+    badge?: string;
+    onChange: (value: string) => void;
+  }) => {
+    const missing = attempted && isBlank(value);
+
+    return (
+      <div
+        key={id}
+        style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing[0.5] }}
+      >
+        <label
+          htmlFor={id}
+          style={{
+            display: 'flex',
+            alignItems: 'baseline',
+            gap: theme.spacing[1],
+            fontSize: theme.font.size.xs,
+            color: theme.font.color.secondary,
+          }}
+        >
+          {badge === undefined ? null : (
+            <span
+              style={{
+                flex: '0 0 auto',
+                color: theme.font.color.tertiary,
+                background: theme.background.transparent.light,
+                borderRadius: theme.border.radius.sm,
+                padding: `0 ${theme.spacing[1]}`,
+              }}
+            >
+              {badge}
+            </span>
+          )}
+          {/*
+            The words around the placeholder, which is what actually tells a rep
+            what belongs here. The token stays beside it, small, as the
+            unambiguous identity — two people discussing "the fourth variable"
+            still need to see which one that is.
+          */}
+          <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+            {hint.context ?? hint.token}
+          </span>
+          <span style={{ color: theme.font.color.light, flex: '0 0 auto' }}>
+            {hint.token}
+          </span>
+        </label>
+        <input
+          id={id}
+          type="text"
+          value={value}
+          placeholder={hint.example ?? undefined}
+          aria-invalid={missing ? true : undefined}
+          onChange={(event) => onChange(event.target.value)}
+          style={{
+            ...control,
+            border: `1px solid ${
+              missing ? theme.border.color.danger : theme.border.color.medium
+            }`,
+          }}
+        />
+        {missing ? (
+          <span
+            role="alert"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: theme.spacing[1],
+              fontSize: theme.font.size.xs,
+              color: theme.font.color.danger,
+            }}
+          >
+            <Glyph name="warning" />
+            {t('builder.error.REQUIRED')}
+          </span>
+        ) : null}
+      </div>
+    );
+  };
+
   return (
     <div
       className="wa-template-picker"
@@ -195,12 +322,14 @@ export const TemplatePicker = ({
         <select
           id="wa-template-select"
           aria-label={t('chat.chooseTemplate')}
-          value={selectedId ?? ''}
+          value={effectiveId ?? ''}
           onChange={(event) => {
             setSelectedId(event.target.value === '' ? null : event.target.value);
             // A different template means different variables; carrying the old
             // values over would fill {{2}} with something meant for {{1}}.
             setValues([]);
+            setHeaderValues([]);
+            setButtonValues({});
             setAttempted(false);
           }}
           style={{ ...control, flex: '1 1 auto', minWidth: 0 }}
@@ -247,6 +376,20 @@ export const TemplatePicker = ({
               display: 'flex',
               flexDirection: 'column',
               gap: theme.spacing[1],
+              /*
+                Clamped, and deliberately **not** scrollable.
+
+                A long template's preview is taller than the panel, so it has to
+                be bounded or every input falls below the fold. The obvious
+                bound — `overflow: auto` — was worse than the problem: the
+                preview then swallowed the wheel, and a rep scrolling towards
+                the fields just scrolled the preview instead, with no way past
+                it. Clamping with `hidden` lets the wheel through to the panel,
+                and the toggle below is how you read the rest.
+              */
+              flex: '0 0 auto',
+              maxHeight: previewOpen ? undefined : '9rem',
+              overflow: 'hidden',
             }}
           >
             <span
@@ -310,81 +453,87 @@ export const TemplatePicker = ({
           </div>
         )}
 
-        {hints.map((hint, index) => {
-          const value = values[index] ?? '';
-          const missing = attempted && isBlank(value);
-          const id = `wa-template-var-${index}`;
+        {preview === null ? null : (
+          <button
+            type="button"
+            onClick={() => setPreviewOpen((current) => !current)}
+            aria-expanded={previewOpen}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              alignSelf: 'flex-start',
+              gap: theme.spacing[1],
+              minHeight: '28px',
+              border: 'none',
+              background: 'transparent',
+              color: theme.font.color.tertiary,
+              cursor: 'pointer',
+              fontFamily: theme.font.family,
+              fontSize: theme.font.size.xs,
+              padding: 0,
+            }}
+          >
+            <Glyph name={previewOpen ? 'chevronDown' : 'chevron'} />
+            {t(previewOpen ? 'common.less' : 'common.more')}
+          </button>
+        )}
 
-          return (
-            <div
-              key={hint.token}
-              style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing[0.5] }}
-            >
-              <label
-                htmlFor={id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: theme.spacing[1],
-                  fontSize: theme.font.size.xs,
-                  color: theme.font.color.secondary,
-                }}
-              >
-                {/*
-                  The words around the placeholder, which is what actually tells
-                  a rep what belongs here. The token stays beside it, small, as
-                  the unambiguous identity — two people discussing "the fourth
-                  variable" still need to see which one that is.
-                */}
-                <span style={{ flex: '1 1 auto', minWidth: 0 }}>
-                  {hint.context ?? hint.token}
-                </span>
-                <span style={{ color: theme.font.color.light, flex: '0 0 auto' }}>
-                  {hint.token}
-                </span>
-              </label>
-              <input
-                id={id}
-                type="text"
-                value={value}
-                placeholder={hint.example ?? undefined}
-                aria-invalid={missing ? true : undefined}
-                onChange={(event) => {
-                  const next = event.target.value;
+        {headerHints.map((hint, index) =>
+          field({
+            id: `wa-template-header-${index}`,
+            hint,
+            badge: t('chat.templateHeader'),
+            value: headerValues[index] ?? '',
+            onChange: (next) =>
+              setHeaderValues((current) => {
+                const copy = [...current];
 
-                  setValues((current) => {
-                    const copy = [...current];
+                copy[index] = next;
 
-                    copy[index] = next;
+                return copy;
+              }),
+          }),
+        )}
 
-                    return copy;
-                  });
-                }}
-                style={{
-                  ...control,
-                  border: `1px solid ${
-                    missing ? theme.border.color.danger : theme.border.color.medium
-                  }`,
-                }}
-              />
-              {missing ? (
-                <span
-                  role="alert"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: theme.spacing[1],
-                    fontSize: theme.font.size.xs,
-                    color: theme.font.color.danger,
-                  }}
-                >
-                  <Glyph name="warning" />
-                  {t('builder.error.REQUIRED')}
-                </span>
-              ) : null}
-            </div>
-          );
-        })}
+        {hints.map((hint, index) =>
+          field({
+            id: `wa-template-var-${index}`,
+            hint,
+            value: values[index] ?? '',
+            onChange: (next) =>
+              setValues((current) => {
+                const copy = [...current];
+
+                copy[index] = next;
+
+                return copy;
+              }),
+          }),
+        )}
+
+        {/*
+          A dynamic button. The label the customer taps is the heading, and the
+          URL template sits under it so it is obvious that only its tail is
+          being filled — a rep asked for "the button value" with no other
+          context reasonably types the whole address.
+        */}
+        {buttonHints.map((button) =>
+          field({
+            id: `wa-template-button-${button.index}`,
+            hint: {
+              token: `#${button.index + 1}`,
+              context: button.label ?? t('chat.templateButton'),
+              example: button.url,
+            },
+            badge:
+              button.subType === 'copy_code'
+                ? t('chat.templateCopyCode')
+                : t('chat.templateButtonUrl'),
+            value: buttonValues[button.index] ?? '',
+            onChange: (next) =>
+              setButtonValues((current) => ({ ...current, [button.index]: next })),
+          }),
+        )}
       </div>
 
       {/*

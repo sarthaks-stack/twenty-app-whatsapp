@@ -170,6 +170,26 @@ export const MESSAGING_TIER = {
 } as const;
 export type MessagingTier = (typeof MESSAGING_TIER)[keyof typeof MESSAGING_TIER];
 
+/**
+ * The webhook fields the app needs subscribed on the WABA (appendix A §1).
+ *
+ * Named once, because this list is the difference between an install that works
+ * and one that looks perfect and receives nothing: the Meta dashboard shows the
+ * callback verified and active whether or not a field is ticked, and a missing
+ * `messages` subscription produces no error anywhere — just silence. The
+ * settings card and the post-install log both read it from here so they cannot
+ * tell an operator two different things.
+ */
+export const REQUIRED_WEBHOOK_FIELDS = [
+  'messages',
+  'message_template_status_update',
+  'message_template_quality_update',
+  'message_template_components_update',
+  'account_update',
+  'phone_number_quality_update',
+  'business_capability_update',
+] as const;
+
 export const WEBHOOK_PROCESSING_STATUS = {
   RECEIVED: 'RECEIVED',
   PROCESSED: 'PROCESSED',

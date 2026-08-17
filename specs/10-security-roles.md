@@ -106,11 +106,16 @@ Two behaviours established against the running platform rather than assumed:
 - **An authenticated caller with no membership is a *machine* caller, not an anonymous one.**
   Verified: on an `isAuthRequired: true` route the platform rejects a missing or invalid token
   before the handler runs ("Missing authentication token" / "Token invalid."), so a null
-  `userWorkspaceId` means a valid API key. Such a key is treated as admin, because refusing it
-  would not be a control — an API key can already write any record through the Core API, and the
-  only thing these routes uniquely own is the `kv` routing claim. What SEC-5 defends against, a
-  logged-in *agent* calling an admin route, still fails. Machine actions are audited with a null
-  actor.
+  `userWorkspaceId` means a valid API key.
+
+  **As built, such a key is refused** unless `WA_ALLOW_API_KEY_ADMIN` is set — a reversal of this
+  paragraph's original reasoning, and the reason is that the reasoning was wrong. Twenty lets an
+  API key be assigned a *restricted* role, and this app has no way to read which role a given key
+  holds (`currentUser` answers nothing for a key). Treating every key as an admin would therefore
+  promote a read-only or entirely unrelated credential to sending messages, connecting numbers,
+  changing consent and running erasure. A workspace running trusted automation opts in explicitly
+  and scopes it to a dedicated key. Machine actions are still audited with a null actor, so "who
+  connected this number" reads "an API key" rather than a member's name.
 
 Route-by-route requirement:
 
@@ -122,8 +127,9 @@ Route-by-route requirement:
 | `/whatsapp/consent` (set) | agent · (import) admin |
 | `/whatsapp/campaign` (all actions) | **admin** (SEC-12) |
 | `/whatsapp/account` (connect, test, disconnect) | **admin** |
-| `/whatsapp/templates` (publish, sync, submit) | **admin** |
-| `/whatsapp/replay` | **admin** |
+| `/whatsapp/template` (publish, sync, submit) | **admin** |
+| `/whatsapp/upload` (attachment upload) | agent |
+| `/whatsapp/replay` (list, replay, resync) | **admin** — the raw log holds message bodies, phone numbers and profile names, so even reading it is an operator's job |
 | `/whatsapp/verify` | none (unauthenticated by design; protected by the verify token) |
 
 A front component hiding a button is a convenience, never a control. Two negative tests per
@@ -203,6 +209,32 @@ cost attribution survive a content purge. The purge job logs counts only, never 
 
 Q-4 (legal input on retention, incl. Lei 22/11) must land before go-live; until it does, the
 default is "keep everything", which is reversible in the direction the law permits.
+
+**As built (2026-08-17)** — `wa-retention-purge`, cron `0 3 * * *`, 300 s budget.
+
+- **Webhook events are destroyed, not soft-deleted.** `dedupKey` carries a unique index and a
+  soft-deleted row keeps its indexed value (probe P-4 is unanswered, so this assumes the
+  unfavourable reading): a Meta redelivery of a purged change would collide with the tombstone, be
+  counted as a duplicate and be discarded — permanently, with nothing left to replay from.
+  `architecture.test.ts` names `repositories/webhook-events.ts` as the second permitted caller of a
+  `destroy*` mutation for exactly this reason.
+- **Messages are emptied, not deleted.** `body`, `payload`, `mediaMeta` and `mediaFile` go;
+  `wamid`, `direction`, `status`, `statusTimestamps`, `billableCostUsd` and the template columns
+  stay, so delivery reporting and cost attribution survive the purge. The query selects only rows
+  that *still hold content* — without that predicate every run would re-blank every old message
+  for ever, 50 000 pointless writes a day at the design volume, while reporting "purged 200" and
+  looking healthy.
+- **Counters expire on a fixed 90 days**, not configurable. `kv` has no scan, so the keys are
+  reconstructed from the `METRIC` catalog and a date, and a `wa:retention:metrics-purged-through`
+  marker makes the walk resumable: a first run starts a full window behind the cutoff — otherwise
+  counters an existing workspace had already expired would be stepped over and unreachable for
+  ever — and catches up at seven days a run.
+- Each kind drains in batches of 60 for at most 12 passes and a run that hits the cap reports
+  `truncated` (D-33: a job that returns its own limit as a success hides a growing backlog).
+- Reclaiming the *bytes* behind a purged `mediaFile` is Twenty's own business; the app has no
+  file-delete API and drops the association only.
+- The job logs counts. It never logs content — the one way a retention job can defeat its own
+  purpose, since logs outlive records.
 
 ### 4.3 Compliance notes (SEC-11)
 

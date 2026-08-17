@@ -121,6 +121,19 @@ export const SettingsView = () => {
    */
   const [confirmingDisconnect, setConfirmingDisconnect] = useState<string | null>(null);
 
+  /** Failed deliveries the operator has ticked for replay. */
+  const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
+
+  /**
+   * How many failed deliveries a bulk replay would re-drive, once asked.
+   *
+   * `null` means the question has not been asked yet, so the button is still
+   * armed rather than confirmed. The count comes from the route's dry run
+   * because "replay all failed" over a week of a bad token is thousands of jobs
+   * from one click, and the number is the whole point of the confirmation.
+   */
+  const [pendingReplay, setPendingReplay] = useState<number | null>(null);
+
   const [form, setForm] = useState({
     name: '',
     wabaId: '',
@@ -206,6 +219,116 @@ export const SettingsView = () => {
 
   const rowsFor = (key: string): HealthRow[] =>
     (data?.rows ?? []).filter((row) => row.key === key);
+
+  type ReplayResult = {
+    requested?: number;
+    matching?: number;
+    replayed: number;
+    jobs: number;
+    truncated?: boolean;
+  };
+
+  /**
+   * Announces what actually happened, then reloads.
+   *
+   * The reload is not cosmetic: a replayed row goes back to `RECEIVED`, so it
+   * leaves this list — which is how an operator can tell a replay that was
+   * queued from one that was refused, without reading a log.
+   */
+  const announceReplay = useCallback(
+    async (result: ReplayResult | null, requested: number) => {
+      if (result === null) return;
+
+      setSelectedEvents([]);
+      setPendingReplay(null);
+
+      const message = t('settings.replayDone', {
+        replayed: result.replayed,
+        requested: result.requested ?? result.matching ?? requested,
+        jobs: result.jobs,
+      });
+
+      await load();
+
+      setNotice(
+        result.truncated === true
+          ? `${message} ${t('settings.replayTruncated', { cap: requested })}`
+          : message,
+      );
+    },
+    [load, t],
+  );
+
+  const replaySelected = useCallback(async () => {
+    const eventIds = selectedEvents;
+
+    if (eventIds.length === 0) return;
+
+    await announceReplay(
+      await post<ReplayResult>('/s/whatsapp/replay', { action: 'replay', eventIds }),
+      eventIds.length,
+    );
+  }, [announceReplay, post, selectedEvents]);
+
+  /**
+   * Two steps, and the first one is a question to the server rather than to the
+   * operator: the dry run returns the count, and only the second click replays.
+   */
+  const armReplayAll = useCallback(async () => {
+    const result = await post<{ matching: number; wouldReplay: number }>(
+      '/s/whatsapp/replay',
+      { action: 'replayFailed', dryRun: true },
+    );
+
+    if (result === null) return;
+
+    if (result.matching === 0) {
+      setNotice(t('settings.replayNothing'));
+
+      return;
+    }
+
+    setPendingReplay(result.wouldReplay);
+  }, [post, t]);
+
+  /**
+   * D-10 layer 3. The button provisions a draft; the notes are what the
+   * operator still has to decide, and they stay on screen because the workflow
+   * does nothing until they act on them.
+   */
+  const [reviewNotes, setReviewNotes] = useState<string[]>([]);
+
+  const createNotificationWorkflow = useCallback(async () => {
+    const result = await post<{
+      name: string;
+      existed: boolean;
+      reviewNotes: string[];
+    }>('/s/whatsapp/account', { action: 'createNotificationWorkflow' });
+
+    if (result === null) return;
+
+    setReviewNotes(result.reviewNotes ?? []);
+    setNotice(
+      t(
+        result.existed
+          ? 'settings.notificationWorkflowExisted'
+          : 'settings.notificationWorkflowCreated',
+        { name: result.name },
+      ),
+    );
+  }, [post, t]);
+
+  const replayAllFailed = useCallback(async () => {
+    const cap = pendingReplay ?? 0;
+
+    await announceReplay(
+      await post<ReplayResult>('/s/whatsapp/replay', {
+        action: 'replayFailed',
+        dryRun: false,
+      }),
+      cap,
+    );
+  }, [announceReplay, pendingReplay, post]);
 
   return (
     <div
@@ -671,28 +794,78 @@ export const SettingsView = () => {
 
       {tab === 'diagnostics' ? (
         <TabPanel group="settings" tabKey="diagnostics">
-          <Card title={t('settings.failedEvents')}>
+          <Card
+            title={t('settings.failedEvents')}
+            actions={
+              <div style={{ display: 'flex', gap: theme.spacing[2] }}>
+                <ActionButton
+                  label={t('settings.replaySelected', { count: selectedEvents.length })}
+                  onClick={() => void replaySelected()}
+                  disabled={selectedEvents.length === 0}
+                  busy={busy}
+                  tone="primary"
+                />
+                {pendingReplay === null ? (
+                  <ActionButton
+                    label={t('settings.replayAllFailed')}
+                    onClick={() => void armReplayAll()}
+                    disabled={(data?.failedEvents ?? []).length === 0}
+                    busy={busy}
+                  />
+                ) : (
+                  <ActionButton
+                    label={t('settings.replayConfirm', { count: pendingReplay })}
+                    onClick={() => void replayAllFailed()}
+                    busy={busy}
+                    tone="danger"
+                  />
+                )}
+              </div>
+            }
+          >
+            <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
+              {t('settings.replayNote')}
+            </span>
             {(data?.failedEvents ?? []).length === 0 ? (
               <span style={{ fontSize: theme.font.size.md, color: theme.font.color.tertiary }}>
                 {t('common.none')}
               </span>
             ) : null}
-            {(data?.failedEvents ?? []).map((event) => (
-              <div
-                key={String(event.id)}
-                style={{
-                  fontSize: theme.font.size.sm,
-                  color: theme.font.color.secondary,
-                  borderTop: `1px solid ${theme.border.color.light}`,
-                  paddingTop: theme.spacing[1],
-                }}
-              >
-                {String(event.webhookField ?? '—')} ·{' '}
-                {relativeTime(event.receivedAt as string | null, now, lang)} ·{' '}
-                {String(event.error ?? '')} · {t('settings.attempts')}{' '}
-                {Number(event.attemptCount ?? 0)}
-              </div>
-            ))}
+            {(data?.failedEvents ?? []).map((event) => {
+              const id = String(event.id);
+              const checked = selectedEvents.includes(id);
+
+              return (
+                <label
+                  key={id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: theme.spacing[2],
+                    fontSize: theme.font.size.sm,
+                    color: theme.font.color.secondary,
+                    borderTop: `1px solid ${theme.border.color.light}`,
+                    paddingTop: theme.spacing[1],
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() =>
+                      setSelectedEvents((current) =>
+                        checked ? current.filter((entry) => entry !== id) : [...current, id],
+                      )
+                    }
+                  />
+                  <span>
+                    {String(event.webhookField ?? '—')} ·{' '}
+                    {relativeTime(event.receivedAt as string | null, now, lang)} ·{' '}
+                    {String(event.error ?? '')} · {t('settings.attempts')}{' '}
+                    {Number(event.attemptCount ?? 0)}
+                  </span>
+                </label>
+              );
+            })}
           </Card>
 
           <Card title={t('settings.stuckMessages')}>
@@ -709,6 +882,29 @@ export const SettingsView = () => {
                 {String(message.id)} ·{' '}
                 {relativeTime(message.createdAt as string | null, now, lang)}
               </div>
+            ))}
+          </Card>
+
+          <Card
+            title={t('settings.notifications')}
+            actions={
+              <ActionButton
+                label={t('settings.createNotificationWorkflow')}
+                onClick={() => void createNotificationWorkflow()}
+                busy={busy}
+              />
+            }
+          >
+            <span style={{ fontSize: theme.font.size.md, color: theme.font.color.tertiary }}>
+              {t('settings.notificationsNote')}
+            </span>
+            {reviewNotes.map((note) => (
+              <span
+                key={note}
+                style={{ fontSize: theme.font.size.sm, color: theme.font.color.secondary }}
+              >
+                • {t(`settings.review.${note}`)}
+              </span>
             ))}
           </Card>
 

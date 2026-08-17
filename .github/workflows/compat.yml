@@ -1,0 +1,144 @@
+name: Compat
+
+# The upgrade tripwire (NFR-M2, R-2, specs/01 §6).
+#
+# Twenty is a moving target and this app runs inside it: a renamed field on a
+# standard object, a changed logic-function payload or a front-component API
+# that stops existing are all upstream changes that break us without a commit
+# on our side. `ci.yml` deliberately runs against the *pinned* version, because
+# a PR must not fail for reasons the PR did not cause — so something else has to
+# watch `latest`, and this is it.
+#
+# It runs weekly rather than nightly on purpose. The signal is "an upgrade is
+# going to hurt", which nobody acts on daily, and a job that cries wolf every
+# morning is a job people mute.
+
+on:
+  schedule:
+    # 04:00 UTC on Mondays — a break found on Monday has a working week in it.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      twenty-version:
+        description: 'Twenty version to test against'
+        required: false
+        default: 'latest'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: compat
+  cancel-in-progress: false
+
+jobs:
+  compat:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.target.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Resolve the target version
+        id: target
+        run: |
+          echo "version=${{ inputs['twenty-version'] || 'latest' }}" >> "$GITHUB_OUTPUT"
+          echo "pinned=$(tr -d '[:space:]' < .twenty-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Spawn Twenty test instance
+        id: twenty
+        uses: twentyhq/twenty/.github/actions/spawn-twenty-app-dev-test@044fc2d38908f711f5f073c345b656e13b541b8b # main 2026-08-16
+        with:
+          twenty-version: ${{ steps.target.outputs.version }}
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      # Lint and typecheck run here too. They are the checks that catch a
+      # renamed SDK export, which is exactly the kind of upstream break this
+      # job exists to find — and they cost seconds.
+      - name: Lint
+        run: yarn lint
+
+      - name: Typecheck
+        run: yarn typecheck
+
+      - name: Unit tests
+        run: yarn test:unit
+
+      - name: Integration smoke suite
+        run: yarn test
+        env:
+          TWENTY_API_URL: ${{ steps.twenty.outputs.server-url }}
+          TWENTY_API_KEY: ${{ steps.twenty.outputs.api-key }}
+
+  # A failure that only exists in a log nobody reads is not a tripwire. It has
+  # to become an issue — but *one* issue: a weekly job against a break that
+  # takes a month to fix would otherwise file four identical reports and train
+  # everyone to ignore the label.
+  report:
+    if: failure() && github.event_name == 'schedule'
+    needs: compat
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the compatibility issue
+        uses: actions/github-script@60a0d83039c74a4aa543908d40d6a712a2df0aab # v7
+        with:
+          script: |
+            const label = 'twenty-compat';
+            const version = '${{ needs.compat.outputs.version }}';
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            const body = [
+              `The weekly compatibility run against \`twentycrm/twenty:${version}\` failed.`,
+              '',
+              `Run: ${run}`,
+              '',
+              'This does **not** affect production, which stays on the version in `.twenty-version`.',
+              'What it means is that upgrading will break something, and the break is known now',
+              'rather than during the upgrade.',
+              '',
+              'When it is fixed, bump `.twenty-version` to the version this job passed on.',
+            ].join('\n');
+
+            // Reuse the open issue if there is one. The comment is what shows
+            // that the break has persisted for another week, which is the fact
+            // a second issue would obscure rather than communicate.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+            });
+
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.data[0].number,
+                body,
+              });
+
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Twenty ${version} breaks the WhatsApp app`,
+              labels: [label],
+              body,
+            });

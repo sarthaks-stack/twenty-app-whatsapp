@@ -47,4 +47,8 @@ src/__tests__/fixtures/meta/raw/
 
 # typescript
 *.tsbuildinfo
+# Generated declaration output. Hand-written ambient declarations live in
+# src/types/ and are source — without the exception `yarn typecheck` passes here
+# and fails on a fresh clone, which is the worst place to find out.
 *.d.ts
+!src/types/*.d.ts

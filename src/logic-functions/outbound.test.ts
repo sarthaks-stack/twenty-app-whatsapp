@@ -681,6 +681,38 @@ describe('parsing what the composer sends', () => {
     expect(photo.ok === true && photo.message).toMatchObject({ voice: false });
   });
 
+  /**
+   * With the window closed a template is the *only* send available, which is
+   * exactly when a rep most needs to say which message they are answering.
+   * `buildTemplatePayload` has carried `context` since it was written; nothing
+   * passed it, so choosing Reply and then sending a template dropped the quote.
+   */
+  it('carries a reply target on a template send', () => {
+    const result = parseClientMessage({
+      kind: 'template',
+      templateId: 't1',
+      contextWamid: 'wamid.PARENT',
+    });
+
+    expect(result.ok === true && result.message).toMatchObject({
+      kind: 'template',
+      contextWamid: 'wamid.PARENT',
+    });
+
+    expect(
+      toSendSpec({
+        kind: 'template',
+        templateId: 't1',
+        parameters: { body: [], buttons: [] },
+        contextWamid: 'wamid.PARENT',
+      }),
+    ).toEqual({
+      kind: 'template',
+      templateId: 't1',
+      contextWamid: 'wamid.PARENT',
+    });
+  });
+
   it('defaults template parameters and rejects a non-array body', () => {
     expect(parseClientMessage({ kind: 'template', templateId: 't1' }).ok).toBe(true);
     expect(

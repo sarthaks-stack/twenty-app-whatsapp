@@ -453,3 +453,78 @@ export const patchMessage = async (id: string, data: MessagePatch): Promise<void
     'messages.patch',
   );
 };
+
+/**
+ * Messages past the retention window that still hold content (SEC-9).
+ *
+ * The `or` is what makes the purge idempotent, and it is not an optimisation.
+ * Without it every run would re-blank every old message for ever — at the
+ * design volume that is 50 000 pointless writes a day, growing, against a
+ * cron that would still report "purged 200" and look healthy.
+ *
+ * `mediaMeta` is one of the three predicates because a media message with no
+ * caption can reach the table with a null body, and a stored filename
+ * (`contrato-joao-silva.pdf`) is content by any reading that matters.
+ *
+ * Ordered by id: the purge deletes what it reads, and without a total order the
+ * API may skip a row across pages — a row skipped here is content that survives
+ * every future run.
+ */
+export const findPurgeableMessages = async (
+  before: Date,
+  limit: number,
+): Promise<{ id: string }[]> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappMessages: {
+          __args: {
+            filter: {
+              waTimestamp: { lt: before.toISOString() },
+              or: [
+                { body: { is: 'NOT_NULL' } },
+                { payload: { is: 'NOT_NULL' } },
+                { mediaMeta: { is: 'NOT_NULL' } },
+              ],
+            },
+            orderBy: [{ id: 'AscNullsFirst' }],
+            first: limit,
+          },
+          edges: { node: { id: true } },
+        },
+      }),
+    'messages.findPurgeable',
+  );
+
+  return nodesOf<{ id: string }>(result.whatsappMessages);
+};
+
+/**
+ * Removes the content and keeps the record.
+ *
+ * `wamid`, `direction`, `status`, `statusTimestamps`, `billableCostUsd` and the
+ * template columns all survive, which is the whole design of SEC-9: delivery
+ * reporting and cost attribution have to remain answerable after a content
+ * purge, so the row is emptied rather than deleted.
+ *
+ * `mediaFile: []` drops the workspace file association. Reclaiming the stored
+ * bytes is Twenty's own business — the app has no file-delete API — and that
+ * limitation is stated in the runbook rather than hidden behind a count.
+ */
+export const blankMessageContent = async (ids: string[]): Promise<void> => {
+  if (ids.length === 0) return;
+
+  await query(
+    (client) =>
+      client.mutation({
+        updateWhatsappMessages: {
+          __args: {
+            filter: { id: { in: ids } },
+            data: { body: null, payload: null, mediaMeta: null, mediaFile: [] },
+          },
+          id: true,
+        },
+      }),
+    'messages.blankContent',
+  );
+};

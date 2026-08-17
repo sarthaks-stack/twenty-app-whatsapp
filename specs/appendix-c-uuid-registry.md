@@ -71,7 +71,9 @@ placeholder page in the sidebar.
 | `LF_RETENTION_PURGE` | `9f112ebd-68c1-478f-956b-285333a41e12` | cron `0 3 * * *` |
 | `LF_WEBHOOK_REPLAY_ROUTE` | `416e05c5-968a-462a-b0b8-48cc34c63d7f` | httpRoute `POST /s/whatsapp/replay` |
 | `LF_CONSENT_KEYWORD` | `c8e4a7b6-1d52-4f39-8a07-2b6e5d90c134` | queued |
-| `LF_TEMPLATE_SUBMIT` | `7b31c0da-6e48-4a2f-9d15-3ac8e2f47b90` | httpRoute `POST /s/whatsapp/templates` |
+| `LF_TEMPLATE_SUBMIT` | `7b31c0da-6e48-4a2f-9d15-3ac8e2f47b90` | httpRoute `POST /s/whatsapp/template` |
+| `LF_CONSENT_BACKFILL` | `90904cd6-e3ff-4778-9678-54fc10bf30aa` | queued |
+| `LF_UPLOAD_ROUTE` | `1145a0b8-8a25-4210-9fb6-685a653f2864` | httpRoute `POST /s/whatsapp/upload` |
 | `LF_POST_INSTALL` | `dcea2279-13e2-491d-83b1-74387ff4e872` | postInstall |
 | `LF_UNINSTALL` | `4f0711c1-5bfe-49b5-995c-cdbc1680820f` | uninstall |
 

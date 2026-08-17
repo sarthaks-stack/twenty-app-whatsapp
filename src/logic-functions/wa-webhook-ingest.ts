@@ -150,7 +150,14 @@ export const jobsForChange = ({
   return jobs;
 };
 
-const accountForChange = async (
+/**
+ * Which account a change belongs to — the number first, the WABA as fallback.
+ *
+ * Exported because the replay route has to answer the same question from a
+ * *stored* change, and answering it differently there would be how a replayed
+ * event lands in the wrong account or is refused as foreign.
+ */
+export const accountForChange = async (
   entry: MetaEntry,
   change: MetaChange,
 ): Promise<WhatsappAccountRecord | null> =>

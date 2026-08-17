@@ -203,6 +203,10 @@ const COPY = {
   'chat.placeholder': { pt: 'Escreva uma mensagem', en: 'Write a message' },
   'chat.send': { pt: 'Enviar', en: 'Send' },
   'chat.chooseTemplate': { pt: 'Escolher modelo', en: 'Choose a template' },
+  'chat.templateHeader': { pt: 'Cabeçalho', en: 'Header' },
+  'chat.templateButton': { pt: 'Botão', en: 'Button' },
+  'chat.templateButtonUrl': { pt: 'Ligação do botão', en: 'Button link' },
+  'chat.templateCopyCode': { pt: 'Código a copiar', en: 'Copy code' },
   'chat.retry': { pt: 'Repetir', en: 'Retry' },
   'chat.details': { pt: 'Ver detalhes', en: 'Show details' },
   'chat.voiceNote': { pt: 'Mensagem de voz', en: 'Voice message' },
@@ -1015,6 +1019,64 @@ const COPY = {
   'settings.failedEvents': { pt: 'Entregas falhadas (24h)', en: 'Failed deliveries (24h)' },
   'settings.stuckMessages': { pt: 'Mensagens presas', en: 'Stuck messages' },
   'settings.attempts': { pt: 'tentativas', en: 'attempts' },
+  'settings.replay': { pt: 'Reprocessar', en: 'Replay' },
+  'settings.replaySelected': {
+    pt: 'Reprocessar seleccionadas ({count})',
+    en: 'Replay selected ({count})',
+  },
+  'settings.replayAllFailed': {
+    pt: 'Reprocessar todas as falhadas',
+    en: 'Replay all failed',
+  },
+  'settings.replayConfirm': {
+    pt: 'Reprocessar {count} entregas? É seguro repetir: cada processador é idempotente pelo WAMID.',
+    en: 'Replay {count} deliveries? Repeating is safe: every processor is idempotent on the WAMID.',
+  },
+  'settings.replayDone': {
+    pt: '{replayed} de {requested} reprocessadas, {jobs} tarefas na fila.',
+    en: '{replayed} of {requested} replayed, {jobs} jobs queued.',
+  },
+  'settings.replayTruncated': {
+    pt: 'Ainda faltam entregas: o limite por pedido é {cap}. Volte a carregar para continuar.',
+    en: 'Deliveries are left over: the per-request cap is {cap}. Press again to continue.',
+  },
+  'settings.replayNothing': {
+    pt: 'Nenhuma entrega falhada para reprocessar.',
+    en: 'No failed delivery to replay.',
+  },
+  'settings.replayNote': {
+    pt: 'A Meta reenvia um webhook durante 7 dias e não tem endpoint de reposição, por isso este registo é a única origem para reprocessar. Reprocessar é seguro: nada é duplicado.',
+    en: 'Meta retries a webhook for 7 days and offers no replay endpoint, so this log is the only source for reprocessing. Replaying is safe: nothing is duplicated.',
+  },
+  'settings.notifications': { pt: 'Notificações', en: 'Notifications' },
+  'settings.notificationsNote': {
+    pt: 'As mensagens por ler e o aviso ao vivo chegam a quem está a olhar para o Twenty. Para chegar a quem não está, é preciso um fluxo de trabalho: este botão cria-o em rascunho, com o gatilho já ligado a uma mensagem nova de WhatsApp.',
+    en: 'Unread counts and the live toast reach whoever is looking at Twenty. Reaching someone who is not takes a workflow: this button creates one as a draft, with the trigger already wired to a new WhatsApp message.',
+  },
+  'settings.createNotificationWorkflow': {
+    pt: 'Criar o fluxo de notificação',
+    en: 'Create the notification workflow',
+  },
+  'settings.notificationWorkflowCreated': {
+    pt: 'Rascunho criado: “{name}”. Abra-o em Fluxos de trabalho para o rever e activar.',
+    en: 'Draft created: “{name}”. Open it under Workflows to review and activate it.',
+  },
+  'settings.notificationWorkflowExisted': {
+    pt: 'Já existe: “{name}”. Nada foi alterado.',
+    en: 'It already exists: “{name}”. Nothing was changed.',
+  },
+  'settings.review.FILTER_INBOUND': {
+    pt: 'Filtre o gatilho por direcção = INBOUND — sem isso, cada mensagem que um agente envia cria uma tarefa a pedir-lhe que responda a si próprio.',
+    en: 'Filter the trigger to direction = INBOUND — without it, every message a rep sends creates a task asking them to reply to themselves.',
+  },
+  'settings.review.CHOOSE_ASSIGNEE': {
+    pt: 'Escolha quem recebe a tarefa: o responsável da conversa, ou uma pessoa fixa.',
+    en: 'Choose who gets the task: the conversation’s assignee, or a fixed person.',
+  },
+  'settings.review.ACTIVATE': {
+    pt: 'Active o fluxo. Fica em rascunho até o fazer.',
+    en: 'Activate the workflow. It stays a draft until you do.',
+  },
   'settings.consent': { pt: 'Consentimento', en: 'Consent' },
   'settings.consentNote': {
     pt: 'As palavras-chave de subscrição e cancelamento, e o texto da confirmação, são variáveis da aplicação — edite-as no separador Variáveis, aqui ao lado. Não são código de propósito: o texto é revisto por aconselhamento jurídico e uma alteração não deve exigir um deploy.',

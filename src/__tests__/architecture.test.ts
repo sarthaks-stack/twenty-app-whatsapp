@@ -215,10 +215,22 @@ describe('destructive writes', () => {
    *
    * A role cannot tell one handler from another, so the control lives here
    * instead, where it names the module and fails the build. Anything else that
-   * needs to destroy records — the retention purge, when it lands — is a
-   * deliberate addition to this list with its own reason, not an accident.
+   * needs to destroy records is a deliberate addition to this list with its own
+   * reason, not an accident.
+   *
+   * The second entry is the retention purge's (SEC-9), and it is confined to
+   * `whatsappWebhookEvent`. It has to hard-delete because `dedupKey` carries a
+   * unique index: a soft-deleted row keeps its indexed value, so a Meta
+   * redelivery of a purged change would collide, be counted as a duplicate, and
+   * be discarded — permanently, with nothing left to replay it from. Probe P-4
+   * has not run, so this assumes the unfavourable answer.
+   *
+   * Message *content* is purged by blanking columns, never by deleting rows —
+   * counts, delivery reporting and cost attribution have to survive a content
+   * purge (specs/10 §4.2), which is why no destroy call appears in
+   * `wa-retention-purge.ts` itself.
    */
-  const DESTROY_CALLERS = ['server/erasure.ts'];
+  const DESTROY_CALLERS = ['server/erasure.ts', 'server/repositories/webhook-events.ts'];
 
   it('confines hard deletes to the erasure routine', () => {
     const candidates = files.filter(

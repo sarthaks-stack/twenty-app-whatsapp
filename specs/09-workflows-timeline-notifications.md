@@ -36,6 +36,31 @@ instead of the run dying. Only infrastructure failures throw.
 The action runs the same `evaluate()` gate and the same interactive lane as a rep's send, which
 is what makes FR-CON-4 true by construction rather than by discipline.
 
+**As built (2026-08-17)** — `wa-send-template-action`. Three corrections to the sketch above, each
+found by building it:
+
+- **`inputSchema` is positional over the handler's parameters**, not a list of named fields. Left
+  undefined, the CLI derives it by parsing the handler's signature and keeps only the first
+  parameter, requiring it to be an object type literal. Five array entries would declare a
+  five-argument handler and bind none of them to the single object the handler receives — so it is
+  **one** `object` entry whose `properties` are the five inputs.
+- **`Person` arrives as a record *or* an id**, depending on how the step was wired: a workflow
+  variable bound to `{{trigger.record}}` resolves to an object, a hand-typed value to a string.
+  Reading both is six lines; reading one is a step that fails for most of the ways an author can
+  build it, with `PERSON_UNKNOWN` as the only clue. The same applies to booleans, which arrive as
+  `"false"` — truthy — when bound to a variable.
+- **Variables are bound by key against the template's spec** (`domain/workflow-parameters.ts`).
+  This is the one place in the app where a caller supplies variables having never seen the
+  template, so `{ "1": "Ana" }`, `{ "nome": "Ana" }` and an already-resolved `body` array all bind
+  to the spec's own ordering — and anything unresolvable comes back **empty**, because empty is a
+  named missing variable that refuses the send, while a stringified `null` is a message a customer
+  reads.
+
+`Template` accepts a record id or a template *name*: a select's options must be resolved at design
+time and the template list is not known then, so what an author can see and type is the name. Two
+templates sharing a name in different languages are two different messages, so that is refused
+rather than guessed at.
+
 ---
 
 ## 2. Database-event triggers — FR-WF-2 (SHOULD)
@@ -176,6 +201,27 @@ also why it belongs to the operator's judgement rather than ours.
 The settings UI ships a one-click "Create the default notification workflow" button that
 provisions a Workflow creating a Task for the thread assignee on inbound messages — turning
 layer 3 from a documentation footnote into a real default.
+
+**As built (2026-08-17)** — `POST /s/whatsapp/account { action: 'createNotificationWorkflow' }`,
+admin-only, idempotent by workflow name.
+
+It creates the workflow, a `DRAFT` version, the `whatsappMessage.created` trigger and a
+`CREATE_RECORD` Task step — and **stops there**, returning three machine-coded review notes the
+settings panel renders. Two reasons, and both are the honest ones rather than caution:
+
+- **Activation is not in the app-facing API.** There is no `activateWorkflowVersion` mutation on
+  the object graph, and writing `status: 'ACTIVE'` without the automated-trigger row the platform
+  normally creates would produce a workflow that says it is active and never fires.
+- **The direction filter is deliberately not written.** `whatsappMessage.created` fires for *both*
+  directions, so without a `direction = INBOUND` filter every message a rep sends creates a Task
+  telling them to reply to themselves. The filter's JSON shape belongs to Twenty's workflow engine,
+  and one this app guessed at and got wrong would look present and match nothing — the same
+  failure with none of the visibility. So it is `FILTER_INBOUND`, the first review note, on the way
+  to the builder the operator has to open anyway.
+
+Which leaves the button doing the part that is genuinely hard to discover — the trigger is called
+`whatsappMessage.created`, a name that appears nowhere in the builder — and leaving the two
+decisions that are the team's to whoever owns their inbox.
 
 ---
 

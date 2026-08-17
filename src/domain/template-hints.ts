@@ -105,6 +105,70 @@ export const bodyVariableHints = (spec: VariableSpec | null): VariableHint[] => 
 };
 
 /**
+ * The variables in a **text header**, which the picker also has to collect.
+ *
+ * It did not, and that was the deeper half of the same bug: `validateParameters`
+ * counts header and button variables, the form only ever offered body ones, and
+ * a template with either could therefore *never* satisfy its own validator.
+ * Filling all six visible boxes left Send disabled and a counter reading
+ * "Missing: 8" with nothing on screen to fill.
+ *
+ * A media header is not here on purpose — it needs a file, not a word, and this
+ * composer has no path to one (spec §"Attachment and file-picker feasibility").
+ * Such a template is refused at sync as unusable in the CRM, so the picker
+ * never sees it.
+ */
+export const headerVariableHints = (spec: VariableSpec | null): VariableHint[] => {
+  const header = spec?.header ?? null;
+
+  if (header === null || header.format !== 'TEXT' || header.variableCount === 0) {
+    return [];
+  }
+
+  const tokens =
+    header.names.length > 0
+      ? header.names.map((name) => `{{${name}}}`)
+      : header.indices.map((index) => `{{${index}}}`);
+
+  return tokens.map((token, position) => {
+    const example = header.example[position];
+
+    return {
+      token,
+      context: contextFor(header.text, token),
+      example:
+        typeof example === 'string' && example.trim().length > 0 ? example.trim() : null,
+    };
+  });
+};
+
+export type ButtonVariableHint = {
+  index: number;
+  /** `url` or `copy_code` — what Meta's `sub_type` must say for this button. */
+  subType: string;
+  /** The button's own label, which is what a rep recognises it by. */
+  label: string | null;
+  /** The URL template, so it is obvious that only its tail is being filled. */
+  url: string | null;
+};
+
+/**
+ * The buttons that need a value — a dynamic URL suffix, or a copy code.
+ *
+ * Only the variable ones: a plain quick-reply button carries nothing to fill,
+ * and offering an input for it would be a box that does nothing.
+ */
+export const buttonVariableHints = (spec: VariableSpec | null): ButtonVariableHint[] =>
+  (spec?.buttons ?? [])
+    .filter((button) => button.hasVariable)
+    .map((button) => ({
+      index: button.index,
+      subType: button.type.toLowerCase() === 'copy_code' ? 'copy_code' : 'url',
+      label: button.text,
+      url: button.url,
+    }));
+
+/**
  * The buttons the customer will see, as plain labels for the preview.
  *
  * A template body that ends "responda através do botão abaixo" is describing a

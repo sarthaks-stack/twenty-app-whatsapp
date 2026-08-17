@@ -222,6 +222,16 @@ Never upgrade production ahead of the weekly compatibility job (01 §6). Procedu
 green on version X → upgrade staging to X → run integration + E2E → upgrade production. Pin the
 image tag; `latest` in production is explicitly forbidden by this runbook.
 
+**As built (2026-08-17).** The pin is a file — `.twenty-version` at the repo root — and `ci.yml`
+reads it, so every pull request is tested against the version production runs. `compat.yml` runs
+weekly against `twentycrm/twenty:latest` and, on failure, opens (or comments on) a single issue
+labelled `twenty-compat`; one issue rather than one per week, so a break that takes a month to fix
+does not train everyone to ignore the label. `workflow_dispatch` accepts a version, which is how
+you test a specific upgrade target before scheduling it.
+
+The upgrade is therefore: dispatch `compat.yml` against X → green → bump `.twenty-version` to X in
+a pull request (CI now runs against X) → upgrade staging → E2E → upgrade production.
+
 ---
 
 ## 6. Replay and reconciliation (TRD §12.4, NFR-R1)
@@ -239,6 +249,32 @@ floor is 7 days (10 §4.2).
 - **Replay all failed in range** with a confirmation showing the count.
 - **Resync thread** → re-runs template/status reconciliation for one thread.
 - Every replay is audit-logged (10 §5).
+
+**As built (2026-08-17)** — `wa-webhook-replay-route`, `POST /s/whatsapp/replay`, admin-only for
+every action including the read: the payloads hold message bodies, phone numbers and profile
+names, which makes this the most sensitive table the app owns.
+
+| Action | Body | Behaviour |
+|---|---|---|
+| `list` | `statuses[]`, `since`, `until`, `limit`, `after` | The raw log, newest first, paged |
+| `replay` | `eventIds[]` | Re-drives the named events; ids that no longer exist come back in `missing` rather than being ignored — the likeliest reason is that the purge removed them, and "4 of the 6 you selected" is what lets an operator work out why the fifth conversation is still wrong |
+| `replayFailed` | `since`, `until`, `dryRun` | `dryRun` (the default) returns the count the confirmation shows; the real run is capped at 200 per request and reports `truncated` so the operator presses again |
+| `resyncThread` | `threadId`, `since`, `dryRun` | Every stored event mentioning that conversation's `wa_id`, scoped to its own account |
+
+Three properties are load-bearing and are unit-tested as such:
+
+- It re-enqueues through **`jobsForChange`**, the same fan-out the live path uses. A replay-only
+  dispatcher would be a second copy of the routing table, and the drift would surface during an
+  incident.
+- The account is **re-resolved from the payload** exactly as ingest resolved it, so a replay
+  cannot land in a different account than the original.
+- A row is marked back to `RECEIVED` only **after** something was actually queued. The other
+  order takes a row out of the failed list with nothing scheduled to process it — the one state in
+  which the loss is invisible.
+
+`resyncThread` searches the payload with a `like` over serialised JSON. That is a scan, not an
+index, which is why it is bounded by the retention window and a limit and lives nowhere near a
+hot path.
 
 **Failure triage order** (put in the runbook verbatim):
 

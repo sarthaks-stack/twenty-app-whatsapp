@@ -1,25 +1,29 @@
 # 15 — Implementation task plan
 
-Live status of the build against [13-delivery-plan.md](13-delivery-plan.md). Updated 2026-08-15.
+Live status of the build against [13-delivery-plan.md](13-delivery-plan.md). Updated 2026-08-17.
 
-**Where things stand:** the foundation and the pure domain logic are done and verified. Nothing
-that talks to Meta or renders UI exists yet. In delivery-plan terms, workstream A is complete,
-the pure half of B/C/D is complete, and every logic function and front component remains.
+**Where things stand:** every phase is code-complete. Phases 0–8 were verified against a live
+Twenty and the connected WABA; phase 9 was built after P-6 answered; phase 10 closed the
+automation and operational tail. What remains is not engineering — it is the part of the release
+gate that needs a handset, a real number and an operator, scripted in
+[16-release-checklist.md](16-release-checklist.md).
 
-| | Done | Remaining |
+| | Built | Remaining |
 |---|---|---|
-| Spec documents | 20 | — |
+| Spec documents | 21 | — |
 | Objects / fields / indexes / roles | 8 / 34 / 5 / 3 | — |
-| Domain modules | 13 | ~5 |
-| Provider modules | 1 | ~5 |
-| Server helpers | 0 | ~12 |
-| Logic functions | 0 | **28** |
-| Front components | 0 | 6 |
-| Layout entities | 0 | ~9 |
-| Unit tests | 386 | — |
-| Integration / contract / E2E tests | 2 | ~40 |
+| Domain modules | 35 | — |
+| Provider modules | 7 | — |
+| Server helpers (incl. repositories) | 37 | — |
+| Logic functions | 30 | — |
+| Front components | 6 | — |
+| Layout, nav and command-menu entities | 6 | — |
+| Unit tests | ~1 690 in 74 files, ~2 s | — |
+| Integration / contract tests | as listed per phase | — |
+| Human-run verification | — | **checklist parts A, B, C, D** |
 
-Legend: **✅ done and verified** · **🔨 partially done** · **⬜ not started** · **🚫 blocked**
+Legend: **✅ done and verified** · **🔨 partially done** · **⬜ not started** · **🚫 blocked on
+something outside the code**
 
 ---
 
@@ -344,23 +348,86 @@ only; reaching them live needs an account at its tier ceiling.
 
 ---
 
-## Phase 10 — Automation, ops, release ⬜
+## Phase 10 — Automation, ops, release ✅ (code) · 🚫 (the two human items)
 
 | # | Task | Status | Requirements |
 |---|---|---|---|
-| 10.1 | `wa-send-template-action` workflow action | ⬜ | FR-WF-1 |
+| 10.1 | `wa-send-template-action` workflow action | ✅ | FR-WF-1 |
 | 10.2 | `wa-account-admin-route` — connect, test, disconnect, kv claim | ✅ | FR-ACC-1, D-3 |
-| 10.3 | `wa-webhook-replay-route` | ⬜ | §12.4 |
-| 10.4 | `wa-retention-purge` | ⬜ | SEC-9 |
-| 10.5 | `post-install` / `uninstall` hooks | ⬜ | AR-5 |
-| 10.6 | Default notification workflow provisioning | ⬜ | D-10 layer 3 |
-| 10.7 | Weekly compat CI against `twentycrm/twenty:latest` | ⬜ | NFR-M2, R-2 |
-| 10.8 | Load tests: burst, throttle, NFR-S5, 10k campaign | ⬜ | specs/12 §5 |
-| 10.9 | E2E on the production number | ⬜ | specs/12 §6 |
-| 10.10 | Security review: role matrix, consent block, secret scan | ⬜ | specs/12 Security |
-| 10.11 | Runbook rehearsal by ops | ⬜ | §12.2 |
+| 10.3 | `wa-webhook-replay-route` + the Diagnostics replay controls | ✅ | §12.4 |
+| 10.4 | `wa-retention-purge` | ✅ | SEC-9 |
+| 10.5 | `post-install` / `uninstall` hooks | ✅ | AR-5 |
+| 10.6 | Default notification workflow provisioning | ✅ | D-10 layer 3 |
+| 10.7 | Weekly compat CI against `twentycrm/twenty:latest` | ✅ | NFR-M2, R-2 |
+| 10.8 | Load tests: burst, throttle, NFR-S5, 10k campaign | ✅ in process · 🚫 on real infrastructure | specs/12 §5 |
+| 10.9 | E2E on the production number | 🚫 needs a handset and the number | specs/12 §6 |
+| 10.10 | Security review: role matrix, consent block, secret scan | ✅ | specs/12 Security |
+| 10.11 | Runbook rehearsal by ops | 🚫 needs an operator | §12.2 |
 
-**~8 days.**
+### What each one turned out to be
+
+**10.1** — the interesting part was not the send. `inputSchema` is positional over the *handler's
+parameters*, not a list of named fields: written as the spec sketched it, five array entries would
+declare a five-argument handler and bind none of them. It is one `object` entry whose `properties`
+are the inputs. A workflow author also supplies variables having never seen the template, so
+`domain/workflow-parameters.ts` binds `{ "1": "Ana" }` / `{ "nome": "Ana" }` / an already-resolved
+array onto the spec's own ordering — and anything it cannot resolve comes back **empty**, because
+empty is a named missing variable and refuses the send, while `null` stringified is a message a
+customer reads.
+
+**10.3** — replay re-enqueues through `jobsForChange`, the live fan-out, and re-resolves the
+account from the payload exactly as ingest did. The load-bearing detail is ordering: the row goes
+back to `RECEIVED` only *after* something was queued, since the other order removes it from the
+failed list with nothing scheduled to process it.
+
+**10.4** — webhook events are hard-destroyed (a soft-deleted row keeps its unique `dedupKey`, so a
+redelivery would collide with the tombstone and be discarded for ever), messages are *emptied*
+rather than deleted, and the "still holds content" predicate in the query is what stops the job
+re-blanking every old message on every run for ever while reporting success.
+
+**10.5** — post-install does not assign anyone to a role, and does not need to: `requireCaller`
+already treats a Twenty workspace administrator as a WhatsApp admin, and the install payload
+carries versions and no user, so "the installing user" is not knowable anyway. It does re-assert
+missing routing claims for connected accounts — a restore or an instance migration leaves an
+account record that looks perfectly healthy while every message for its number is discarded as
+unclaimed.
+
+**10.6** — the workflow is created as a **draft**. Activating a version is not in the app-facing
+API, and a workflow that writes a Task for every inbound message is a decision about a team's
+inbox rather than a side effect of a settings button. The direction filter is deliberately not
+written into the trigger JSON: the filter shape belongs to Twenty's workflow engine, and one this
+app guessed at would look present and match nothing. It is returned as a review note instead.
+
+**10.8** — every load target in specs/12 §5 is a claim about this app's *design* under volume, and
+those are decidable in process at the spec's real numbers: 3 000 deliveries keyed and routed, a
+sliding one-second window over the pacing plan, the two-cursor guarantee at a 10 000-recipient
+campaign, a 100 000-recipient snapshot. What is not decidable here is throughput of the platform
+underneath — queue latency, Core API round-trips, ack time under real HTTP — so that is part D of
+the release checklist rather than a test pretending to measure it.
+
+**10.10** — written as assertions rather than a document, because a review is only true on the day
+it is signed. The route table from specs/10 §3.4 is data in `src/__tests__/security.test.ts`; a
+new route with no entry fails the build, and the three read-only campaign actions that run at agent
+level are enumerated there so a fourth cannot join them by being added to a switch statement.
+
+### Deviations recorded
+
+- **Secret scanning checks for a *read*, not a name.** The settings card names
+  `META_VERIFY_TOKEN` on screen on purpose — telling an operator which variable to set is its job
+  — so a scan for the string fails on the one file doing the right thing and gets deleted. The
+  check is for `process.env.<NAME>` in browser-reachable source and in the built bundles.
+- **`/whatsapp/campaign` allows three agent-level actions** (`audienceOptions`, `preview`,
+  `preflight`) where specs/10 §3.4 says admin for all. They change nothing, send nothing, and
+  return CRM data an agent can already see; requiring an administrator to preview an audience
+  would only mean campaigns get built by administrators. Enumerated in the security test.
+- **CI is now pinned** to `.twenty-version` (`v2.31.1`) rather than tracking `latest`, which is
+  what R-2 asks for and what makes `compat.yml` meaningful.
+
+**Remaining: 10.9 and 10.11, plus part D of the checklist.** All three are scripted in
+[16-release-checklist.md](16-release-checklist.md) — the install rehearsal on a fresh workspace,
+the thirteen-step handset loop with the four steps that close phase 8's open questions
+(tier increment, `pacingObserved`, the delivered/read funnel, a real terminal failure), and the
+nine operational procedures. None of them can be run without the number and a person.
 
 ---
 
@@ -373,7 +440,7 @@ Only P-1 has been answered. The rest still gate design decisions:
 | **P-1** | Does Meta accept our GET handshake? | — | ✅ **passed** against real Meta |
 | P-2 | Rate limit on `/s/*` routes | 9.1 polling intervals | raise intervals to 10 s |
 | P-3 | Can the app role write `timelineActivity`? | 4.11 | downgrade FR-TL-1 to the WhatsApp tab |
-| P-4 | Does a soft-deleted row hold a unique index? | 10.4 | purge hard-destroys. *No longer gates campaigns: the snapshot upserts, so either answer is correct* |
+| P-4 | Does a soft-deleted row hold a unique index? | — | ✅ **no longer gates anything**: 10.4 took the fallback unconditionally. The purge hard-destroys webhook events, so the answer cannot change its behaviour, and campaigns were never gated because the snapshot upserts |
 | P-5 | Can the Core API filter `additionalPhones`? | 4.8 | derived indexed array field |
 | P-6 | Front-component chat feasibility | — | ✅ **answered and acted on**: the chat is buildable. Three doc'd APIs were wrong, the widget needed an explicit height, `clientWidth` measures where `getBoundingClientRect` does not, and `/s/*` auth was broken for every human until the caller's own token was forwarded (D-53) |
 | P-7 | Row-level permission predicates | SEC-7 enforcement | route-level filtering, limitation documented |
@@ -384,24 +451,36 @@ Only P-1 has been answered. The rest still gate design decisions:
 ## Critical path
 
 ```
-Phase 2 tail (2d) → Phase 3 (3d) → Phase 4 (5d) → Phase 5 (6d) ── first observable loop
-                                                      ↓
-                                        Phase 6 ✅ → Phase 7 ✅ → Phase 8 ✅
-                                                      ↓
-                              Phase 9 (15d, P-6 gated) → Phase 10 (8d) → release gate
+Phases 0–8 ✅ ──► Phase 9 ✅ ──► Phase 10 ✅ (code) ──┐
+                                                      ├──► release gate
+                    16-release-checklist.md 🚫 ───────┘
+                    (A install rehearsal · B handset loop · C procedures · D real-infra load)
 ```
 
-**~23 working days of engineering remaining** — phase 9 (15d) and phase 10 (8d) — or roughly 5
-weeks for one engineer. Phases 0–8 are done, which is the whole server side: every object, every
-logic function that talks to Meta or to the CRM, and the campaign pipeline. What is left is the
-user interface and the operational tail.
+**Zero engineering days remain on the plan.** Every task in phases 0–10 that is code is written,
+typechecked, linted and unit-tested; the suite is 74 files and ~1 690 assertions and runs in about
+two seconds.
 
-Phase 9 is the schedule risk: it is the largest block, it is gated on an unrun probe, and Twenty
-documents front components as "under active development".
+The release gate is now a **scheduling** problem rather than a build one. What stands between here
+and it is [16-release-checklist.md](16-release-checklist.md): a fresh-workspace install rehearsal,
+a thirteen-step loop from a real handset against the real number, nine operational procedures
+exercised once each, and one load run on real infrastructure. Roughly a day of an operator's time
+and half a day of an engineer's, plus whatever the corrections turn out to cost.
+
+Two things about that gate are worth stating plainly:
+
+- **Four of phase 8's claims are still unproven and only one campaign can prove them.** The tier
+  increment, `pacingObserved`, the failure-rate breaker and the delivered/read funnel are each
+  unit-tested and none has met Meta. Steps B14–B17 close all four.
+- **Part A is the one most likely to find something.** A rehearsal on a workspace where nobody has
+  ever done a step by hand is the only way to find the step that only ever worked because somebody
+  did.
 
 ---
 
 ## Ordering advice
+
+The build ordering below is kept as a record of what worked; it is no longer live guidance.
 
 1. **Finish phase 2 before starting logic functions.** Pure modules are 20× cheaper to test.
 2. **Phase 3 and 4 before phase 5.** Twenty-eight handlers sharing conventions beats 28
@@ -411,6 +490,11 @@ documents front components as "under active development".
 4. **Phase 5 before phase 6** — the fixtures already exist, so ingestion is testable today while
    outbound needs the provider and a test number.
 5. **Do not start phase 9 without P-6.**
+
+For the checklist, the ordering that matters is: **A before B**, because an install rehearsal that
+finds a broken step invalidates whatever the loop proved on the old workspace; and **B12 last of
+the B steps that spend money**, because it is the only one that messages someone who did not ask
+to be part of a test.
 
 ---
 

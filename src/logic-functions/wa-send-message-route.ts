@@ -43,7 +43,7 @@ import {
   listAccounts,
   type WhatsappAccountRecord,
 } from '../server/repositories/accounts';
-import { asJson, toDate } from '../server/repositories/base';
+import { asJson, isUuid, toDate } from '../server/repositories/base';
 import { findMessageByClientToken } from '../server/repositories/messages';
 import { findPersonById } from '../server/repositories/people';
 import { findTemplateById } from '../server/repositories/templates';
@@ -419,9 +419,17 @@ const resolveThread = async (
   }
 
   if (typeof body.accountId === 'string') {
-    const named =
-      (await findAccountById(body.accountId)) ??
-      (await findAccountByPhoneNumberId(body.accountId));
+    /**
+     * Only an id-shaped value reaches the id lookup. `id` is a `UUIDFilter` and
+     * the server validates the shape first, so `findAccountById('123456789')`
+     * raises instead of answering "not found" — and the `??` fallback to the
+     * `phone_number_id`, which is the form an operator actually has to hand,
+     * would never be reached.
+     */
+    const named = isUuid(body.accountId)
+      ? ((await findAccountById(body.accountId)) ??
+        (await findAccountByPhoneNumberId(body.accountId)))
+      : await findAccountByPhoneNumberId(body.accountId);
 
     if (named === null) return { ok: false, status: 404, error: 'Unknown account' };
 

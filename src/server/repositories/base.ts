@@ -64,6 +64,25 @@ export const pageOf = <T>(
  */
 
 /**
+ * Whether a value can be handed to an `id` filter at all.
+ *
+ * `id` is a `UUIDFilter`, and the server validates the *shape* before it looks
+ * anything up — so `findAccountById('123456789')` does not answer "not found",
+ * it raises. That matters wherever a caller may legitimately supply either an
+ * id or a human-facing alternative: `findAccountById(x) ?? findAccountByPhoneNumberId(x)`
+ * reads as a fallback chain and is not one, because the first call throws
+ * before the `??` is ever reached.
+ *
+ * The workflow action is where this bites hardest — a step author types a
+ * template *name*, since a select's options cannot be resolved at design time —
+ * but the same shape appears anywhere a `phone_number_id` may stand in for an
+ * account id.
+ */
+export const isUuid = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim());
+
+/**
  * Every repository read and write funnels through these two, so the retry
  * policy and the call counters cannot be forgotten at a call site.
  */

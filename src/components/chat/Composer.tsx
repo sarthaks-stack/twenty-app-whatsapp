@@ -98,14 +98,28 @@ export type ComposerProps = {
 export const MAX_TEXT_LENGTH = 4096;
 
 /**
- * How much of the conversation a composer panel is allowed to take.
+ * How much of the conversation a composer panel takes.
  *
- * A template with six variables rendered a form taller than the pane, and the
+ * A template with six variables rendered a form taller than the pane and the
  * transcript went with it — a rep filling one in could not see the message they
- * were answering, or check the name they were about to type. The cap is what
- * keeps the conversation on screen; the panel scrolls inside it.
+ * were answering, or check the name they were about to type.
+ *
+ * **A definite height, not a maximum, and not a percentage.** Both of the
+ * obvious alternatives failed here, and the reasons are worth keeping:
+ *
+ * - A *percentage* resolves against a containing block whose own height comes
+ *   from this element — circular, and every engine breaks the tie differently.
+ * - A *maximum* over a scrolling child is no constraint at all: the child sets
+ *   `min-height: 0` so it can scroll, which also means it contributes nothing
+ *   to the intrinsic height, so the panel sized itself to its header and footer
+ *   and squeezed the fields into a one-row strip. Giving the child a minimum
+ *   instead just moved the fight — the minimum won and the panel overflowed,
+ *   taking Send and Cancel past the bottom edge.
+ *
+ * One definite height ends the argument: the panel is exactly this tall, its
+ * middle scrolls, and the transcript takes what is left.
  */
-const PANEL_MAX_HEIGHT = '62%';
+const PANEL_HEIGHT = '18rem';
 
 /**
  * The chrome every composer panel wears: a title, a collapse toggle and a close.
@@ -158,7 +172,8 @@ const PanelFrame = ({
         display: 'flex',
         flexDirection: 'column',
         minHeight: 0,
-        maxHeight: collapsed ? undefined : PANEL_MAX_HEIGHT,
+        ...(collapsed ? {} : { height: PANEL_HEIGHT }),
+        overflow: 'hidden',
         borderTop: `1px solid ${theme.border.color.light}`,
       }}
     >
@@ -559,6 +574,13 @@ export const Composer = ({
       style={{
         display: 'flex',
         flexDirection: 'column',
+        /*
+          Fixed, never squeezed. The transcript above is the elastic one
+          (`flex: 1 1 auto`, `min-height: 0`) and gives up whatever the composer
+          needs; the collapse toggle is how a rep gets it back.
+        */
+        flex: '0 0 auto',
+        minHeight: 0,
         borderTop: `1px solid ${theme.border.color.light}`,
         background: theme.background.primary,
       }}

@@ -506,6 +506,174 @@ describe('scope=thread', () => {
   });
 });
 
+/**
+ * The three things the thread scope learned for the advanced ThreadView. All
+ * three are decisions the browser is not allowed to make for itself (AR-17,
+ * D-53), so all three have to be right *here*.
+ */
+describe('scope=thread, for the rich transcript', () => {
+  it('answers a capability per composer action, not one blanket verdict', async () => {
+    seedAccount();
+    seedThread();
+
+    const { body } = await call({ scope: 'thread', id: 'thr-1' });
+
+    expect(body.capabilities.text.allowed).toBe(true);
+    expect(body.capabilities.reaction.allowed).toBe(true);
+    expect(body.capabilities.interactive.allowed).toBe(true);
+  });
+
+  it('leaves only the template path open once the window has closed', async () => {
+    seedAccount();
+    seedThread({ serviceWindowExpiresAt: new Date(Date.now() - HOUR).toISOString() });
+
+    const { body } = await call({ scope: 'thread', id: 'thr-1' });
+
+    expect(body.capabilities.template.allowed).toBe(true);
+    expect(body.capabilities.media.reason).toBe('WINDOW_CLOSED');
+    expect(body.capabilities.reaction.reason).toBe('WINDOW_CLOSED');
+  });
+
+  /**
+   * A reaction belongs on the bubble it is about. Rendering the reaction
+   * *record* as well put a bubble saying "👍" between two sentences, breaking
+   * the conversation in half to repeat something shown two rows up.
+   */
+  it('keeps reaction rows out of the transcript', async () => {
+    seedAccount();
+    seedThread();
+    seedMessage({ id: 'm-text', wamid: 'wamid.1', body: 'Bom dia' });
+    seedMessage({
+      id: 'm-reaction',
+      messageType: 'REACTION',
+      body: '👍',
+      reactionTargetWamid: 'wamid.1',
+    });
+
+    const { body } = await call({ scope: 'thread', id: 'thr-1' });
+
+    expect(body.messages.map((message: Envelope) => message.id)).toEqual(['m-text']);
+  });
+
+  it('says which reactions belong to the rep who is reading', async () => {
+    seedAccount();
+    seedThread();
+    seedMessage({
+      wamid: 'wamid.1',
+      payload: {
+        reactions: [
+          { workspaceMemberId: 'wm-1', emoji: '🙏' },
+          { waId: '244900000001', emoji: '👍' },
+        ],
+      },
+    });
+
+    const { body } = await call({ scope: 'thread', id: 'thr-1' });
+
+    expect(body.messages[0].reactions).toEqual([
+      {
+        actorId: 'wm-1',
+        actorLabel: null,
+        actorKind: 'WORKSPACE_MEMBER',
+        emoji: '🙏',
+        isMine: true,
+      },
+      {
+        actorId: '244900000001',
+        actorLabel: 'Ana',
+        actorKind: 'CONTACT',
+        emoji: '👍',
+        isMine: false,
+      },
+    ]);
+  });
+
+  it('resolves a quote from the same page without a second read', async () => {
+    seedAccount();
+    seedThread();
+    seedMessage({ id: 'm-quoted', wamid: 'wamid.1', body: 'A morada é ali' });
+    seedMessage({
+      id: 'm-reply',
+      direction: 'OUTBOUND',
+      body: 'Chego às 10:00',
+      contextWamid: 'wamid.1',
+    });
+
+    const { body } = await call({ scope: 'thread', id: 'thr-1' });
+    const reply = body.messages.find((message: Envelope) => message.id === 'm-reply');
+
+    expect(reply.quote).toMatchObject({
+      wamid: 'wamid.1',
+      direction: 'INBOUND',
+      senderLabel: 'Ana',
+      preview: 'A morada é ali',
+    });
+  });
+
+  /**
+   * The case a per-bubble lookup could never handle: the quoted message sits
+   * outside the loaded window, so the route asks for it once for the whole page.
+   */
+  it('resolves a quote that reaches outside the loaded page', async () => {
+    seedAccount();
+    seedThread();
+    seedMessage({
+      id: 'm-old',
+      wamid: 'wamid.old',
+      body: 'Combinado',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    seedMessage({ id: 'm-reply', contextWamid: 'wamid.old' });
+
+    const { body } = await call({ scope: 'thread', id: 'thr-1', limit: '1' });
+    const reply = body.messages.find((message: Envelope) => message.id === 'm-reply');
+
+    expect(body.messages).toHaveLength(1);
+    expect(reply.quote?.preview).toBe('Combinado');
+  });
+
+  /**
+   * A quote we cannot describe stays null rather than becoming a stub. "In
+   * reply to a message" told the reader nothing they could act on — which is
+   * the finding the whole quote projection exists to answer.
+   */
+  it('leaves an unresolvable quote null', async () => {
+    seedAccount();
+    seedThread();
+    seedMessage({ id: 'm-reply', contextWamid: 'wamid.gone' });
+
+    const { body } = await call({ scope: 'thread', id: 'thr-1' });
+
+    expect(body.messages[0].quote).toBeNull();
+  });
+
+  it('projects each message as a content union the renderer switches on', async () => {
+    seedAccount();
+    seedThread();
+    seedMessage({
+      messageType: 'LOCATION',
+      body: 'Talatona',
+      payload: {
+        latitude: -8.9126,
+        longitude: 13.2334,
+        name: 'Talatona',
+        address: 'Rua Centro',
+      },
+    });
+
+    const { body } = await call({ scope: 'thread', id: 'thr-1' });
+
+    expect(body.messages[0].content).toEqual({
+      kind: 'location',
+      name: 'Talatona',
+      address: 'Rua Centro',
+      latitude: -8.9126,
+      longitude: 13.2334,
+    });
+  });
+});
+
 describe('scope=inbox', () => {
   const seedFour = () => {
     seedAccount();

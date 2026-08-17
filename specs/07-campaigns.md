@@ -58,8 +58,8 @@ loses work.
 
 "Build audience" then moves the campaign to `snapshotting`.
 
-Only *WhatsApp Admin* may create, build, launch, pause, resume or cancel (SEC-12). Agents see
-campaigns read-only.
+Only *WhatsApp Admin* may create, build, launch, pause, resume, cancel or delete an unlaunched
+campaign (SEC-12). Agents see campaigns read-only.
 
 ---
 
@@ -286,10 +286,49 @@ and resume does not reset the safety net.
 | `pause` | `running|tier_waiting → paused`; already-queued messages still send — the queue cannot be recalled, and the UI says so |
 | `resume` | `paused → running` after re-running all guardrails |
 | `cancel` | any non-terminal → `cancelled`; all `pending` recipients → `skipped` with `errorCode='CANCELLED'`; already-sent messages keep tracking (FR-CAM-8) |
+| `delete` | soft-deletes a campaign **that never launched** (`draft`, `snapshotting` or `ready`, with no `sentCount`, `queuedCount` or `startedAt`) and its snapshot rows; refuses everything else with 409 |
+| `archive` / `unarchive` | sets or clears `archivedAt` on a campaign that has **stopped** (`completed`, `cancelled`, `failed`); hides it from the campaigns page and nothing else. Refuses a campaign that is still going with 409; idempotent, answering `changed: false` |
 
 Every action: admin-only (SEC-12), audit-logged with the actor, the previous state and the
 audience-definition snapshot, and idempotent (repeating `pause` on a paused campaign is a no-op,
 not an error).
+
+**A campaign that ever ran cannot be deleted, by anyone, anywhere.** Its counters, exclusion
+breakdown and recipient rows are what the launch audit line points at, so a cancelled or completed
+campaign is evidence of a bulk send to real people — and evidence that whoever is embarrassed by it
+can delete is not evidence. The rule lives in `canDeleteCampaign` (`domain/campaign/transitions.ts`)
+and is enforced twice: this route checks it, and the *WhatsApp Admin* role withholds
+`canSoftDeleteObjectRecords` on `whatsappCampaign` and `whatsappCampaignRecipient` so the platform's
+own record delete — one gesture with no notion of state — cannot bypass it (10 §roles). Stopping a
+campaign is `cancel`; there is no follow-up that makes it never have happened.
+
+### 9.1 The archive
+
+A record that must be kept still has to be got out of the way, which is the whole of what archiving
+is: `archivedAt` set, nothing else touched. No status moves, no counter changes, no recipient row is
+written, and no worker reads the field — an archived campaign keeps receiving delivery statuses and
+its replies keep landing in the inbox exactly as before. The rule is `canArchiveCampaign`
+(`domain/campaign/transitions.ts`): only a campaign that has **stopped**.
+
+Three consequences worth stating, because each is a bug in the version that does not have them:
+
+- **The list and the archive are two server-side pages, not one page filtered in the browser.** The
+  campaigns feed asks for the newest 50; filtering client-side would mean a workspace that archived
+  50 campaigns receives 50 hidden rows and renders "Ainda não há campanhas." — the archive hiding the
+  live campaigns instead of the past ones. `GET /s/whatsapp/feed?scope=campaign&archived=1` is the
+  other side of the same line, and `listCampaigns` orders the archive by `archivedAt` because "what
+  did I put away recently" is the only question anyone asks of one.
+- **A campaign that moves again is unarchived automatically.** `transitionCampaign` clears
+  `archivedAt` on any real transition, which in practice means `failed → paused`: an admin who
+  archived a failed campaign, fixed the template and recovered it must not be left with a campaign
+  they can resume and cannot see. A no-op transition leaves the archive alone, or repeating `pause`
+  would undo an archive.
+- **Nothing is both archivable and deletable.** What may be archived is what finished; what may be
+  deleted is what never started. A test asserts the two sets do not intersect for any status.
+
+Archiving is deliberately **not** behind a confirmation modal, unlike cancel and delete: it hides
+nothing that cannot be shown again in one click, and a dialog in front of a tidy-up is what makes an
+operator leave forty finished campaigns on the page instead of filing them.
 
 ---
 

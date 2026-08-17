@@ -120,3 +120,51 @@ describe('what a transition does besides', () => {
     expect(audit.mock.calls[0][0].details).toMatchObject({ reason: null });
   });
 });
+
+/**
+ * Archiving is a decision about a campaign that has finished. A campaign that
+ * moves again has not finished, so the transition takes it back out of the
+ * archive — otherwise an admin who archived a failed campaign, then fixed the
+ * template and recovered it, is left with a campaign they can resume and cannot
+ * see.
+ */
+describe('a transition and the archive', () => {
+  const archived = (status: string) =>
+    ({
+      id: 'c1',
+      status,
+      name: 'Festa',
+      templateId: 't1',
+      accountId: 'a1',
+      archivedAt: '2026-08-16T09:00:00.000Z',
+    }) as never;
+
+  it('unarchives a campaign that really moves', async () => {
+    await transitionCampaign({ campaign: archived('FAILED'), to: 'PAUSED' });
+
+    expect(patchOf()).toMatchObject({ status: 'PAUSED', archivedAt: null });
+    expect(audit.mock.calls[0][0].details).toMatchObject({ unarchived: true });
+  });
+
+  /**
+   * A no-op must not unarchive. Repeating an action is idempotent by design
+   * (FR-CAM-8), and "pause an already-paused campaign" quietly pulling a
+   * campaign back onto the page would make the archive undo itself.
+   */
+  it('leaves the archive alone on a no-op', async () => {
+    await transitionCampaign({
+      campaign: archived('PAUSED'),
+      to: 'PAUSED',
+      patch: { sentCount: 40 },
+    });
+
+    expect(patchOf()).toEqual({ sentCount: 40 });
+  });
+
+  it('says nothing about the archive for a campaign that was not in it', async () => {
+    await transitionCampaign({ campaign: campaign('RUNNING'), to: 'PAUSED' });
+
+    expect(patchOf()).not.toHaveProperty('archivedAt');
+    expect(audit.mock.calls[0][0].details).not.toHaveProperty('unarchived');
+  });
+});

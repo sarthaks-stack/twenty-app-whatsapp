@@ -37,6 +37,7 @@ const CAMPAIGN_FIELDS = {
   maxFailureRatePct: true,
   pacingObserved: true,
   lastRunTickAt: true,
+  archivedAt: true,
   testRecipientPhones: true,
   templateId: true,
   accountId: true,
@@ -69,6 +70,7 @@ export type WhatsappCampaignRecord = {
   maxFailureRatePct?: number | null;
   pacingObserved?: boolean | null;
   lastRunTickAt?: string | null;
+  archivedAt?: string | null;
   testRecipientPhones?: string[] | null;
   templateId?: string | null;
   accountId?: string | null;
@@ -131,20 +133,40 @@ export const listCampaignsByStatus = async (
  * Ordered by `createdAt` rather than `startedAt`: a draft has never started, and
  * ordering on a column that is null for the campaign someone is in the middle of
  * building would file it last.
+ *
+ * **Archived campaigns are excluded here, in the query.** Filtering them out in
+ * the browser would have been three lines instead of a parameter, and wrong for
+ * the case archiving exists for: the page asks for the newest 50, so a workspace
+ * that archived 50 old campaigns would receive 50 hidden rows and render an
+ * empty list under "Ainda não há campanhas." — the archive would have hidden the
+ * live campaigns instead of the past ones. `archived: true` asks for the other
+ * side of the same line, which is what makes the archive reachable.
  */
-export const listCampaigns = async (limit = 50): Promise<WhatsappCampaignRecord[]> => {
+export const listCampaigns = async (
+  limit = 50,
+  { archived = false }: { archived?: boolean } = {},
+): Promise<WhatsappCampaignRecord[]> => {
   const result = await query(
     (client) =>
       client.query({
         whatsappCampaigns: {
           __args: {
-            orderBy: [{ createdAt: 'DescNullsLast' }],
+            filter: { archivedAt: { is: archived ? 'NOT_NULL' : 'NULL' } },
+            /**
+             * The archive is ordered by *when it was filed*, not by when the
+             * campaign was created: "what did I put away recently" is the only
+             * question anyone asks of an archive, and it is not the same order
+             * as the live list's.
+             */
+            orderBy: archived
+              ? [{ archivedAt: 'DescNullsLast' }]
+              : [{ createdAt: 'DescNullsLast' }],
             first: limit,
           },
           edges: { node: CAMPAIGN_FIELDS },
         },
       }),
-    'campaigns.list',
+    archived ? 'campaigns.listArchived' : 'campaigns.list',
   );
 
   return nodesOf<WhatsappCampaignRecord>(result.whatsappCampaigns);
@@ -208,6 +230,8 @@ export type CampaignPatch = {
   lastRunTickAt?: string;
   startedAt?: string | null;
   completedAt?: string | null;
+  /** Set to hide a finished campaign from the campaigns page; `null` unhides it. */
+  archivedAt?: string | null;
   templateId?: string | null;
   accountId?: string | null;
   ownerId?: string | null;
@@ -217,6 +241,26 @@ export const patchCampaign = async (id: string, data: CampaignPatch): Promise<vo
   await query(
     (client) => client.mutation({ updateWhatsappCampaign: { __args: { id, data }, id: true } }),
     'campaigns.patch',
+  );
+};
+
+/**
+ * Soft-deletes a campaign.
+ *
+ * Soft, not hard: `destroy*` is confined to the erasure routine by an
+ * architecture test, and a deleted campaign should still be recoverable from
+ * the workspace's deleted records for as long as the platform keeps them —
+ * "delete" here means "take it off the campaigns page", not "make it
+ * unrecoverable".
+ *
+ * Only ever called for a campaign `canDeleteCampaign` cleared, which is a
+ * campaign that has never sent anything. Nothing in this module enforces that;
+ * the route does, once, before it calls this.
+ */
+export const deleteCampaign = async (id: string): Promise<void> => {
+  await query(
+    (client) => client.mutation({ deleteWhatsappCampaign: { __args: { id }, id: true } }),
+    'campaigns.delete',
   );
 };
 

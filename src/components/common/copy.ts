@@ -295,6 +295,270 @@ const COPY = {
     en: 'The owner could not be changed.',
   },
 
+  // ─── Message actions (spec §"Message action model") ───────────────────────
+  'chat.action.react': { pt: 'Reagir', en: 'React' },
+  'chat.action.reply': { pt: 'Responder', en: 'Reply' },
+  'chat.action.copy': { pt: 'Copiar texto', en: 'Copy text' },
+  'chat.action.copied': { pt: 'Copiado', en: 'Copied' },
+  'chat.action.copyFailed': {
+    pt: 'Não foi possível copiar.',
+    en: 'The text could not be copied.',
+  },
+  'chat.action.download': { pt: 'Transferir', en: 'Download' },
+  'chat.action.openImage': { pt: 'Abrir imagem', en: 'Open image' },
+  'chat.action.openVideo': { pt: 'Abrir vídeo', en: 'Open video' },
+  'chat.action.openMap': { pt: 'Abrir mapa', en: 'Open map' },
+  'chat.action.openDocument': { pt: 'Abrir documento', en: 'Open document' },
+  'chat.action.moreEmoji': { pt: 'Mais emoji', en: 'More emoji' },
+  'chat.action.removeReaction': { pt: 'Remover a sua reacção', en: 'Remove your reaction' },
+  'chat.action.reactWith': { pt: 'Reagir com {emoji}', en: 'React with {emoji}' },
+  'chat.action.close': { pt: 'Fechar', en: 'Close' },
+  'chat.action.forMessage': {
+    pt: 'Acções para esta mensagem',
+    en: 'Actions for this message',
+  },
+
+  // ─── Reply and quote strip (spec §"Reply UX") ─────────────────────────────
+  'chat.replyingTo': { pt: 'A responder a {sender}', en: 'Replying to {sender}' },
+  'chat.you': { pt: 'Si', en: 'You' },
+  'chat.cancelReply': { pt: 'Cancelar resposta', en: 'Cancel reply' },
+  'chat.quoteUnavailable': {
+    pt: 'Mensagem original indisponível',
+    en: 'Original message unavailable',
+  },
+
+  // ─── What each content type is called ─────────────────────────────────────
+  'chat.type.TEXT': { pt: 'Mensagem', en: 'Message' },
+  'chat.type.IMAGE': { pt: 'Imagem', en: 'Photo' },
+  'chat.type.VIDEO': { pt: 'Vídeo', en: 'Video' },
+  'chat.type.AUDIO': { pt: 'Áudio', en: 'Audio' },
+  'chat.type.DOCUMENT': { pt: 'Documento', en: 'Document' },
+  'chat.type.STICKER': { pt: 'Autocolante', en: 'Sticker' },
+  'chat.type.LOCATION': { pt: 'Localização', en: 'Location' },
+  'chat.type.CONTACTS': { pt: 'Contacto', en: 'Contact' },
+  'chat.type.TEMPLATE': { pt: 'Modelo', en: 'Template' },
+  'chat.type.INTERACTIVE': { pt: 'Mensagem interactiva', en: 'Interactive message' },
+  'chat.type.BUTTON_REPLY': { pt: 'Resposta rápida', en: 'Quick reply' },
+  'chat.type.LIST_REPLY': { pt: 'Opção da lista', en: 'List option' },
+  'chat.type.REACTION': { pt: 'Reacção', en: 'Reaction' },
+  'chat.type.SYSTEM': { pt: 'Evento do sistema', en: 'System event' },
+  /**
+   * Reached only through `chat.type.${type}`, like every row above it — but this
+   * is the one a scanner would never see used, because `UNSUPPORTED` is the
+   * branch that exists precisely for types nobody has written code for.
+   */
+  'chat.type.UNSUPPORTED': { pt: 'Mensagem não suportada', en: 'Unsupported message' },
+
+  // ─── Rich renderers (spec §"Rich message renderer registry") ──────────────
+  'chat.voiceMessage': { pt: 'Mensagem de voz', en: 'Voice message' },
+  'chat.audioFile': { pt: 'Ficheiro de áudio', en: 'Audio file' },
+  'chat.duration': { pt: '{minutes}:{seconds}', en: '{minutes}:{seconds}' },
+  'chat.imageFailed': {
+    pt: 'A imagem não pôde ser mostrada.',
+    en: 'The image could not be shown.',
+  },
+  'chat.playVideo': { pt: 'Reproduzir', en: 'Play' },
+  'chat.mediaPending': { pt: 'A transferir…', en: 'Downloading…' },
+  'chat.selectedQuickReply': {
+    pt: 'Escolheu uma resposta rápida',
+    en: 'Selected a quick reply',
+  },
+  'chat.selectedFromList': { pt: 'Escolheu da lista', en: 'Selected from the list' },
+  'chat.flowResponse': { pt: 'Resposta a um formulário', en: 'Form response' },
+  'chat.interactiveButtons': {
+    pt: 'Botões de resposta rápida',
+    en: 'Quick reply buttons',
+  },
+  'chat.interactiveList': { pt: 'Mensagem com lista', en: 'List message' },
+  'chat.listOptions': { pt: '{count} opções', en: '{count} options' },
+  'chat.viewOptions': { pt: 'Ver opções', en: 'View options' },
+  'chat.hideOptions': { pt: 'Ocultar opções', en: 'Hide options' },
+  'chat.systemEvent': { pt: 'Evento do sistema', en: 'System event' },
+  'chat.unsupportedBody': {
+    pt: 'Esta mensagem chegou num formato que a aplicação ainda não mostra. O conteúdo original ficou guardado.',
+    en: 'This message arrived in a format the app does not render yet. The original is stored.',
+  },
+
+  // ─── Location and contact cards (spec §"Location and vCard design") ───────
+  'chat.locationShared': { pt: 'Localização partilhada', en: 'Shared location' },
+  'chat.coordinates': { pt: '{latitude}, {longitude}', en: '{latitude}, {longitude}' },
+  'chat.contactShared': { pt: 'Contacto partilhado', en: 'Shared contact' },
+  'chat.openPerson': { pt: 'Abrir contacto', en: 'Open person' },
+  'chat.createPerson': { pt: 'Criar contacto', en: 'Create person' },
+  'chat.creatingPerson': { pt: 'A criar…', en: 'Creating…' },
+  'chat.contactReview': {
+    pt: 'Estes dados são de terceiros. Reveja antes de criar um contacto.',
+    en: 'This is third-party data. Review it before creating a person.',
+  },
+
+  // ─── Message details panel ────────────────────────────────────────────────
+  'chat.detail.sent': { pt: 'Enviada', en: 'Sent' },
+  'chat.detail.delivered': { pt: 'Entregue', en: 'Delivered' },
+  'chat.detail.read': { pt: 'Lida', en: 'Read' },
+  'chat.detail.accepted': { pt: 'Aceite pela Meta', en: 'Accepted by Meta' },
+  'chat.detail.played': { pt: 'Ouvida', en: 'Played' },
+  'chat.detail.failed': { pt: 'Falhou', en: 'Failed' },
+  'chat.detail.type': { pt: 'Tipo', en: 'Type' },
+  'chat.detail.template': { pt: 'Modelo', en: 'Template' },
+  'chat.detail.language': { pt: 'Idioma', en: 'Language' },
+  'chat.detail.category': { pt: 'Categoria', en: 'Category' },
+  'chat.detail.file': { pt: 'Ficheiro', en: 'File' },
+  'chat.detail.size': { pt: 'Tamanho', en: 'Size' },
+  'chat.detail.buttonId': { pt: 'Identificador do botão', en: 'Button id' },
+  'chat.detail.rowId': { pt: 'Identificador da linha', en: 'Row id' },
+  'chat.detail.organization': { pt: 'Organização', en: 'Organisation' },
+  'chat.detail.email': { pt: 'Email', en: 'Email' },
+  'chat.detail.reactions': { pt: 'Reacções', en: 'Reactions' },
+  'chat.detail.attempts': { pt: 'Tentativas', en: 'Attempts' },
+
+  // ─── Composer ＋ sheet (spec §"Composer redesign") ─────────────────────────
+  'chat.attach': { pt: 'Anexar', en: 'Attach' },
+  'chat.collapsePanel': { pt: 'Recolher e ver a conversa', en: 'Collapse and see the conversation' },
+  'chat.expandPanel': { pt: 'Expandir', en: 'Expand' },
+  'chat.attachTitle': { pt: 'Enviar…', en: 'Send…' },
+  'chat.emoji': { pt: 'Emoji', en: 'Emoji' },
+  'chat.attachPhoto': { pt: 'Foto ou vídeo', en: 'Photo or video' },
+  'chat.attachDocument': { pt: 'Documento', en: 'Document' },
+  'chat.attachVoice': { pt: 'Mensagem de voz', en: 'Voice message' },
+  'chat.attachLocation': { pt: 'Localização', en: 'Location' },
+  'chat.attachContact': { pt: 'Contacto', en: 'Contact' },
+  'chat.attachQuickReplies': { pt: 'Respostas rápidas', en: 'Quick replies' },
+  'chat.attachList': { pt: 'Mensagem com lista', en: 'List message' },
+  'chat.attachTemplate': { pt: 'Modelo aprovado', en: 'Approved template' },
+  'chat.unavailableHere': {
+    pt: 'Indisponível nesta conversa',
+    en: 'Not available in this conversation',
+  },
+  /**
+   * The one entry that describes a *platform* limit rather than a WhatsApp
+   * rule. Written as a sentence a rep can act on, because "unsupported" with no
+   * alternative is the kind of dead end the empty-state work removed elsewhere.
+   */
+  'chat.deviceUploadUnavailable': {
+    pt: 'Ainda não é possível escolher um ficheiro do dispositivo aqui. Carregue-o para o Twenty e anexe-o a partir dos ficheiros.',
+    en: 'Choosing a file from this device is not possible here yet. Upload it to Twenty and attach it from your files.',
+  },
+
+  // ─── Sending media from Twenty's own files ────────────────────────────────
+  'chat.fileUrlLabel': { pt: 'Endereço do ficheiro no Twenty', en: 'Twenty file URL' },
+  'chat.fileUrlHint': {
+    pt: 'Copie o endereço do ficheiro a partir do registo no Twenty.',
+    en: 'Copy the file’s address from its record in Twenty.',
+  },
+  'chat.fileNameLabel': { pt: 'Nome do ficheiro', en: 'File name' },
+  'chat.captionLabel': { pt: 'Legenda (opcional)', en: 'Caption (optional)' },
+  'chat.mediaKindLabel': { pt: 'Tipo de anexo', en: 'Attachment type' },
+  'chat.sendAttachment': { pt: 'Enviar anexo', en: 'Send attachment' },
+  'chat.fileUrlRequired': {
+    pt: 'Indique o endereço do ficheiro.',
+    en: 'Enter the file’s address.',
+  },
+  'chat.fileUrlInvalid': {
+    pt: 'Este endereço não é válido.',
+    en: 'That address is not valid.',
+  },
+
+  // ─── Voice recording ──────────────────────────────────────────────────────
+  'chat.recordStart': { pt: 'Gravar mensagem de voz', en: 'Record a voice message' },
+  'chat.recordStop': { pt: 'Parar gravação', en: 'Stop recording' },
+  'chat.recording': { pt: 'A gravar… {duration}', en: 'Recording… {duration}' },
+  'chat.recordReview': { pt: 'Ouça antes de enviar.', en: 'Listen before sending.' },
+  'chat.recordDiscard': { pt: 'Descartar', en: 'Discard' },
+  'chat.recordUnavailable': {
+    pt: 'A gravação de áudio não está disponível neste navegador.',
+    en: 'Audio recording is not available in this browser.',
+  },
+  'chat.recordDenied': {
+    pt: 'Sem acesso ao microfone. Autorize-o no navegador e tente de novo.',
+    en: 'No microphone access. Allow it in the browser and try again.',
+  },
+  'chat.recordUploading': { pt: 'A carregar a gravação…', en: 'Uploading the recording…' },
+  'chat.recordUploadFailed': {
+    pt: 'Não foi possível carregar a gravação.',
+    en: 'The recording could not be uploaded.',
+  },
+
+  // ─── Location composer ────────────────────────────────────────────────────
+  'chat.locationName': { pt: 'Nome do local (opcional)', en: 'Place name (optional)' },
+  'chat.locationAddress': { pt: 'Morada (opcional)', en: 'Address (optional)' },
+  'chat.latitude': { pt: 'Latitude', en: 'Latitude' },
+  'chat.longitude': { pt: 'Longitude', en: 'Longitude' },
+  'chat.sendLocation': { pt: 'Enviar localização', en: 'Send location' },
+  'chat.coordinatesRequired': {
+    pt: 'Indique uma latitude entre -90 e 90 e uma longitude entre -180 e 180.',
+    en: 'Enter a latitude between -90 and 90 and a longitude between -180 and 180.',
+  },
+
+  // ─── Contact composer ─────────────────────────────────────────────────────
+  'chat.contactName': { pt: 'Nome', en: 'Name' },
+  'chat.contactPhone': { pt: 'Telefone', en: 'Phone' },
+  'chat.contactOrganization': { pt: 'Organização (opcional)', en: 'Organisation (optional)' },
+  'chat.sendContact': { pt: 'Enviar contacto', en: 'Send contact' },
+  'chat.contactNameRequired': { pt: 'Indique um nome.', en: 'Enter a name.' },
+  'chat.useThisPerson': { pt: 'Usar este contacto', en: 'Use this person' },
+
+  // ─── Interactive builders (spec §"Interactive-message authoring") ─────────
+  'builder.header': { pt: 'Cabeçalho (opcional)', en: 'Header (optional)' },
+  'builder.body': { pt: 'Texto', en: 'Body' },
+  'builder.footer': { pt: 'Rodapé (opcional)', en: 'Footer (optional)' },
+  'builder.buttons': { pt: 'Botões', en: 'Buttons' },
+  'builder.buttonTitle': { pt: 'Título do botão {index}', en: 'Button {index} title' },
+  'builder.addButton': { pt: 'Adicionar botão', en: 'Add a button' },
+  'builder.removeButton': { pt: 'Remover botão {index}', en: 'Remove button {index}' },
+  'builder.buttonLabel': { pt: 'Texto do botão da lista', en: 'List button label' },
+  'builder.section': { pt: 'Secção {index}', en: 'Section {index}' },
+  'builder.sectionTitle': { pt: 'Título da secção {index}', en: 'Section {index} title' },
+  'builder.addSection': { pt: 'Adicionar secção', en: 'Add a section' },
+  'builder.removeSection': { pt: 'Remover secção {index}', en: 'Remove section {index}' },
+  'builder.row': { pt: 'Linha {index}', en: 'Row {index}' },
+  'builder.rowTitle': { pt: 'Título da linha {index}', en: 'Row {index} title' },
+  'builder.rowDescription': {
+    pt: 'Descrição da linha {index} (opcional)',
+    en: 'Row {index} description (optional)',
+  },
+  'builder.addRow': { pt: 'Adicionar linha', en: 'Add a row' },
+  'builder.removeRow': { pt: 'Remover linha {index}', en: 'Remove row {index}' },
+  'builder.moveUp': { pt: 'Mover para cima', en: 'Move up' },
+  'builder.moveDown': { pt: 'Mover para baixo', en: 'Move down' },
+  'builder.rowsUsed': { pt: '{used} / {limit} linhas', en: '{used} / {limit} rows' },
+  'builder.preview': { pt: 'Como o contacto vê', en: 'What the contact sees' },
+  'builder.sendButtons': { pt: 'Enviar respostas rápidas', en: 'Send quick replies' },
+  'builder.sendList': { pt: 'Enviar lista', en: 'Send list' },
+  'builder.quickRepliesTitle': { pt: 'Respostas rápidas', en: 'Quick replies' },
+  'builder.listTitle': { pt: 'Mensagem com lista', en: 'List message' },
+  'builder.idsAreAutomatic': {
+    pt: 'Os identificadores são gerados automaticamente e não mudam quando edita o texto.',
+    en: 'Ids are generated automatically and do not change when you edit the text.',
+  },
+
+  /**
+   * Field-addressed rejections, keyed by the code the validator returns. One
+   * sentence per *kind* of mistake, because "invalid" under a box is the API
+   * error message again in a nicer font.
+   */
+  'builder.error.REQUIRED': { pt: 'Obrigatório.', en: 'Required.' },
+  'builder.error.TOO_LONG': {
+    pt: 'Demasiado longo — máximo {limit} caracteres.',
+    en: 'Too long — {limit} characters at most.',
+  },
+  'builder.error.TOO_FEW': { pt: 'Faltam entradas (mínimo {limit}).', en: 'Too few (at least {limit}).' },
+  'builder.error.TOO_MANY': {
+    pt: 'Demasiadas entradas (máximo {limit}).',
+    en: 'Too many (at most {limit}).',
+  },
+  'builder.error.DUPLICATE_ID': {
+    pt: 'Este identificador já é usado por outra entrada.',
+    en: 'Another entry already uses this id.',
+  },
+  'builder.error.UNSUPPORTED': {
+    pt: 'Este formato não é suportado.',
+    en: 'That format is not supported.',
+  },
+  'builder.invalid': {
+    pt: 'Corrija os campos assinalados antes de enviar.',
+    en: 'Fix the highlighted fields before sending.',
+  },
+
   // ─── Inbox ────────────────────────────────────────────────────────────────
   'inbox.mine': { pt: 'Minhas', en: 'Mine' },
   'inbox.unassigned': { pt: 'Sem responsável', en: 'Unassigned' },
@@ -405,6 +669,7 @@ const COPY = {
   'campaign.filter.running': { pt: 'A decorrer', en: 'Running' },
   'campaign.filter.completed': { pt: 'Concluídas', en: 'Completed' },
   'campaign.filter.attention': { pt: 'A precisar de atenção', en: 'Needs attention' },
+  'campaign.filter.archived': { pt: 'Arquivadas', en: 'Archived' },
   'campaign.open': { pt: 'Abrir campanha', en: 'Open campaign' },
   'campaign.progress': { pt: '{done} de {total} enviadas', en: '{done} of {total} sent' },
   'campaign.updated': { pt: 'Actualizado {when}', en: 'Updated {when}' },
@@ -420,6 +685,7 @@ const COPY = {
   'campaign.col.name': { pt: 'Nome', en: 'Name' },
   'campaign.col.status': { pt: 'Estado', en: 'Status' },
   'campaign.col.created': { pt: 'Criada', en: 'Created' },
+  'campaign.col.archived': { pt: 'Arquivada', en: 'Archived' },
   'campaign.col.phone': { pt: 'Telefone', en: 'Phone' },
   'campaign.col.reason': { pt: 'Motivo', en: 'Reason' },
 
@@ -549,6 +815,28 @@ const COPY = {
     pt: 'As mensagens ainda não enviadas não serão enviadas.',
     en: 'Messages not yet sent will not be sent.',
   },
+  'campaign.delete': { pt: 'Eliminar campanha', en: 'Delete campaign' },
+  'campaign.deleteSubtitle': {
+    pt: 'A campanha e a audiência que foi construída desaparecem da lista. Não há nada enviado para perder.',
+    en: 'The campaign and the audience it built come off the list. There is nothing sent to lose.',
+  },
+  'campaign.deleteNote': {
+    pt: 'Esta campanha nunca foi lançada, por isso ainda pode ser eliminada. Depois do lançamento passa a ser o registo do que foi enviado — a partir daí só pode ser cancelada, nunca eliminada.',
+    en: 'This campaign was never launched, so it can still be deleted. Once launched it becomes the record of what went out — from then on it can only be cancelled, never deleted.',
+  },
+  'campaign.archive': { pt: 'Arquivar', en: 'Archive' },
+  'campaign.unarchive': { pt: 'Desarquivar', en: 'Unarchive' },
+  'campaign.archiveTitle': { pt: 'Arquivo', en: 'Archive' },
+  'campaign.archivedOn': {
+    pt: 'Arquivada {when} — está fora da lista de campanhas, mas continua a receber estados de entrega e respostas.',
+    en: 'Archived {when} — off the campaigns list, but still receiving delivery statuses and replies.',
+  },
+  'campaign.archiveNone': { pt: 'O arquivo está vazio.', en: 'The archive is empty.' },
+  'campaign.archiveNoneBody': {
+    pt: 'As campanhas concluídas, canceladas ou falhadas podem ser arquivadas a partir da própria campanha. Nada é apagado: sai da lista e volta quando quiser.',
+    en: 'Completed, cancelled or failed campaigns can be archived from the campaign itself. Nothing is deleted: it leaves the list and comes back whenever you want.',
+  },
+  'campaign.archiveBack': { pt: 'Voltar às campanhas', en: 'Back to campaigns' },
   'campaign.reason': { pt: 'Motivo', en: 'Reason' },
   'campaign.pacing': {
     pt: 'O ritmo foi reduzido para respeitar o limite do número — a campanha demora mais do que o previsto, e nada foi perdido.',

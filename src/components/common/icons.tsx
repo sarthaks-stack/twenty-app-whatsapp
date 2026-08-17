@@ -1,38 +1,62 @@
 import {
+  IconAddressBook,
   IconAlertCircle,
   IconAlertTriangle,
   IconArchive,
+  IconArchiveOff,
+  IconArrowBackUp,
+  IconArrowDown,
   IconArrowLeft,
+  IconArrowUp,
   IconBroadcast,
   IconCalendarTime,
   IconCheck,
+  IconChevronDown,
   IconChevronRight,
   IconClock,
+  IconCode,
+  IconCopy,
   IconCurrencyDollar,
   IconDotsVertical,
   IconDownload,
   IconEdit,
+  IconExternalLink,
+  IconFile,
   IconFileText,
+  IconFileZip,
   IconFilter,
   IconFlask,
   IconForbid,
+  IconHeadphones,
   IconHelpCircle,
   IconHourglassHigh,
   IconInbox,
+  IconInfoCircle,
+  IconLink,
   IconList,
+  IconListDetails,
   IconLock,
+  IconMap,
   IconMessage,
+  IconMessageCirclePlus,
+  IconMoodSmile,
   IconPaperclip,
+  IconPhoto,
   IconPlayerPause,
   IconPlayerPlay,
+  IconPlayerStop,
   IconPlus,
+  IconPresentation,
   IconRefresh,
   IconSearch,
   IconSend,
   IconSettings,
+  IconTable,
+  IconTrash,
   IconUser,
   IconUserPlus,
   IconUsers,
+  IconVideo,
   IconX,
   type IconComponent,
 } from 'twenty-ui/icon';
@@ -89,7 +113,57 @@ export const ICON = {
   dismiss: IconX,
   back: IconArrowLeft,
   chevron: IconChevronRight,
+  chevronDown: IconChevronDown,
   settings: IconSettings,
+
+  /**
+   * The message action toolbar (spec §"Message action model").
+   *
+   * Named for what they *do*, not for what they draw, so a picture can change
+   * without every call site changing with it — the reason this map exists.
+   */
+  react: IconMoodSmile,
+  reply: IconArrowBackUp,
+  copy: IconCopy,
+  details: IconInfoCircle,
+  open: IconExternalLink,
+  moveUp: IconArrowUp,
+  moveDown: IconArrowDown,
+
+  /**
+   * The composer's ＋ sheet.
+   *
+   * `twenty-ui` ships no microphone, so a voice message wears headphones —
+   * which is the spec's own fallback, and reads as "audio" rather than as
+   * something else entirely.
+   */
+  photo: IconPhoto,
+  document: IconFile,
+  voice: IconHeadphones,
+  location: IconMap,
+  contactCard: IconAddressBook,
+  quickReplies: IconMessageCirclePlus,
+  listMessage: IconListDetails,
+  record: IconPlayerPlay,
+  stopRecording: IconPlayerStop,
+
+  /**
+   * Content types in the transcript. A document wears the family its MIME type
+   * belongs to, so a spreadsheet and a PDF are told apart before either is
+   * opened (`documentFamily`).
+   */
+  image: IconPhoto,
+  video: IconVideo,
+  audio: IconPlayerPlay,
+  sticker: IconMoodSmile,
+  file: IconFile,
+  pdf: IconFileText,
+  sheet: IconTable,
+  doc: IconFileText,
+  slides: IconPresentation,
+  zip: IconFileZip,
+  code: IconCode,
+  link: IconLink,
 
   // Campaigns
   newCampaign: IconPlus,
@@ -103,6 +177,9 @@ export const ICON = {
   replies: IconMessage,
   cost: IconCurrencyDollar,
   pending: IconHourglassHigh,
+  remove: IconTrash,
+  archive: IconArchive,
+  unarchive: IconArchiveOff,
 } as const satisfies Record<string, IconComponent>;
 
 export type IconName = keyof typeof ICON;

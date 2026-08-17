@@ -1,7 +1,12 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTheme } from 'twenty-ui/theme-constants';
 
+import type { ContactCardProjection } from '../../domain/feed/content';
 import type { MessageProjection } from '../../domain/feed/projection';
+import { contactKey } from '../../domain/feed/contact-match';
+import { projectQuote } from '../../domain/feed/quote';
+import type { QuoteProjection } from '../../domain/feed/quote';
+import type { FieldError } from '../../domain/interactive/validate';
 import type { ResolvedParameters } from '../../domain/template-render';
 import { newClientToken, useActions, type SendOutcome } from '../common/actions';
 import { useCopy } from '../common/copy';
@@ -11,6 +16,15 @@ import { ActionButton, Banner, EmptyState } from '../common/ui';
 import { useFeed } from '../common/use-feed';
 import { Composer } from './Composer';
 import { MessageList } from './MessageList';
+import {
+  optimisticContacts,
+  optimisticInteractive,
+  optimisticLocation,
+  optimisticMedia,
+  optimisticTemplate,
+  optimisticText,
+} from './optimistic';
+import { projectInteractive } from '../../domain/feed/content';
 import { StartConversation } from './StartConversation';
 import { ThreadHeader } from './ThreadHeader';
 
@@ -23,9 +37,15 @@ import { ThreadHeader } from './ThreadHeader';
  * rewrite. If the probe says a rich widget is unusable, this component moves to
  * the side panel and nothing inside it changes.
  *
- * It owns exactly one piece of state the server does not: the optimistic
- * bubble. A rep pressing Enter sees their message immediately, keyed by its
- * `clientToken`, and the server's record replaces it rather than joining it.
+ * It owns exactly three pieces of state the server does not: the optimistic
+ * bubble, the message a rep is replying to, and the reactions they have just
+ * pressed. All three exist for the same reason — the server's answer arrives on
+ * the next poll, and three seconds of a screen that has not reacted to a click
+ * is three seconds of a rep clicking again.
+ *
+ * Every send goes through one shape: mint a token, add an optimistic bubble,
+ * call the route, settle. The kinds differ only in what they put in the bubble
+ * and which action they call — see `optimistic.ts`.
  */
 
 export type ThreadViewProps = {
@@ -35,40 +55,6 @@ export type ThreadViewProps = {
   /** Chrome only. The conversation is identical in all three. */
   variant?: 'tab' | 'panel' | 'inbox';
 };
-
-const optimisticMessage = (
-  threadId: string,
-  clientToken: string,
-  body: string | null,
-  templateName: string | null,
-): MessageProjection => ({
-  id: `local-${clientToken}`,
-  wamid: null,
-  direction: 'OUTBOUND',
-  type: templateName === null ? 'TEXT' : 'TEMPLATE',
-  status: 'QUEUED',
-  body,
-  waTimestamp: null,
-  createdAt: new Date().toISOString(),
-  statusTimestamps: {},
-  errorCode: null,
-  errorDetail: null,
-  retryCount: 0,
-  isRetryable: false,
-  lane: 'INTERACTIVE',
-  sourceKind: 'AGENT',
-  templateName,
-  templateLanguage: null,
-  templateCategory: null,
-  contextWamid: null,
-  reactionTargetWamid: null,
-  media: null,
-  reactions: [],
-  payload: null,
-  clientToken,
-  sentById: null,
-  threadId,
-});
 
 export const ThreadView = ({
   threadId = null,
@@ -87,6 +73,30 @@ export const ThreadView = ({
    * yet. It renders as a banner rather than disappearing into a log.
    */
   const [actionError, setActionError] = useState<string | null>(null);
+  /**
+   * Field-addressed rejections from the route's interactive validator, handed
+   * straight to the open builder so each lands under the box that caused it.
+   */
+  const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
+  const [replyTarget, setReplyTarget] = useState<QuoteProjection | null>(null);
+  /**
+   * Reactions pressed but not yet confirmed by a poll, keyed by target wamid.
+   *
+   * A reaction is not a transcript row — the feed drops those — so there is no
+   * optimistic *message* to add. What the rep needs to see is the chip on the
+   * bubble they pressed, immediately. An empty string means "removed", which is
+   * the same thing an empty emoji means on the wire.
+   */
+  const [pendingReactions, setPendingReactions] = useState<Record<string, string>>({});
+  /**
+   * Contact cards whose **Create person** is in flight, keyed by `contactKey`.
+   *
+   * The one write on this surface with no optimistic representation of its own:
+   * the card learns it succeeded from the server's match, one poll later.
+   */
+  const [creatingContacts, setCreatingContacts] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
 
   const feed = useFeed({
     scope: 'thread',
@@ -100,6 +110,98 @@ export const ThreadView = ({
   const templates = feed.data?.templates ?? [];
   const canSend = feed.data?.permissions.canSend === true;
   const viewerId = feed.data?.permissions.workspaceMemberId ?? null;
+  const capabilities = feed.data?.capabilities;
+
+  const person = thread?.person ?? feed.data?.person ?? null;
+
+  const contactLabel = useMemo(() => {
+    const name = [person?.firstName, person?.lastName]
+      .filter((part): part is string => typeof part === 'string' && part.length > 0)
+      .join(' ');
+
+    return name.length > 0 ? name : (thread?.profileName ?? null);
+  }, [person, thread]);
+
+  /**
+   * The server's reactions, with the ones this rep has just pressed folded in.
+   *
+   * Folded rather than replaced: a rep reacting must not make the customer's
+   * reaction disappear for the three seconds until the next poll. The pending
+   * entry replaces only the viewer's own, and vanishes on its own once the
+   * server's version carries the same emoji — see the reconciliation below.
+   */
+  const messages = useMemo(() => {
+    if (Object.keys(pendingReactions).length === 0) return feed.messages;
+
+    return feed.messages.map((message) => {
+      const pending =
+        message.wamid === null ? undefined : pendingReactions[message.wamid];
+
+      if (pending === undefined) return message;
+
+      const confirmed =
+        message.reactions.find((reaction) => reaction.isMine)?.emoji ?? '';
+
+      /**
+       * The server has caught up: its answer and the pending one agree, so the
+       * override is dropped. Without this the local entry would outlive the
+       * poll and pin the chip in place — including through a *later* change
+       * made from another tab, which is exactly the state a rep cannot explain.
+       */
+      if (confirmed === pending) return message;
+
+      const others = message.reactions.filter((reaction) => !reaction.isMine);
+
+      return {
+        ...message,
+        reactions:
+          pending.length === 0
+            ? others
+            : [
+                ...others,
+                {
+                  actorId: viewerId ?? 'me',
+                  actorLabel: null,
+                  actorKind: 'WORKSPACE_MEMBER' as const,
+                  emoji: pending,
+                  isMine: true,
+                },
+              ],
+      };
+    });
+  }, [feed.messages, pendingReactions, viewerId]);
+
+  /**
+   * Confirmed overrides are dropped from the map, not merely ignored above.
+   *
+   * Left to accumulate, the map would grow for every reaction a rep pressed
+   * over a long shift, and each stale entry is a bubble whose chip can never
+   * again be changed from another tab. The `useMemo` reads the map; this is
+   * what empties it.
+   */
+  useEffect(() => {
+    setPendingReactions((current) => {
+      const entries = Object.entries(current);
+
+      if (entries.length === 0) return current;
+
+      const settled = entries.filter(([wamid, emoji]) => {
+        const message = feed.messages.find((candidate) => candidate.wamid === wamid);
+
+        if (message === undefined) return false;
+
+        return (message.reactions.find((reaction) => reaction.isMine)?.emoji ?? '') === emoji;
+      });
+
+      if (settled.length === 0) return current;
+
+      const remaining = Object.fromEntries(
+        entries.filter(([wamid]) => !settled.some(([done]) => done === wamid)),
+      );
+
+      return remaining;
+    });
+  }, [feed.messages]);
 
   /**
    * Recomputed on every render rather than ticked on a timer: the countdown
@@ -114,12 +216,13 @@ export const ThreadView = ({
    * A refused send creates no server row, so nothing a later poll returns will
    * ever replace the bubble — leaving a message that reads "queued" forever and
    * a conversation that shows something which was never sent. The bubble is
-   * therefore settled explicitly on both failure paths, with the reason on it.
+   * therefore settled explicitly on every failure path, with the reason on it.
    */
   const handleOutcome = useCallback(
     (outcome: SendOutcome, clientToken: string) => {
       if (outcome.ok) {
         setRefusal(null);
+        setFieldErrors([]);
         // Ask immediately rather than waiting for the next tick, so the bubble
         // stops saying "queued" as soon as the server has something better.
         feed.refresh();
@@ -134,68 +237,419 @@ export const ThreadView = ({
         return;
       }
 
+      /**
+       * A builder's own rejection. The bubble is settled like any other
+       * failure, *and* the fields go back to the panel — which is still open,
+       * because a builder that closed on send would have nowhere to show them.
+       */
+      if (outcome.kind === 'invalid') {
+        setRefusal(null);
+        setFieldErrors(outcome.fields);
+        feed.settleOptimistic(clientToken, { error: t('builder.invalid') });
+
+        return;
+      }
+
       setRefusal(null);
       feed.settleOptimistic(clientToken, { error: outcome.message });
     },
     [feed, t],
   );
 
-  const sendText = useCallback(
-    async (body: string) => {
-      if (thread === null) return;
+  /**
+   * The shape every send shares: a token, a bubble, a call, a settlement.
+   *
+   * Written once because the seven kinds differ only in their middle two lines,
+   * and because the `finally` is the part that must never be forgotten — an
+   * `isSending` left true disables the composer for the rest of the session.
+   */
+  const perform = useCallback(
+    async (
+      optimistic: (clientToken: string) => MessageProjection,
+      call: (clientToken: string) => Promise<SendOutcome>,
+    ): Promise<boolean> => {
+      if (thread === null) return false;
 
       const clientToken = newClientToken();
 
       setIsSending(true);
-      feed.addOptimistic(optimisticMessage(thread.id, clientToken, body, null));
+      feed.addOptimistic(optimistic(clientToken));
 
       try {
-        handleOutcome(
-          await actions.sendText({ threadId: thread.id, body, clientToken }),
-          clientToken,
-        );
+        const outcome = await call(clientToken);
+
+        handleOutcome(outcome, clientToken);
+
+        return outcome.ok;
       } catch (error) {
         // A network failure is not an outcome the route reported; the bubble
         // still has to stop claiming it is on its way.
         feed.settleOptimistic(clientToken, {
           error: error instanceof Error ? error.message : t('error.unknown'),
         });
+
+        return false;
       } finally {
         setIsSending(false);
       }
     },
-    [actions, feed, handleOutcome, t, thread],
+    [feed, handleOutcome, t, thread],
+  );
+
+  const sendText = useCallback(
+    (body: string) => {
+      const id = thread?.id;
+
+      if (id === undefined) return;
+
+      const quote = replyTarget;
+
+      setReplyTarget(null);
+
+      void perform(
+        (clientToken) =>
+          optimisticText({ threadId: id, clientToken, quote }, body),
+        (clientToken) =>
+          actions.sendText({ threadId: id, body, clientToken, contextWamid: quote?.wamid ?? null }),
+      );
+    },
+    [actions, perform, replyTarget, thread],
   );
 
   const sendTemplate = useCallback(
-    async (templateId: string, parameters: ResolvedParameters) => {
-      if (thread === null) return;
+    (templateId: string, parameters: ResolvedParameters) => {
+      const id = thread?.id;
 
-      const clientToken = newClientToken();
-      const name = templates.find((template) => template.id === templateId)?.name ?? null;
+      if (id === undefined) return;
 
-      setIsSending(true);
-      feed.addOptimistic(optimisticMessage(thread.id, clientToken, null, name));
+      const template = templates.find((entry) => entry.id === templateId) ?? null;
+      const quote = replyTarget;
 
-      try {
-        handleOutcome(
-          await actions.sendTemplate({
-            threadId: thread.id,
+      setReplyTarget(null);
+
+      void perform(
+        (clientToken) =>
+          optimisticTemplate(
+            { threadId: id, clientToken, body: null, quote },
+            {
+              name: template?.name ?? null,
+              language: template?.language ?? null,
+              category: template?.category ?? null,
+            },
+          ),
+        (clientToken) =>
+          actions.sendTemplate({
+            threadId: id,
             templateId,
             parameters,
             clientToken,
+            contextWamid: quote?.wamid ?? null,
           }),
-          clientToken,
-        );
-      } catch (error) {
-        feed.settleOptimistic(clientToken, {
-          error: error instanceof Error ? error.message : t('error.unknown'),
+      );
+    },
+    [actions, perform, replyTarget, templates, thread],
+  );
+
+  const sendMedia = useCallback(
+    (input: {
+      mediaKind: 'image' | 'video' | 'audio' | 'document';
+      fileUrl?: string;
+      filePath?: string;
+      filename: string | null;
+      caption: string | null;
+      voice?: boolean;
+    }) => {
+      const id = thread?.id;
+
+      if (id === undefined) return;
+
+      const quote = replyTarget;
+
+      setReplyTarget(null);
+
+      void perform(
+        (clientToken) =>
+          optimisticMedia(
+            { threadId: id, clientToken, quote },
+            {
+              mediaKind: input.mediaKind,
+              /**
+               * The stored file's own URL, so the preview and the delivered
+               * bubble render the same bytes and the image does not visibly
+               * reload when the server row arrives.
+               */
+              url: input.fileUrl ?? null,
+              fileName: input.filename,
+              mimeType: null,
+              sizeBytes: null,
+              caption: input.caption,
+              ...(input.voice === undefined ? {} : { isVoice: input.voice }),
+            },
+          ),
+        (clientToken) =>
+          actions.sendMedia({
+            threadId: id,
+            clientToken,
+            mediaKind: input.mediaKind,
+            ...(input.fileUrl === undefined ? {} : { fileUrl: input.fileUrl }),
+            ...(input.filePath === undefined ? {} : { filePath: input.filePath }),
+            filename: input.filename,
+            caption: input.caption,
+            ...(input.voice === undefined ? {} : { voice: input.voice }),
+            contextWamid: quote?.wamid ?? null,
+          }),
+      );
+    },
+    [actions, perform, replyTarget, thread],
+  );
+
+  const sendLocation = useCallback(
+    (location: {
+      latitude: number;
+      longitude: number;
+      name: string | null;
+      address: string | null;
+    }) => {
+      const id = thread?.id;
+
+      if (id === undefined) return;
+
+      const quote = replyTarget;
+
+      setReplyTarget(null);
+
+      void perform(
+        (clientToken) => optimisticLocation({ threadId: id, clientToken, quote }, location),
+        (clientToken) =>
+          actions.sendLocation({
+            threadId: id,
+            clientToken,
+            ...location,
+            contextWamid: quote?.wamid ?? null,
+          }),
+      );
+    },
+    [actions, perform, replyTarget, thread],
+  );
+
+  const sendContact = useCallback(
+    (contact: ContactCardProjection) => {
+      const id = thread?.id;
+
+      if (id === undefined) return;
+
+      const quote = replyTarget;
+
+      setReplyTarget(null);
+
+      void perform(
+        (clientToken) => optimisticContacts({ threadId: id, clientToken, quote }, [contact]),
+        (clientToken) =>
+          actions.sendContacts({
+            threadId: id,
+            clientToken,
+            /**
+             * Meta's own contact shape, assembled here rather than in the panel
+             * so the panel stays a form over a product model and the wire
+             * format has exactly one author.
+             */
+            contacts: [
+              {
+                name: {
+                  formatted_name: contact.formattedName ?? contact.firstName ?? '',
+                  first_name: contact.firstName ?? contact.formattedName ?? '',
+                },
+                ...(contact.organization === null
+                  ? {}
+                  : { org: { company: contact.organization } }),
+                ...(contact.phones.length === 0
+                  ? {}
+                  : {
+                      phones: contact.phones.map((phone) => ({
+                        phone: phone.phone,
+                        type: phone.type ?? 'CELL',
+                      })),
+                    }),
+              },
+            ],
+            contextWamid: quote?.wamid ?? null,
+          }),
+      );
+    },
+    [actions, perform, replyTarget, thread],
+  );
+
+  /**
+   * The one send that reports back.
+   *
+   * A builder must not close on a refusal: the route's field-addressed errors
+   * have nowhere to go once the form is gone, and the rep would be left with a
+   * failed bubble and no way to see which box caused it. So this resolves to
+   * whether the send was accepted, and the composer closes the panel only then.
+   */
+  const sendInteractive = useCallback(
+    async (interactive: Record<string, unknown>): Promise<boolean> => {
+      const id = thread?.id;
+
+      if (id === undefined) return false;
+
+      const quote = replyTarget;
+
+      const accepted = await perform(
+        (clientToken) =>
+          optimisticInteractive(
+            { threadId: id, clientToken, quote },
+            projectInteractive(interactive),
+          ),
+        (clientToken) =>
+          actions.sendInteractive({
+            threadId: id,
+            clientToken,
+            interactive,
+            contextWamid: quote?.wamid ?? null,
+          }),
+      );
+
+      if (accepted) setReplyTarget(null);
+
+      return accepted;
+    },
+    [actions, perform, replyTarget, thread],
+  );
+
+  /**
+   * A reaction, which is not a message.
+   *
+   * It gets no optimistic bubble — the feed drops reaction rows, so nothing
+   * would ever settle it — and no `isSending`, because a rep must be able to
+   * keep typing while a 👍 is in flight. What it gets is the chip, immediately,
+   * rolled back if the route refuses.
+   */
+  const react = useCallback(
+    async (message: MessageProjection, emoji: string) => {
+      const id = thread?.id;
+      const target = message.wamid;
+
+      if (id === undefined || target === null) return;
+
+      const previous = message.reactions.find((reaction) => reaction.isMine)?.emoji ?? '';
+
+      setPendingReactions((current) => ({ ...current, [target]: emoji }));
+
+      try {
+        const outcome = await actions.sendReaction({
+          threadId: id,
+          clientToken: newClientToken(),
+          targetWamid: target,
+          emoji,
         });
-      } finally {
-        setIsSending(false);
+
+        if (outcome.ok) {
+          feed.refresh();
+
+          return;
+        }
+
+        setPendingReactions((current) => ({ ...current, [target]: previous }));
+
+        if (outcome.kind === 'denied') setRefusal(outcome.code);
+        else setActionError(outcome.kind === 'error' ? outcome.message : t('builder.invalid'));
+      } catch (error) {
+        setPendingReactions((current) => ({ ...current, [target]: previous }));
+        setActionError(error instanceof Error ? error.message : t('error.unknown'));
       }
     },
-    [actions, feed, handleOutcome, t, templates, thread],
+    [actions, feed, t, thread],
+  );
+
+  /**
+   * Choosing a message to reply to.
+   *
+   * The quote is built here, from the message already on screen, rather than
+   * asked of the server: the strip must appear on the press, and the projection
+   * that builds it is the same pure function the feed route uses — so the strip
+   * above the composer and the strip inside the delivered bubble cannot
+   * describe the message differently.
+   */
+  const reply = useCallback(
+    (message: MessageProjection) => {
+      setReplyTarget(
+        projectQuote(
+          {
+            wamid: message.wamid,
+            direction: message.direction,
+            type: message.type,
+            content: message.content,
+            media: message.media,
+          },
+          contactLabel,
+        ),
+      );
+    },
+    [contactLabel],
+  );
+
+  /**
+   * A Person created from a contact card the customer shared.
+   *
+   * The name and number sent are the *card's*, which is what the rep has just
+   * read on screen beside the warning that these are a third party's details —
+   * so the review the spec asks for is the card itself, and the button is the
+   * confirmation. The route re-checks the number and refuses one it cannot
+   * normalise rather than storing a fragment.
+   *
+   * A refresh follows because the match is resolved server-side: the very next
+   * poll turns **Create person** into **Open person**, which is the feedback
+   * that the record now exists.
+   */
+  const createPerson = useCallback(
+    async (contact: ContactCardProjection) => {
+      if (thread === null) return;
+
+      const key = contactKey(contact);
+
+      /**
+       * Guarded, because this button has no optimistic state: it stops being
+       * offered only when the *server's* next poll reports a match, up to three
+       * seconds later. A rep who presses twice in that window creates the same
+       * person twice — which is not a hypothetical, it is what happened the
+       * first time this was exercised.
+       */
+      if (creatingContacts.has(key)) return;
+
+      setCreatingContacts((current) => new Set(current).add(key));
+
+      const full = contact.formattedName ?? contact.firstName ?? '';
+      const parts = full.trim().split(/\s+/);
+
+      try {
+        const outcome = await actions.threadAction('createPerson', {
+          threadId: thread.id,
+          firstName: contact.firstName ?? parts[0] ?? '',
+          lastName: contact.lastName ?? parts.slice(1).join(' '),
+          phone: contact.phones[0]?.waId ?? contact.phones[0]?.phone ?? '',
+        });
+
+        if (!outcome.ok) setActionError(outcome.error ?? t('error.unknown'));
+        else setActionError(null);
+
+        feed.refresh();
+      } finally {
+        /**
+         * Released on both paths. A key left in the set would leave the button
+         * permanently disabled after one failure — the create is retryable, and
+         * a failed one leaves nothing behind to collide with.
+         */
+        setCreatingContacts((current) => {
+          const next = new Set(current);
+
+          next.delete(key);
+
+          return next;
+        });
+      }
+    },
+    [actions, creatingContacts, feed, t, thread],
   );
 
   /**
@@ -208,7 +662,7 @@ export const ThreadView = ({
    */
   const retry = useCallback(
     (message: MessageProjection) => {
-      if (message.body !== null) void sendText(message.body);
+      if (message.body !== null) sendText(message.body);
     },
     [sendText],
   );
@@ -290,13 +744,13 @@ export const ThreadView = ({
           setRefusal(outcome.code);
         } else {
           setRefusal(null);
-          setActionError(outcome.message);
+          setActionError(outcome.kind === 'invalid' ? t('builder.invalid') : outcome.message);
         }
       } finally {
         setIsSending(false);
       }
     },
-    [actions, feed],
+    [actions, feed, t],
   );
 
   const shell: React.CSSProperties = {
@@ -379,7 +833,7 @@ export const ThreadView = ({
               display: 'inline-flex',
               alignItems: 'center',
               gap: theme.spacing[1],
-              minHeight: '24px',
+              minHeight: '32px',
               border: `1px solid ${theme.border.color.medium}`,
               borderRadius: theme.border.radius.sm,
               background: 'transparent',
@@ -430,25 +884,47 @@ export const ThreadView = ({
       )}
 
       <MessageList
-        messages={feed.messages}
+        messages={messages}
         lang={lang}
         t={t}
         now={now}
         hasOlder={feed.hasOlder}
         isLoading={feed.isLoading}
+        contactLabel={contactLabel}
+        callbacks={
+          canSend
+            ? {
+                onCreatePerson: (contact) => void createPerson(contact),
+                creatingContacts,
+              }
+            : {}
+        }
         onLoadOlder={feed.loadOlder}
-        onRetry={canSend ? retry : undefined}
+        {...(canSend ? { onRetry: retry } : {})}
+        {...(canSend ? { onReply: reply } : {})}
+        {...(capabilities?.reaction.allowed === true
+          ? { onReact: (message, emoji) => void react(message, emoji) }
+          : {})}
       />
 
       <Composer
         policy={feed.data?.policy}
+        capabilities={capabilities}
         templates={templates}
         canSend={canSend}
         t={t}
         isSending={isSending}
         refusal={refusal}
-        onSendText={(body) => void sendText(body)}
-        onSendTemplate={(templateId, parameters) => void sendTemplate(templateId, parameters)}
+        fieldErrors={fieldErrors}
+        replyTarget={replyTarget}
+        person={person}
+        onSendText={sendText}
+        onSendTemplate={sendTemplate}
+        onSendMedia={sendMedia}
+        onSendLocation={sendLocation}
+        onSendContact={sendContact}
+        onSendInteractive={sendInteractive}
+        onCancelReply={() => setReplyTarget(null)}
         onDismissRefusal={() => setRefusal(null)}
       />
     </div>

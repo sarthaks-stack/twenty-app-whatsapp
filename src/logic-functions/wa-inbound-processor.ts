@@ -26,17 +26,13 @@ import { config } from '../server/config';
 import { enqueue } from '../server/jobs';
 import { describeError, logger } from '../server/logger';
 import { METRIC, count } from '../server/metrics';
+import { applyReaction } from '../server/reactions';
 import { findAccountById } from '../server/repositories/accounts';
-import { asJson } from '../server/repositories/base';
 import {
   findRecipientByThreadId,
   patchRecipient,
 } from '../server/repositories/campaign-recipients';
-import {
-  createMessage,
-  findMessageByWamid,
-  patchMessage,
-} from '../server/repositories/messages';
+import { createMessage, findMessageByWamid } from '../server/repositories/messages';
 import { markWebhookEvent, markWebhookEventFailed } from '../server/repositories/webhook-events';
 import { patchThread, type WhatsappThreadRecord } from '../server/repositories/threads';
 import { statusAfterInbound, upsertThread } from '../server/threads';
@@ -303,38 +299,22 @@ const processReaction = async ({
   const targetWamid = normalised.reactionTargetWamid;
 
   if (targetWamid !== null) {
-    const target = await findMessageByWamid(targetWamid);
+    /**
+     * The same helper the outbound sender calls. Two implementations of
+     * "replace this actor's reaction" is how a rep's 👍 and a customer's 👍
+     * end up stored differently and rendered differently.
+     */
+    const outcome = await applyReaction({
+      targetWamid,
+      actor: {
+        kind: 'CONTACT',
+        waId: payload.message.from ?? '',
+        label: thread.profileName ?? null,
+      },
+      emoji: normalised.body ?? '',
+    });
 
-    if (target !== null) {
-      const payloadJson = asJson<Record<string, unknown>>(target.payload, {});
-      const reactions = Array.isArray(payloadJson.reactions)
-        ? (payloadJson.reactions as { waId: string; emoji: string }[])
-        : [];
-
-      /**
-       * One reaction per person, replaced rather than appended: WhatsApp lets a
-       * contact change their reaction, and appending would show them reacting
-       * three times with three different emoji.
-       */
-      const withoutSender = reactions.filter(
-        (reaction) => reaction.waId !== payload.message.from,
-      );
-      const emoji = normalised.body ?? '';
-
-      await patchMessage(target.id, {
-        payload: {
-          ...payloadJson,
-          reactions:
-            emoji.length === 0
-              ? withoutSender
-              : [...withoutSender, { waId: payload.message.from ?? '', emoji }],
-        },
-      });
-    } else {
-      // Reacting to a message we never stored is normal for history predating
-      // the install; the reaction row survives either way.
-      log.debug('wa.inbound.reaction_target_missing');
-    }
+    if (outcome === 'target_missing') log.debug('wa.inbound.reaction_target_missing');
   }
 
   /**

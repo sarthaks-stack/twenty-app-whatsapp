@@ -10,6 +10,11 @@ import {
 import { isBusinessInitiated } from './tier-budget';
 import {
   ALLOWED_TRANSITIONS,
+  ARCHIVABLE_STATUSES,
+  DELETABLE_STATUSES,
+  canArchiveCampaign,
+  canDeleteCampaign,
+  isArchivedCampaign,
   canTransition,
   isActive,
   isTerminal,
@@ -75,6 +80,116 @@ describe('the campaign state machine', () => {
     expect(Object.keys(ALLOWED_TRANSITIONS).sort()).toEqual(
       Object.values(CAMPAIGN_STATUS).sort(),
     );
+  });
+});
+
+describe('deleting a campaign', () => {
+  /**
+   * The rule the whole restriction rests on. It is checked here, in the route
+   * that offers deletion, and — by withholding the object permission — nowhere
+   * else, so these cases are the specification of what "cannot be deleted"
+   * means.
+   */
+  it('allows a campaign that was never launched', () => {
+    for (const status of [
+      CAMPAIGN_STATUS.DRAFT,
+      CAMPAIGN_STATUS.SNAPSHOTTING,
+      CAMPAIGN_STATUS.READY,
+    ]) {
+      expect(canDeleteCampaign({ status })).toEqual({ ok: true });
+    }
+  });
+
+  it('refuses a cancelled campaign, sent or not', () => {
+    const verdict = canDeleteCampaign({ status: CAMPAIGN_STATUS.CANCELLED, sentCount: 0 });
+
+    expect(verdict.ok).toBe(false);
+    expect(!verdict.ok && verdict.reason).toContain('cannot be deleted');
+  });
+
+  it('refuses every status that is not a pre-launch one', () => {
+    const deletable = new Set<string>(DELETABLE_STATUSES);
+
+    for (const status of Object.values(CAMPAIGN_STATUS)) {
+      expect(canDeleteCampaign({ status }).ok).toBe(deletable.has(status));
+    }
+  });
+
+  /**
+   * The counters, not only the status. A campaign written back to `DRAFT` after
+   * it had sent messages would pass the status test — and deleting it would
+   * take the record of those messages with it.
+   */
+  it('refuses a draft that has already sent or queued something', () => {
+    expect(canDeleteCampaign({ status: CAMPAIGN_STATUS.DRAFT, sentCount: 1 }).ok).toBe(false);
+    expect(canDeleteCampaign({ status: CAMPAIGN_STATUS.READY, queuedCount: 4 }).ok).toBe(false);
+    expect(
+      canDeleteCampaign({
+        status: CAMPAIGN_STATUS.READY,
+        startedAt: '2026-08-16T09:00:00.000Z',
+      }).ok,
+    ).toBe(false);
+  });
+
+  /** A campaign with no status at all is a draft, the same as everywhere else. */
+  it('treats a missing status as a draft', () => {
+    expect(canDeleteCampaign({}).ok).toBe(true);
+  });
+});
+
+describe('archiving a campaign', () => {
+  it('archives a campaign that has stopped', () => {
+    for (const status of [
+      CAMPAIGN_STATUS.COMPLETED,
+      CAMPAIGN_STATUS.CANCELLED,
+      CAMPAIGN_STATUS.FAILED,
+    ]) {
+      expect(canArchiveCampaign({ status })).toEqual({ ok: true });
+    }
+  });
+
+  /**
+   * The case archiving must never allow. A running campaign hidden from the only
+   * page that shows it keeps sending to thousands of people with nothing on
+   * screen to pause it.
+   */
+  it('refuses a campaign that is still going', () => {
+    for (const status of [
+      CAMPAIGN_STATUS.DRAFT,
+      CAMPAIGN_STATUS.SNAPSHOTTING,
+      CAMPAIGN_STATUS.READY,
+      CAMPAIGN_STATUS.SCHEDULED,
+      CAMPAIGN_STATUS.RUNNING,
+      CAMPAIGN_STATUS.PAUSED,
+      CAMPAIGN_STATUS.TIER_WAITING,
+    ]) {
+      expect(canArchiveCampaign({ status }).ok).toBe(false);
+    }
+  });
+
+  it('names the archivable statuses and nothing else', () => {
+    const archivable = new Set<string>(ARCHIVABLE_STATUSES);
+
+    for (const status of Object.values(CAMPAIGN_STATUS)) {
+      expect(canArchiveCampaign({ status }).ok).toBe(archivable.has(status));
+    }
+  });
+
+  it('reads the archive flag off the timestamp', () => {
+    expect(isArchivedCampaign({ archivedAt: '2026-08-16T09:00:00.000Z' })).toBe(true);
+    expect(isArchivedCampaign({ archivedAt: null })).toBe(false);
+    expect(isArchivedCampaign({})).toBe(false);
+  });
+
+  /**
+   * Archiving and deleting are separate judgements about the same campaign, and
+   * they are almost opposites: what may be archived is what has finished, and
+   * what may be deleted is what never started. Nothing is both.
+   */
+  it('never allows a campaign to be both archivable and deletable', () => {
+    for (const status of Object.values(CAMPAIGN_STATUS)) {
+      expect(canArchiveCampaign({ status }).ok && canDeleteCampaign({ status }).ok).toBe(false);
+    }
   });
 });
 

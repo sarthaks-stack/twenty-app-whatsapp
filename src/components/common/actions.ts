@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { RestApiClient } from 'twenty-client-sdk/rest';
 
+import type { FieldError } from '../../domain/interactive/validate';
 import type { ResolvedParameters } from '../../domain/template-render';
 
 /**
@@ -20,9 +21,24 @@ export type SendOutcome =
   | { ok: true; messageId: string; replayed: boolean }
   /** `409` — the policy gate refused. `code` is a `DENIAL`, never a sentence. */
   | { ok: false; kind: 'denied'; code: string; warnings: string[] }
+  /**
+   * `400` with a field map — a builder's own validation, run authoritatively on
+   * the server. Distinct from `error` because it has somewhere to *go*: the
+   * quick-reply form puts each entry under the box that caused it, rather than
+   * showing one sentence about a message with eight fields.
+   */
+  | { ok: false; kind: 'invalid'; fields: FieldError[]; message: string }
   | { ok: false; kind: 'error'; message: string };
 
-type ErrorBody = { code?: string; warnings?: string[]; error?: string; missing?: string[] };
+export type { FieldError };
+
+type ErrorBody = {
+  code?: string;
+  warnings?: string[];
+  error?: string;
+  missing?: string[];
+  fields?: FieldError[];
+};
 
 const bodyOf = (error: unknown): { status: number | null; body: ErrorBody } => {
   const detail = error as { status?: number; body?: unknown };
@@ -62,15 +78,20 @@ export type ThreadActionName =
   | 'link'
   | 'relink'
   | 'markRead'
-  | 'snooze';
+  | 'snooze'
+  | 'createPerson';
+
+/** Everything a rich send shares: which conversation, and what it replies to. */
+export type SendBase = {
+  threadId: string;
+  clientToken: string;
+  contextWamid?: string | null;
+};
+
+export type MediaKind = 'image' | 'video' | 'audio' | 'document' | 'sticker';
 
 export type Actions = {
-  sendText: (input: {
-    threadId: string;
-    body: string;
-    clientToken: string;
-    contextWamid?: string | null;
-  }) => Promise<SendOutcome>;
+  sendText: (input: SendBase & { body: string }) => Promise<SendOutcome>;
   sendTemplate: (input: {
     threadId?: string;
     accountId?: string;
@@ -78,7 +99,50 @@ export type Actions = {
     templateId: string;
     parameters: ResolvedParameters;
     clientToken: string;
+    contextWamid?: string | null;
   }) => Promise<SendOutcome>;
+  /**
+   * A file *already in Twenty*. There is no local-device path: the front-component
+   * sandbox exposes a file input's metadata and not its bytes, so a picker that
+   * let a rep choose a file would fail after the choice (spec §"Attachment and
+   * file-picker feasibility"). Voice recording is the exception — a
+   * `MediaRecorder` blob is produced in the page and can be uploaded — and it
+   * arrives here as an ordinary uploaded file.
+   */
+  sendMedia: (
+    input: SendBase & {
+      mediaKind: MediaKind;
+      fileId?: string | null;
+      fileUrl?: string | null;
+      filePath?: string | null;
+      filename?: string | null;
+      caption?: string | null;
+      voice?: boolean;
+    },
+  ) => Promise<SendOutcome>;
+  /**
+   * An empty emoji removes the reaction — the same call, because that is how
+   * Meta models a removal too. No `contextWamid`: a reaction already names its
+   * target, and adding a context makes Meta reject the payload.
+   */
+  sendReaction: (input: {
+    threadId: string;
+    clientToken: string;
+    targetWamid: string;
+    emoji: string;
+  }) => Promise<SendOutcome>;
+  sendInteractive: (
+    input: SendBase & { interactive: Record<string, unknown> },
+  ) => Promise<SendOutcome>;
+  sendLocation: (
+    input: SendBase & {
+      latitude: number;
+      longitude: number;
+      name?: string | null;
+      address?: string | null;
+    },
+  ) => Promise<SendOutcome>;
+  sendContacts: (input: SendBase & { contacts: unknown[] }) => Promise<SendOutcome>;
   threadAction: (
     action: ThreadActionName,
     input: Record<string, unknown>,
@@ -114,6 +178,20 @@ export const useActions = (): Actions => {
           return { ok: false, kind: 'denied', code: body.code, warnings: body.warnings ?? [] };
         }
 
+        /**
+         * A field-addressed rejection from a builder's own validator. It is
+         * the difference between "this message is invalid" and a message under
+         * the box that caused it — see the send route's `INTERACTIVE_INVALID`.
+         */
+        if (status === 400 && Array.isArray(body.fields) && body.fields.length > 0) {
+          return {
+            ok: false,
+            kind: 'invalid',
+            fields: body.fields,
+            message: body.error ?? 'INVALID',
+          };
+        }
+
         return {
           ok: false,
           kind: 'error',
@@ -127,7 +205,7 @@ export const useActions = (): Actions => {
 
   return {
     sendText: useCallback(
-      ({ threadId, body, clientToken, contextWamid = null }) =>
+      ({ threadId, body, clientToken, contextWamid = null }: SendBase & { body: string }) =>
         send({
           threadId,
           clientToken,
@@ -137,13 +215,84 @@ export const useActions = (): Actions => {
     ),
 
     sendTemplate: useCallback(
-      ({ threadId, accountId, waId, templateId, parameters, clientToken }) =>
+      ({ threadId, accountId, waId, templateId, parameters, clientToken, contextWamid = null }) =>
         send({
           ...(threadId === undefined ? {} : { threadId }),
           ...(accountId === undefined ? {} : { accountId }),
           ...(waId === undefined ? {} : { waId }),
           clientToken,
-          message: { kind: 'template', templateId, parameters },
+          message: { kind: 'template', templateId, parameters, contextWamid },
+        }),
+      [send],
+    ),
+
+    sendMedia: useCallback(
+      ({
+        threadId,
+        clientToken,
+        contextWamid = null,
+        mediaKind,
+        fileId = null,
+        fileUrl = null,
+        filePath = null,
+        filename = null,
+        caption = null,
+        voice = false,
+      }) =>
+        send({
+          threadId,
+          clientToken,
+          message: {
+            kind: 'media',
+            mediaKind,
+            fileId,
+            fileUrl,
+            filePath,
+            filename,
+            caption,
+            voice,
+            contextWamid,
+          },
+        }),
+      [send],
+    ),
+
+    sendReaction: useCallback(
+      ({ threadId, clientToken, targetWamid, emoji }) =>
+        send({
+          threadId,
+          clientToken,
+          message: { kind: 'reaction', targetWamid, emoji },
+        }),
+      [send],
+    ),
+
+    sendInteractive: useCallback(
+      ({ threadId, clientToken, contextWamid = null, interactive }) =>
+        send({
+          threadId,
+          clientToken,
+          message: { kind: 'interactive', interactive, contextWamid },
+        }),
+      [send],
+    ),
+
+    sendLocation: useCallback(
+      ({ threadId, clientToken, contextWamid = null, latitude, longitude, name = null, address = null }) =>
+        send({
+          threadId,
+          clientToken,
+          message: { kind: 'location', latitude, longitude, name, address, contextWamid },
+        }),
+      [send],
+    ),
+
+    sendContacts: useCallback(
+      ({ threadId, clientToken, contextWamid = null, contacts }) =>
+        send({
+          threadId,
+          clientToken,
+          message: { kind: 'contacts', contacts, contextWamid },
         }),
       [send],
     ),

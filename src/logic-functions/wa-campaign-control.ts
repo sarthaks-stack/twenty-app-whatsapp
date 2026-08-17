@@ -13,7 +13,13 @@ import {
 import { emptyBreakdown } from '../domain/campaign/exclusions';
 import { estimateCampaignCostUsd, rateFor } from '../domain/campaign/guardrails';
 import { projectDailySpread } from '../domain/campaign/tier-budget';
-import { STATUS_REASON, canTransition } from '../domain/campaign/transitions';
+import {
+  STATUS_REASON,
+  canArchiveCampaign,
+  canDeleteCampaign,
+  canTransition,
+  isArchivedCampaign,
+} from '../domain/campaign/transitions';
 import {
   ALLOWED_BINDING_PATHS,
   resolveParameters,
@@ -46,12 +52,14 @@ import { findAccountById, type WhatsappAccountRecord } from '../server/repositor
 import { asJson } from '../server/repositories/base';
 import {
   countRecipients,
+  deleteRecipientsForCampaign,
   listRecipients,
   patchRecipients,
   retirePreviousSnapshot,
 } from '../server/repositories/campaign-recipients';
 import {
   createCampaign,
+  deleteCampaign,
   findCampaignById,
   patchCampaign,
   type WhatsappCampaignRecord,
@@ -88,7 +96,10 @@ export type CampaignAction =
   | 'launch'
   | 'pause'
   | 'resume'
-  | 'cancel';
+  | 'cancel'
+  | 'delete'
+  | 'archive'
+  | 'unarchive';
 
 export type CampaignControlBody = {
   action?: CampaignAction;
@@ -995,6 +1006,126 @@ export const handler = async (
         );
       }
 
+      /**
+       * Deleting a campaign — and refusing to, for anything that ever ran.
+       *
+       * This route is the *only* way a campaign can be deleted: the admin role
+       * withholds `canSoftDeleteObjectRecords` on the campaign object precisely
+       * so that the native record surfaces cannot do it without this check.
+       * A cancelled or completed campaign carries the counters, the exclusion
+       * breakdown and the recipient rows the launch audit line refers to, and
+       * "delete the evidence" must not be a button.
+       *
+       * The recipients go first. If deleting the campaign then failed the rows
+       * would be gone from a campaign still in `draft` or `ready` — recoverable
+       * by rebuilding the audience, which is exactly what a rebuild does anyway.
+       * The other order leaves recipient rows pointing at a campaign no screen
+       * can open.
+       */
+      case 'delete': {
+        requireRole(caller, 'admin');
+
+        const { campaign } = loaded!;
+        const verdict = canDeleteCampaign(campaign);
+
+        if (!verdict.ok) return new Response({ error: verdict.reason }, { status: 409 });
+
+        const recipients = await deleteRecipientsForCampaign(campaign.id);
+
+        await deleteCampaign(campaign.id);
+
+        audit({
+          action: AUDIT_ACTION.CAMPAIGN_DELETE,
+          actorId: caller.workspaceMemberId,
+          subject: {
+            campaignId: campaign.id,
+            templateId: campaign.templateId ?? null,
+            accountId: campaign.accountId ?? null,
+          },
+          /**
+           * The name and the audience go in the line, because after this the row
+           * they came from is not on the campaigns page to be looked up.
+           */
+          details: {
+            name: campaign.name ?? null,
+            status: campaign.status ?? null,
+            audience: campaign.audienceDefinition,
+            recipients,
+          },
+        });
+
+        return new Response(
+          { campaignId: campaign.id, deleted: true, recipients },
+          { status: 200 },
+        );
+      }
+
+      /**
+       * Archiving: hiding a finished campaign from the campaigns page.
+       *
+       * The cheapest possible operation on purpose — one nullable timestamp, no
+       * status change, no recipient rows touched. Archiving must be something an
+       * admin does to forty old campaigns without wondering what else it did,
+       * which it can only be if the answer is "nothing".
+       *
+       * Both arms are idempotent: archiving an archived campaign and unarchiving
+       * a live one answer 200 with `changed: false`, the same way `pause`
+       * answers a paused campaign (FR-CAM-8). A tidy-up that errors when two
+       * people tidy at once is a tidy-up nobody trusts.
+       */
+      case 'archive':
+      case 'unarchive': {
+        requireRole(caller, 'admin');
+
+        const { campaign } = loaded!;
+        const archiving = action === 'archive';
+        const already = isArchivedCampaign(campaign);
+
+        if (archiving) {
+          const verdict = canArchiveCampaign(campaign);
+
+          if (!verdict.ok) return new Response({ error: verdict.reason }, { status: 409 });
+        }
+
+        const changed = archiving !== already;
+
+        if (changed) {
+          await patchCampaign(campaign.id, {
+            archivedAt: archiving ? new Date().toISOString() : null,
+          });
+
+          audit({
+            action: archiving
+              ? AUDIT_ACTION.CAMPAIGN_ARCHIVE
+              : AUDIT_ACTION.CAMPAIGN_UNARCHIVE,
+            actorId: caller.workspaceMemberId,
+            subject: {
+              campaignId: campaign.id,
+              templateId: campaign.templateId ?? null,
+              accountId: campaign.accountId ?? null,
+            },
+            details: { name: campaign.name ?? null, status: campaign.status ?? null },
+          });
+        }
+
+        return new Response(
+          {
+            campaignId: campaign.id,
+            archived: archiving,
+            changed,
+            /**
+             * Said out loud because an archive that quietly stopped something
+             * would be the worst possible surprise: the counters on an archived
+             * campaign keep moving, and its replies keep arriving in the inbox.
+             */
+            note: archiving
+              ? 'Hidden from the campaigns page only. Delivery statuses and replies keep arriving.'
+              : null,
+          },
+          { status: 200 },
+        );
+      }
+
       default:
         return new Response({ error: `Unknown action: ${String(action)}` }, { status: 400 });
     }
@@ -1060,7 +1191,7 @@ export default defineLogicFunction({
   universalIdentifier: LF_CAMPAIGN_CONTROL,
   name: 'wa-campaign-control',
   description:
-    'Builds, previews, pre-flights, launches, pauses, resumes and cancels campaigns — admin-only and audited.',
+    'Builds, previews, pre-flights, launches, pauses, resumes, cancels, archives and unarchives campaigns, and deletes ones that never launched — admin-only and audited.',
   timeoutSeconds: 60,
   httpRouteTriggerSettings: {
     path: '/whatsapp/campaign',

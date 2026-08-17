@@ -593,6 +593,94 @@ describe('parsing what the composer sends', () => {
     });
   });
 
+  /**
+   * The route used to queue any non-null `interactive` object. The message
+   * then failed inside the sender, minutes later, with a Meta error nobody
+   * could map back to a field — and the builder that could have corrected it
+   * was long gone.
+   */
+  it('refuses an invalid interactive message with the field that caused it', () => {
+    const result = parseClientMessage({
+      kind: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: 'Confirma?' },
+        action: {
+          buttons: [{ type: 'reply', reply: { id: 'b1', title: 'x'.repeat(30) } }],
+        },
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toBe('INTERACTIVE_INVALID');
+    expect(result.ok === false && result.fields).toEqual([
+      { field: 'action.buttons.0.reply.title', code: 'TOO_LONG', limit: 20 },
+    ]);
+  });
+
+  it('accepts a well-formed quick-reply message', () => {
+    expect(
+      parseClientMessage({
+        kind: 'interactive',
+        interactive: {
+          type: 'button',
+          body: { text: 'Confirma a morada?' },
+          action: { buttons: [{ type: 'reply', reply: { id: 'b1', title: 'Sim' } }] },
+        },
+      }).ok,
+    ).toBe(true);
+  });
+
+  /**
+   * A transposed coordinate pair is accepted by Meta and sends the customer to
+   * a point in the Atlantic — the silent failure FR-CID-2 treats as the worst
+   * kind.
+   */
+  it('rejects coordinates outside the range a point on Earth can have', () => {
+    expect(parseClientMessage({ kind: 'location', latitude: 91, longitude: 13 }).ok).toBe(
+      false,
+    );
+    expect(
+      parseClientMessage({ kind: 'location', latitude: -8.9126, longitude: 13.2334 }).ok,
+    ).toBe(true);
+  });
+
+  it('accepts a contact card only when it names somebody', () => {
+    expect(
+      parseClientMessage({
+        kind: 'contacts',
+        contacts: [{ name: { formatted_name: 'Abel Febere' } }],
+      }).ok,
+    ).toBe(true);
+
+    expect(parseClientMessage({ kind: 'contacts', contacts: [{ phones: [] }] }).ok).toBe(
+      false,
+    );
+    expect(parseClientMessage({ kind: 'contacts', contacts: [] }).ok).toBe(false);
+  });
+
+  /**
+   * Only audio can be a voice note. Accepting the flag on an image would store
+   * a lie the transcript then renders — a photo with a microphone label.
+   */
+  it('keeps the voice flag on audio and drops it everywhere else', () => {
+    const voice = parseClientMessage({
+      kind: 'media',
+      mediaKind: 'audio',
+      filePath: 'x',
+      voice: true,
+    });
+    const photo = parseClientMessage({
+      kind: 'media',
+      mediaKind: 'image',
+      filePath: 'x',
+      voice: true,
+    });
+
+    expect(voice.ok === true && voice.message).toMatchObject({ voice: true });
+    expect(photo.ok === true && photo.message).toMatchObject({ voice: false });
+  });
+
   it('defaults template parameters and rejects a non-array body', () => {
     expect(parseClientMessage({ kind: 'template', templateId: 't1' }).ok).toBe(true);
     expect(

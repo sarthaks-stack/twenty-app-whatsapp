@@ -55,6 +55,31 @@ describe('projectMessage', () => {
       url: 'https://host/file/f1?token=x',
       deferred: false,
       downloadFailed: false,
+      isVoice: false,
+      isAnimated: false,
+      durationSeconds: null,
+      width: null,
+      height: null,
+    });
+  });
+
+  /**
+   * The two flags a renderer cannot infer. A voice note and an attached `.ogg`
+   * have the same MIME type and deserve different cards, so the projection has
+   * to carry Meta's own answer rather than a guess made from the file.
+   */
+  it('carries the voice flag and the dimensions the renderer reserves space with', () => {
+    const projected = projectMessage({
+      id: 'm1',
+      messageType: 'AUDIO',
+      mediaMeta: { mimeType: 'audio/ogg', voice: true, durationSeconds: 12 },
+    });
+
+    expect(projected.media).toMatchObject({ isVoice: true, durationSeconds: 12 });
+    expect(projected.content).toEqual({
+      kind: 'audio',
+      media: projected.media,
+      isVoice: true,
     });
   });
 
@@ -117,7 +142,46 @@ describe('projectMessage', () => {
       },
     });
 
-    expect(projected.reactions).toEqual([{ waId: '244900000001', emoji: '👍' }]);
+    expect(projected.reactions).toEqual([
+      {
+        actorId: '244900000001',
+        actorLabel: null,
+        actorKind: 'CONTACT',
+        emoji: '👍',
+        isMine: false,
+      },
+    ]);
+  });
+
+  /**
+   * Which chip is the viewer's own is the whole of the removal interaction:
+   * tapping an active reaction clears it, tapping another replaces it. The
+   * browser is told, never left to compare ids it was not given (D-53).
+   */
+  it('marks the reading rep’s own reaction, and nobody else’s', () => {
+    const projected = projectMessage(
+      {
+        id: 'm1',
+        payload: {
+          reactions: [
+            { workspaceMemberId: 'wm-1', emoji: '🙏' },
+            { workspaceMemberId: 'wm-2', emoji: '❤️' },
+            { waId: '244900000001', emoji: '👍' },
+          ],
+        },
+      },
+      { workspaceMemberId: 'wm-1', contactWaId: '244900000001', contactLabel: 'Marcos' },
+    );
+
+    expect(projected.reactions.map((reaction) => reaction.isMine)).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    expect(projected.reactions[2]).toMatchObject({
+      actorKind: 'CONTACT',
+      actorLabel: 'Marcos',
+    });
   });
 
   it('parses a JSON column that arrived as a string', () => {

@@ -61,6 +61,15 @@ export type FeedQuery = {
    * much slower clock instead.
    */
   counts: boolean;
+  /**
+   * Campaign scope: ask for the **archive** instead of the live list.
+   *
+   * A parameter rather than a client-side filter because the list is a page of
+   * 50 newest rows. Filtering in the browser would mean a workspace with 50
+   * archived campaigns receives 50 hidden rows and shows an empty campaigns page
+   * — the archive hiding the live campaigns instead of the past ones.
+   */
+  archived: boolean;
 };
 
 export type FeedQueryResult =
@@ -136,6 +145,12 @@ export const parseFeedQuery = (
     return { ok: false, error: `counts must be 0 or 1: ${rawCounts}` };
   }
 
+  const rawArchived = trimmed(params.archived);
+
+  if (rawArchived !== null && rawArchived !== '1' && rawArchived !== '0') {
+    return { ok: false, error: `archived must be 0 or 1: ${rawArchived}` };
+  }
+
   return {
     ok: true,
     query: {
@@ -147,6 +162,7 @@ export const parseFeedQuery = (
       before: trimmed(params.before),
       limit,
       counts: rawCounts === '1',
+      archived: rawArchived === '1',
     },
   };
 };

@@ -236,6 +236,28 @@ export default defineObject({
       type: FieldType.DATE_TIME,
       isNullable: true,
     },
+    /**
+     * When an admin filed this campaign away (FR-CAM-10).
+     *
+     * Visibility only, and deliberately not a status: a campaign is `COMPLETED`
+     * or `CANCELLED` whether or not anyone has tidied it off the page, and
+     * putting "archived" in the status column would have made the state machine
+     * answer a question about a *screen*. Nothing in the runner, the rollup or
+     * the reports reads this field — an archived campaign keeps reporting
+     * delivery statuses exactly as it did before.
+     *
+     * A timestamp rather than a boolean, for the reason every other flag here is
+     * one: "hidden since 3 August" is answerable and `true` is not.
+     */
+    {
+      universalIdentifier: f('archivedAt'),
+      name: 'archivedAt',
+      label: 'Archived at',
+      description: 'Set when a finished campaign is hidden from the campaigns page; visibility only',
+      icon: 'IconArchive',
+      type: FieldType.DATE_TIME,
+      isNullable: true,
+    },
     {
       universalIdentifier: f('testRecipientPhones'),
       name: 'testRecipientPhones',

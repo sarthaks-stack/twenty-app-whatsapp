@@ -79,6 +79,15 @@ Everything the agent has, plus: update `whatsappAccount` and `whatsappTemplate`
 (incl. `publishedToCrm`), full campaign control, consent import, webhook-event read and replay,
 and the app's settings section.
 
+**Deleting a campaign is withheld from the role and moved into the route.** `whatsappCampaign` and
+`whatsappCampaignRecipient` are updatable but not deletable through the Core API, because a record
+delete is one gesture with no notion of state: it would remove a cancelled or completed campaign —
+the counters, exclusion breakdown and recipient rows the launch audit line refers to — as readily as
+an untouched draft. Deleting a campaign that never launched is legitimate and stays possible through
+`POST /s/whatsapp/campaign { action: 'delete' }`, which checks `canDeleteCampaign` and audits the
+result (07 §9). This is the same reasoning as the app role's `canDestroyAllObjectRecords`
+(§3.1): a role cannot tell one campaign from another, so the control belongs where it can.
+
 ### 3.4 Server-side re-checks (SEC-5)
 
 Object permissions protect the Core API. They do **not** protect our HTTP routes, which run with
@@ -224,6 +233,8 @@ structured log line:
 | Template publish / unpublish | who, template, direction |
 | Account connect / disconnect / settings change | who, field-level diff **with secrets excluded** |
 | Campaign create / launch / pause / resume / cancel | who, previous state, audience definition snapshot, exclusion counts, template (SEC-12) |
+| Campaign delete (unlaunched only) | who, name, status, audience definition, snapshot rows removed — the row itself is gone, so the line is the only record it existed |
+| Campaign archive / unarchive | who, name, status — visibility only, but "the campaign is not on the page" and "the campaign was deleted" look identical to whoever comes looking |
 | Webhook replay | who, event ids |
 | Erasure | who, person, counts |
 

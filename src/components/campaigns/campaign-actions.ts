@@ -21,7 +21,10 @@ export type CampaignAction =
   | 'launch'
   | 'pause'
   | 'resume'
-  | 'cancel';
+  | 'cancel'
+  | 'delete'
+  | 'archive'
+  | 'unarchive';
 
 export type CampaignCallResult<T = Record<string, unknown>> =
   | { ok: true; data: T }

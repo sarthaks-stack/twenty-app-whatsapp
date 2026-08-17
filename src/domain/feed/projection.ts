@@ -1,4 +1,7 @@
 import { ERROR_CATALOG, ERROR_CLASS } from '../../providers/whatsapp/errors';
+import { projectContent, type MessageContentProjection } from './content';
+import type { MediaProjection } from './media';
+import type { QuoteProjection } from './quote';
 
 /**
  * The wire shapes the front components render (specs/08 §2).
@@ -15,19 +18,43 @@ import { ERROR_CATALOG, ERROR_CLASS } from '../../providers/whatsapp/errors';
  * change is never a server deploy.
  */
 
-export type MediaProjection = {
-  kind: string | null;
-  mimeType: string | null;
-  fileName: string | null;
-  sizeBytes: number | null;
-  /** Signed, short-lived, and only ever handed to an authenticated caller. */
-  url: string | null;
-  /** D-8: too large to have been fetched automatically; the UI offers a download. */
-  deferred: boolean;
-  downloadFailed: boolean;
+export type { MediaProjection };
+
+/**
+ * One reaction, by one identifiable actor (spec §"Required model change").
+ *
+ * `{ waId, emoji }` was enough while only customers could react: one emoji
+ * beside a bubble, nobody to attribute it to. It stops being enough the moment
+ * a rep can react too — the chip has to know which reaction is *the viewer's*,
+ * because tapping the active one removes it and tapping another replaces it,
+ * and a rep's reaction has no `waId` at all.
+ *
+ * `isMine` is decided on the server, from the caller the feed route already
+ * resolved (D-53). A browser comparing ids would be asserting an identity
+ * instead of being told one.
+ */
+export type ReactionProjection = {
+  /** A `waId` for a contact, a workspace member id for a rep. Stable, never displayed. */
+  actorId: string;
+  actorLabel: string | null;
+  actorKind: 'CONTACT' | 'WORKSPACE_MEMBER';
+  emoji: string;
+  isMine: boolean;
 };
 
-export type ReactionProjection = { waId: string; emoji: string };
+/** Who is reading, so `isMine` and the customer's own name can be filled in. */
+export type ViewerContext = {
+  workspaceMemberId: string | null;
+  /** The thread's contact: their `waId`, and what to call them in a quote strip. */
+  contactWaId: string | null;
+  contactLabel: string | null;
+};
+
+export const ANONYMOUS_VIEWER: ViewerContext = {
+  workspaceMemberId: null,
+  contactWaId: null,
+  contactLabel: null,
+};
 
 export type MessageProjection = {
   id: string;
@@ -52,6 +79,17 @@ export type MessageProjection = {
   reactionTargetWamid: string | null;
   media: MediaProjection | null;
   reactions: ReactionProjection[];
+  /**
+   * What this message *is*, as a product model the renderer registry switches
+   * on. The one field a component should reach for before `payload` or `type`.
+   */
+  content: MessageContentProjection;
+  /**
+   * The message this one replies to, resolved by the feed route in one batched
+   * read. Null when nothing was quoted, and also when the quoted message
+   * predates the install — a quote we cannot describe is not shown as a stub.
+   */
+  quote: QuoteProjection | null;
   /** Location, contact cards, interactive structures — and the "Ver detalhes" fallback. */
   payload: Record<string, unknown> | null;
   clientToken: string | null;
@@ -160,25 +198,78 @@ const projectMedia = (source: MessageSource): MediaProjection | null => {
     url: stringOrNull(file?.url),
     deferred: meta?.deferred === true,
     downloadFailed: meta?.downloadFailed === true,
+    /**
+     * `voice` and `animated` are set by the inbound normaliser from Meta's own
+     * flags, and by the composer's voice path on the way out. Neither is
+     * inferable from the MIME type: a voice note and an attached `.ogg` are
+     * both `audio/ogg`.
+     */
+    isVoice: meta?.voice === true,
+    isAnimated: meta?.animated === true,
+    durationSeconds: numberOrNull(meta?.durationSeconds) ?? numberOrNull(meta?.duration),
+    width: numberOrNull(meta?.width),
+    height: numberOrNull(meta?.height),
   };
 };
 
-const projectReactions = (payload: Record<string, unknown> | null): ReactionProjection[] => {
+/**
+ * The reactions stored on a message, attributed.
+ *
+ * Rows written before this projection existed carry only `{ waId, emoji }`, and
+ * they still render: a missing `actorKind` means a contact, because a rep's
+ * reaction could not have been written by the code that produced them. Reading
+ * the old shape is cheaper and safer than a migration over every message row
+ * that ever received a 👍.
+ */
+const projectReactions = (
+  payload: Record<string, unknown> | null,
+  viewer: ViewerContext,
+): ReactionProjection[] => {
   const raw = payload?.reactions;
 
   if (!Array.isArray(raw)) return [];
 
   return raw
     .map((entry) => asRecord(entry))
-    .map((entry) => ({
-      waId: stringOrNull(entry?.waId) ?? '',
-      emoji: stringOrNull(entry?.emoji) ?? '',
-    }))
-    .filter((reaction) => reaction.emoji.length > 0);
+    .flatMap((entry): ReactionProjection[] => {
+      const emoji = stringOrNull(entry?.emoji) ?? '';
+
+      if (emoji.length === 0) return [];
+
+      const memberId = stringOrNull(entry?.workspaceMemberId);
+      const waId = stringOrNull(entry?.waId);
+
+      if (memberId !== null) {
+        return [
+          {
+            actorId: memberId,
+            actorLabel: stringOrNull(entry?.actorLabel),
+            actorKind: 'WORKSPACE_MEMBER',
+            emoji,
+            isMine: viewer.workspaceMemberId === memberId,
+          },
+        ];
+      }
+
+      return [
+        {
+          actorId: waId ?? '',
+          actorLabel: stringOrNull(entry?.actorLabel) ?? viewer.contactLabel,
+          actorKind: 'CONTACT',
+          emoji,
+          // A contact is never the viewer: the viewer is a signed-in rep.
+          isMine: false,
+        },
+      ];
+    });
 };
 
-export const projectMessage = (source: MessageSource): MessageProjection => {
+export const projectMessage = (
+  source: MessageSource,
+  viewer: ViewerContext = ANONYMOUS_VIEWER,
+): MessageProjection => {
   const payload = asRecord(source.payload);
+  const media = projectMedia(source);
 
   return {
     id: source.id,
@@ -201,8 +292,22 @@ export const projectMessage = (source: MessageSource): MessageProjection => {
     templateCategory: stringOrNull(source.templateCategory),
     contextWamid: stringOrNull(source.contextWamid),
     reactionTargetWamid: stringOrNull(source.reactionTargetWamid),
-    media: projectMedia(source),
-    reactions: projectReactions(payload),
+    media,
+    reactions: projectReactions(payload, viewer),
+    content: projectContent({
+      type: stringOrNull(source.messageType),
+      direction: stringOrNull(source.direction),
+      body: typeof source.body === 'string' ? source.body : null,
+      payload,
+      media,
+      templateName: stringOrNull(source.templateName),
+      templateLanguage: stringOrNull(source.templateLanguage),
+      templateCategory: stringOrNull(source.templateCategory),
+      reactionTargetWamid: stringOrNull(source.reactionTargetWamid),
+    }),
+    // Filled in by the feed route's batched resolution; a bare projection has
+    // no way to read another row and must not pretend otherwise.
+    quote: null,
     payload,
     clientToken: stringOrNull(source.clientToken),
     sentById: stringOrNull(source.sentById),

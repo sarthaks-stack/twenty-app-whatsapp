@@ -330,6 +330,47 @@ export const retirePreviousSnapshot = async (campaignId: string): Promise<number
 };
 
 /**
+ * Soft-deletes every recipient row of a campaign that is being deleted.
+ *
+ * The rows of a *launched* campaign are its audit trail and are never touched
+ * by this — the deletion rule refuses that campaign long before here. What is
+ * left is the snapshot of a campaign nobody sent: a frozen list of people's
+ * phone numbers with no message behind it and no report to support. Keeping it
+ * after its campaign is gone would leave contact data in rows that no screen in
+ * the app can reach.
+ *
+ * Bounded and looped for the same reason `retirePreviousSnapshot` is: the server
+ * may cap how many rows one filtered mutation touches, and a snapshot can hold
+ * 100 000 of them. A pass that deletes nothing ends the loop — soft-deleted rows
+ * no longer match the filter, so the second pass over a small campaign is one
+ * cheap empty answer.
+ */
+export const deleteRecipientsForCampaign = async (campaignId: string): Promise<number> => {
+  let total = 0;
+
+  for (let pass = 0; pass < 200; pass += 1) {
+    const deleted = await query(
+      (client) =>
+        client.mutation({
+          deleteWhatsappCampaignRecipients: {
+            __args: { filter: { campaignId: { eq: campaignId } } },
+            id: true,
+          },
+        }),
+      'recipients.deleteForCampaign',
+    );
+
+    const count = (deleted.deleteWhatsappCampaignRecipients ?? []).length;
+
+    total += count;
+
+    if (count === 0) break;
+  }
+
+  return total;
+};
+
+/**
  * Which of these numbers this campaign has already accepted (FR-CAM-3).
  *
  * The duplicate detector, and deliberately **not** the `kv` set the spec

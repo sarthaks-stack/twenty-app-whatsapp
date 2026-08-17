@@ -31,7 +31,30 @@ export const AUDIT_ACTION = {
   CAMPAIGN_PAUSE: 'campaign.pause',
   CAMPAIGN_RESUME: 'campaign.resume',
   CAMPAIGN_CANCEL: 'campaign.cancel',
+  /**
+   * Only ever a campaign that never sent anything — the rule in
+   * `canDeleteCampaign` refuses the rest. Audited anyway: the line is what
+   * answers "where did the campaign I built on Friday go", which is otherwise
+   * unanswerable once the row is gone.
+   */
+  CAMPAIGN_DELETE: 'campaign.delete',
+  /**
+   * Visibility, not content — but audited, because "the campaign is not on the
+   * page" and "the campaign was deleted" look identical to whoever comes
+   * looking, and only one of them is true.
+   */
+  CAMPAIGN_ARCHIVE: 'campaign.archive',
+  CAMPAIGN_UNARCHIVE: 'campaign.unarchive',
   WEBHOOK_REPLAY: 'webhook.replay',
+  /**
+   * A contact created from a card a customer shared.
+   *
+   * Audited because the subject never consented to being in this CRM and is
+   * not the person who was messaging — "who put this record here, and from
+   * what" is the question a data-subject request asks, and without this line
+   * the answer is a Person row with no provenance at all (R-11).
+   */
+  PERSON_CREATED_FROM_CARD: 'person.created_from_card',
   ERASURE: 'person.erasure',
 } as const;
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

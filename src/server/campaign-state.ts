@@ -1,4 +1,4 @@
-import { canTransition } from '../domain/campaign/transitions';
+import { canTransition, isArchivedCampaign } from '../domain/campaign/transitions';
 import { CAMPAIGN_STATUS, type CampaignStatus } from '../domain/constants';
 import { AUDIT_ACTION, audit, type AuditAction } from './audit';
 import { logger } from './logger';
@@ -79,10 +79,23 @@ export const transitionCampaign = async ({
    * 40 more queued" is carrying real information, and dropping the patch to
    * keep the idempotence tidy would lose it.
    */
+  /**
+   * A campaign that moves is not a campaign anyone has finished with, so a real
+   * transition unarchives it.
+   *
+   * The only edges that can reach an archived campaign are `FAILED → PAUSED` and
+   * `FAILED → CANCELLED`, since archiving requires a stopped campaign and the
+   * other two stopped states are terminal. The first is the one that matters: an
+   * admin who archived a failed campaign, then fixed the template and recovered
+   * it, must not be left with a campaign they can resume and cannot see.
+   */
+  const unarchive = isArchivedCampaign(campaign) && !verdict.noop;
+
   await patchCampaign(campaign.id, {
     ...patch,
     ...(verdict.noop ? {} : { status: to }),
     ...(reason === undefined ? {} : { statusReason: reason }),
+    ...(unarchive ? { archivedAt: null } : {}),
   });
 
   const auditAction = verdict.noop ? undefined : AUDITED[to];
@@ -92,7 +105,14 @@ export const transitionCampaign = async ({
       action: auditAction,
       actorId,
       subject: { campaignId: campaign.id, templateId: campaign.templateId ?? null, accountId: campaign.accountId ?? null },
-      details: { from, to, reason: reason ?? null, name: campaign.name ?? null, ...details },
+      details: {
+      from,
+      to,
+      reason: reason ?? null,
+      name: campaign.name ?? null,
+      ...(unarchive ? { unarchived: true } : {}),
+      ...details,
+    },
     });
   }
 

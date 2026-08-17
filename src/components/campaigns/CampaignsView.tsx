@@ -11,6 +11,7 @@ import { CampaignDetail } from './CampaignDetail';
 import {
   CAMPAIGN_FILTERS,
   RUNNING_STATUSES,
+  isArchiveFilter,
   visibleCampaigns,
   type CampaignFilter,
 } from './list';
@@ -97,7 +98,24 @@ export const CampaignsView = () => {
     }
   }, [measure]);
 
-  const list = useFeed({ scope: 'campaign', intervalMs: 10_000 });
+  const archiveOpen = isArchiveFilter(filter);
+
+  /**
+   * One feed, two lists. `archived` changes what the server sends rather than
+   * what this component keeps, and the hook treats it as a change of subject —
+   * so switching to the archive clears the live rows instead of showing them
+   * under it for one interval.
+   *
+   * The archive polls on a slower clock: nothing in it is moving, by definition.
+   * Ten seconds is the interval for a page that might have a campaign sending on
+   * it, and paying that every ten seconds to re-read forty finished campaigns is
+   * exactly the cost D-6 exists to control.
+   */
+  const list = useFeed({
+    scope: 'campaign',
+    archived: archiveOpen,
+    intervalMs: archiveOpen ? 60_000 : 10_000,
+  });
   const detail = useFeed({
     scope: 'campaign',
     id: selectedId,
@@ -178,6 +196,16 @@ export const CampaignsView = () => {
               detail.refresh();
               list.refresh();
             }}
+            /**
+             * Back to the list, and refresh it — the deleted campaign is still
+             * in the last poll's `campaigns` array, so without the refresh the
+             * operator returns to a list that still shows what they just
+             * deleted and re-opens a 404.
+             */
+            onDeleted={() => {
+              setSelectedId(null);
+              list.refresh();
+            }}
           />
         )}
       </div>
@@ -206,8 +234,32 @@ export const CampaignsView = () => {
         >
           {t('campaign.title')}
         </span>
+        {/*
+          The heading says which of the two lists this is. Without it the archive
+          is a page of campaigns that look like the live ones and are not on the
+          live page — which is the moment somebody concludes a campaign has been
+          deleted.
+        */}
+        {archiveOpen ? (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: theme.spacing[1],
+              fontSize: theme.font.size.sm,
+              color: theme.font.color.tertiary,
+            }}
+          >
+            <Glyph name="archive" />
+            {t('campaign.archiveTitle')}
+          </span>
+        ) : null}
         <span style={{ flex: '1 1 auto' }} />
-        {canManage ? (
+        {/*
+          No "New campaign" while the archive is open: the button would create a
+          draft that appears on the page the operator is not looking at.
+        */}
+        {canManage && !archiveOpen ? (
           <ActionButton
             label={t('campaign.new')}
             tone="primary"
@@ -231,8 +283,14 @@ export const CampaignsView = () => {
       {/*
         The toolbar appears only once there is something to navigate. A search
         box above "Ainda não há campanhas." is furniture.
+
+        The exception is a filter that is already narrowing something — most of
+        all `archived`, which asks the server for a *different* list: an empty
+        archive with no chips is a screen with no way back to the campaigns,
+        which is precisely the hidden-state-with-no-exit this filter was added to
+        avoid.
       */}
-      {campaigns.length === 0 ? null : (
+      {campaigns.length === 0 && filter === 'all' ? null : (
         <div
           style={{
             display: 'flex',
@@ -324,20 +382,52 @@ export const CampaignsView = () => {
             >
               {t('common.loading')}
             </div>
+          ) : archiveOpen ? (
+            /*
+              An empty archive is not "no campaigns yet", and offering to create
+              one here would answer a question nobody asked. It offers the way
+              back instead — the only thing anyone wants from an empty archive.
+            */
+            <EmptyState
+              icon="archive"
+              title={t('campaign.archiveNone')}
+              body={t('campaign.archiveNoneBody')}
+              actions={
+                <ActionButton
+                  label={t('campaign.archiveBack')}
+                  icon="back"
+                  onClick={() => setFilter('all')}
+                />
+              }
+            />
           ) : (
             <EmptyState
               icon="newCampaign"
               title={t('campaign.none')}
               body={t('campaign.noneBody')}
+              /*
+                The archive link is here as well as in the chips, because this is
+                the one state where the chips are hidden — and "every campaign we
+                have is archived" is precisely a state that produces an empty
+                live list. Without it, archiving the last campaign would hide the
+                archive along with it.
+              */
               actions={
-                canManage ? (
+                <>
+                  {canManage ? (
+                    <ActionButton
+                      label={t('campaign.new')}
+                      tone="primary"
+                      icon="newCampaign"
+                      onClick={() => setScreen('builder')}
+                    />
+                  ) : null}
                   <ActionButton
-                    label={t('campaign.new')}
-                    tone="primary"
-                    icon="newCampaign"
-                    onClick={() => setScreen('builder')}
+                    label={t('campaign.filter.archived')}
+                    icon="archive"
+                    onClick={() => setFilter('archived')}
                   />
-                ) : undefined
+                </>
               }
             />
           )}
@@ -386,7 +476,9 @@ export const CampaignsView = () => {
                     'campaign.counter.failedCount',
                     'campaign.counter.respondedCount',
                     'campaign.counter.actualCost',
-                    'campaign.col.created',
+                    // In the archive, the date that matters is when it was filed
+                    // — which is also the order the rows arrive in.
+                    archiveOpen ? 'campaign.col.archived' : 'campaign.col.created',
                   ].map((key) => (
                     <th
                       key={key}
@@ -409,6 +501,7 @@ export const CampaignsView = () => {
                     now={now}
                     lang={lang}
                     t={t}
+                    archived={archiveOpen}
                     onOpen={() => setSelectedId(String(campaign.id))}
                   />
                 ))}
@@ -514,12 +607,15 @@ const CampaignRow = ({
   now,
   lang,
   t,
+  archived = false,
   onOpen,
 }: {
   campaign: Record<string, any>;
   now: Date;
   lang: 'pt' | 'en';
   t: Translate;
+  /** Rendering the archive: the last column reads `archivedAt`, not `createdAt`. */
+  archived?: boolean;
   onOpen: () => void;
 }) => {
   const theme = useTheme();
@@ -591,7 +687,11 @@ const CampaignRow = ({
         ${Number(campaign.actualCostUsd ?? campaign.estimatedCostUsd ?? 0).toFixed(2)}
       </td>
       <td style={{ ...cell, color: theme.font.color.tertiary }}>
-        {relativeTime(campaign.createdAt as string | null, now, lang)}
+        {relativeTime(
+          (archived ? campaign.archivedAt : campaign.createdAt) as string | null,
+          now,
+          lang,
+        )}
       </td>
     </tr>
   );

@@ -24,9 +24,33 @@ export type SendSpec =
       filePath?: string | null;
       filename?: string | null;
       caption?: string | null;
+      /**
+       * A microphone recording rather than an attached audio file.
+       *
+       * Meta does not infer it — an `.ogg` recorded in the composer and an
+       * `.ogg` somebody attached are byte-identical to the API — so the flag
+       * has to travel with the intention. Without it the customer receives a
+       * voice note as a file attachment, and our own transcript shows the
+       * generic audio card for a message that was plainly a voice message.
+       */
+      voice?: boolean;
       contextWamid?: string | null;
     }
-  | { kind: 'template'; templateId: string }
+  | {
+      kind: 'template';
+      templateId: string;
+      /**
+       * A template sent *as a reply* to a specific message.
+       *
+       * `buildTemplatePayload` has accepted this since it was written — the
+       * envelope helper carries `context` for every type — but nothing ever
+       * passed it, so choosing Reply and then sending a template silently
+       * dropped the quote. With the window closed a template is the *only*
+       * send available, which is precisely when a rep most needs to say which
+       * message they are answering.
+       */
+      contextWamid?: string | null;
+    }
   | {
       kind: 'interactive';
       interactive: Record<string, unknown>;

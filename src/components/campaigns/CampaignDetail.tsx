@@ -2,6 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { openCommandConfirmationModal } from 'twenty-sdk/front-component';
 import { useTheme } from 'twenty-ui/theme-constants';
 
+import {
+  canArchiveCampaign,
+  canDeleteCampaign,
+  isArchivedCampaign,
+} from '../../domain/campaign/transitions';
 import type { Lang, Translate } from '../common/copy';
 import { relativeTime } from '../common/format';
 import { Glyph } from '../common/icons';
@@ -34,6 +39,12 @@ export type CampaignDetailProps = {
   now: Date;
   onBack: () => void;
   onChanged: () => void;
+  /**
+   * Separate from `onChanged` because there is no longer a campaign to refresh:
+   * re-reading a deleted campaign answers 404 and the screen would sit on
+   * "loading" for a record that is gone.
+   */
+  onDeleted: () => void;
 };
 
 type Preflight = {
@@ -79,6 +90,7 @@ export const CampaignDetail = ({
   now,
   onBack,
   onChanged,
+  onDeleted,
 }: CampaignDetailProps) => {
   const theme = useTheme();
   const { call } = useCampaignActions();
@@ -138,6 +150,41 @@ export const CampaignDetail = ({
     },
     [run],
   );
+
+  /**
+   * Deletion, which cannot go through `run`: on success there is no campaign
+   * left to re-read, so it hands the screen back to the list instead of asking
+   * the feed for a record that no longer exists.
+   *
+   * The button that calls this only exists for a campaign that never launched
+   * (`canDeleteCampaign` below), and the route re-checks the same rule — so a
+   * campaign that finished sending between the render and the click is refused
+   * server-side rather than deleted by a stale screen.
+   */
+  const remove = useCallback(async () => {
+    const answer = await openCommandConfirmationModal({
+      title: t('campaign.delete'),
+      subtitle: t('campaign.deleteSubtitle'),
+      confirmButtonText: t('campaign.delete'),
+      confirmButtonAccent: 'danger',
+    });
+
+    if (answer !== 'confirm') return;
+
+    setBusy(true);
+    setError(null);
+
+    const result = await call('delete', { campaignId });
+
+    setBusy(false);
+
+    if (!result.ok) setError(result.error);
+    else onDeleted();
+  }, [call, campaignId, onDeleted, t]);
+
+  const deletion = canDeleteCampaign(campaign);
+  const archived = isArchivedCampaign(campaign);
+  const archivable = canArchiveCampaign(campaign);
 
   const label = { fontSize: theme.font.size.xs, color: theme.font.color.tertiary };
 
@@ -252,9 +299,49 @@ export const CampaignDetail = ({
             }
           />
         ) : null}
+
+        {/*
+          Archiving and its undo, in the same place, with no confirmation modal.
+
+          Deliberately unguarded: it hides nothing that cannot be shown again in
+          one click, and a dialog in front of a tidy-up is what makes an operator
+          leave forty finished campaigns on the page rather than file them. The
+          destructive controls above keep their modals — those are the ones that
+          cannot be taken back.
+        */}
+        {canManage && archived ? (
+          <ActionButton
+            label={t('campaign.unarchive')}
+            icon="unarchive"
+            busy={busy}
+            onClick={() => void run('unarchive')}
+          />
+        ) : null}
+        {canManage && !archived && archivable.ok ? (
+          <ActionButton
+            label={t('campaign.archive')}
+            icon="archive"
+            busy={busy}
+            onClick={() => void run('archive')}
+          />
+        ) : null}
       </div>
 
       {error === null ? null : <Banner tone="danger">{error}</Banner>}
+
+      {/*
+        Said on the record itself, not only in the list it is missing from: this
+        screen is reachable from a link, a search or a back button, and a
+        campaign that is quietly absent from the campaigns page is one somebody
+        will report as deleted.
+      */}
+      {archived ? (
+        <Banner>
+          {t('campaign.archivedOn', {
+            when: relativeTime(campaign.archivedAt as string | null, now, lang),
+          })}
+        </Banner>
+      ) : null}
 
       {canManage && status === 'READY' && preflight === null && error === null ? (
         <Banner>{t('campaign.launchNeedsPreflight')}</Banner>
@@ -560,6 +647,36 @@ export const CampaignDetail = ({
           </table>
         </div>
       </Card>
+
+      {/*
+        Deletion, last on the screen and only while it is legitimate.
+
+        A campaign that has sent something shows nothing here at all: there is
+        no disabled button and no explanation of a rule that cannot be broken,
+        because the honest answer to "how do I delete this" is that the record
+        of a bulk send to real people stays. Cancel is the control for that, and
+        it is at the top of the screen where the live campaigns' controls are.
+
+        What the note does say — while the campaign is still deletable — is that
+        launching ends this option, which is the one moment the rule is worth a
+        sentence.
+      */}
+      {canManage && deletion.ok ? (
+        <Card title={t('campaign.delete')}>
+          <span style={{ fontSize: theme.font.size.sm, color: theme.font.color.secondary }}>
+            {t('campaign.deleteNote')}
+          </span>
+          <div style={{ display: 'flex' }}>
+            <ActionButton
+              label={t('campaign.delete')}
+              tone="danger"
+              icon="remove"
+              busy={busy}
+              onClick={() => void remove()}
+            />
+          </div>
+        </Card>
+      ) : null}
     </div>
   );
 };

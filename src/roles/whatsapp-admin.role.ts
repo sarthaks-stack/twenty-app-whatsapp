@@ -67,8 +67,43 @@ export default defineRole({
     readOnly(OBJ_THREAD, '3f7d2b8e-1a95-4c60-8e43-9b2f6d1a5c78'),
     readWrite(OBJ_ACCOUNT, '6b1e9c4a-8d27-453f-9017-4a8c2e6b1d95'),
     readWrite(OBJ_TEMPLATE, 'd8a3f6c1-4b79-4e02-8536-1c9b7e4a2f60'),
-    readWrite(OBJ_CAMPAIGN, '1c5a8e2f-7d93-4b46-9f28-6e3d0b7a4c19'),
-    readWrite(OBJ_CAMPAIGN_RECIPIENT, '7e2b4d9a-3c86-4f15-8b70-5a1d9c3e6f42'),
+    /**
+     * Campaigns are editable but **not deletable through the Core API**.
+     *
+     * A record delete is a single gesture with no notion of state, so the
+     * platform's own delete on a campaign record would remove a cancelled or
+     * completed one — the counters, the exclusion breakdown and the recipient
+     * rows the launch audit line refers to — as readily as an untouched draft.
+     * That is the one thing a campaign record must never allow: it is the
+     * evidence of a bulk send to real people, and evidence that can be deleted
+     * by whoever is embarrassed by it is not evidence (SEC-12).
+     *
+     * Deleting a campaign that never launched is legitimate and remains
+     * possible, through the control route's `delete` arm, which checks the
+     * status and the counters and audits the result. So the capability is not
+     * withheld — it is moved to the only place that can tell one campaign from
+     * another.
+     *
+     * The recipient rows are held the same way, for the same reason and one
+     * more: they name people, and a snapshot is the list of who a campaign was
+     * about to message.
+     */
+    {
+      universalIdentifier: '1c5a8e2f-7d93-4b46-9f28-6e3d0b7a4c19',
+      objectUniversalIdentifier: OBJ_CAMPAIGN,
+      canReadObjectRecords: true,
+      canUpdateObjectRecords: true,
+      canSoftDeleteObjectRecords: false,
+      canDestroyObjectRecords: false,
+    },
+    {
+      universalIdentifier: '7e2b4d9a-3c86-4f15-8b70-5a1d9c3e6f42',
+      objectUniversalIdentifier: OBJ_CAMPAIGN_RECIPIENT,
+      canReadObjectRecords: true,
+      canUpdateObjectRecords: true,
+      canSoftDeleteObjectRecords: false,
+      canDestroyObjectRecords: false,
+    },
     /**
      * Consent events are the **evidence trail** (SEC-11): append-only by
      * design, written only by the app through `setConsent` and the erasure

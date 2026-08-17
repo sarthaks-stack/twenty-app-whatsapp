@@ -59,6 +59,7 @@ import { describeError, logger } from '../server/logger';
 import { METRIC, count } from '../server/metrics';
 import { noteCampaignChange } from '../server/campaign-deltas';
 import { transitionCampaign } from '../server/campaign-state';
+import { applyReaction } from '../server/reactions';
 import { rescheduleSend } from '../server/schedule';
 import { recordBusinessInitiated } from '../server/tier-ledger';
 import { TIMELINE_EVENT, THREAD_OBJECT_UID, writeTimelineActivity } from '../server/timeline';
@@ -264,6 +265,7 @@ export const buildOutboundPayload = ({
         mediaId,
         caption: spec.caption,
         filename: spec.filename,
+        voice: spec.voice === true,
         contextWamid: spec.contextWamid,
       });
     }
@@ -287,6 +289,7 @@ export const buildOutboundPayload = ({
         languageCode: template.languageCode,
         spec: template.spec,
         parameters,
+        contextWamid: spec.contextWamid,
       });
     }
 
@@ -1037,6 +1040,31 @@ export const sendOutbound = async (
     });
 
     await markAcceptedOutOfBand(message.id, accepted.wamid);
+  }
+
+  /**
+   * A reaction has to land on the message it is about, or it is invisible.
+   *
+   * Meta accepted it and the customer can see it; without this patch our own
+   * transcript shows nothing at all, because the only code that ever wrote a
+   * reaction onto a target was the inbound webhook handler. The rep presses
+   * 👍, the chip never appears, and the natural response is to press it again.
+   *
+   * `afterAcceptance` because the send already succeeded: a failure to
+   * decorate a bubble must never look like a failure to send, and must never
+   * cause a retry that would react twice.
+   */
+  if (spec.kind === 'reaction') {
+    await afterAcceptance('reaction', log, () =>
+      applyReaction({
+        targetWamid: spec.targetWamid,
+        actor: {
+          kind: 'WORKSPACE_MEMBER',
+          workspaceMemberId: message.sentById ?? '',
+        },
+        emoji: spec.emoji,
+      }),
+    );
   }
 
   /**

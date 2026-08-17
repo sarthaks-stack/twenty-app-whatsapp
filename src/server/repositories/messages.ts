@@ -270,6 +270,41 @@ const FEED_MESSAGE_FIELDS = {
 
 export type FeedMessageRecord = WhatsappMessageRecord & { mediaFile?: unknown };
 
+/**
+ * The messages a page of replies quotes, in one read (spec §"Reply UX").
+ *
+ * Separate from `findMessagesByWamids` because a quote strip may need a
+ * thumbnail, and the media URL only exists on the FILES sub-selection the feed
+ * field set asks for. Asking for it everywhere would mint a signed URL per row
+ * on every status-webhook lookup, which is the cost `FEED_MESSAGE_FIELDS`
+ * exists to keep out of the hot path.
+ *
+ * Capped, because the caller is a page of at most fifty messages and a hostile
+ * or corrupt page must not turn one feed read into an unbounded `in:` filter.
+ */
+export const MAX_QUOTE_LOOKUPS = 50;
+
+export const findFeedMessagesByWamids = async (
+  wamids: string[],
+): Promise<FeedMessageRecord[]> => {
+  const wanted = wamids.slice(0, MAX_QUOTE_LOOKUPS);
+
+  if (wanted.length === 0) return [];
+
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappMessages: {
+          __args: { filter: { wamid: { in: wanted } }, first: wanted.length },
+          edges: { node: FEED_MESSAGE_FIELDS },
+        },
+      }),
+    'messages.findFeedByWamids',
+  );
+
+  return nodesOf<FeedMessageRecord>(result.whatsappMessages);
+};
+
 export type MessagePage = {
   messages: FeedMessageRecord[];
   /** Opaque; hand back as `before` to load the page above this one. */

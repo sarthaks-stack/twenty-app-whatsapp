@@ -16,6 +16,10 @@ import {
   type TemplateCategory,
 } from '../domain/constants';
 import {
+  validateInteractive,
+  type FieldError,
+} from '../domain/interactive/validate';
+import {
   evaluateSendPermission,
   type SendContext,
   type SendIntent,
@@ -71,9 +75,16 @@ export type ClientMessage =
       filePath?: string | null;
       filename?: string | null;
       caption?: string | null;
+      /** A recording rather than an attached audio file; see `SendSpec.voice`. */
+      voice?: boolean;
       contextWamid?: string | null;
     }
-  | { kind: 'template'; templateId: string; parameters: ResolvedParameters }
+  | {
+      kind: 'template';
+      templateId: string;
+      parameters: ResolvedParameters;
+      contextWamid?: string | null;
+    }
   | { kind: 'interactive'; interactive: Record<string, unknown>; contextWamid?: string | null }
   | { kind: 'reaction'; targetWamid: string; emoji: string }
   | {
@@ -82,7 +93,9 @@ export type ClientMessage =
       longitude: number;
       name?: string | null;
       address?: string | null;
-    };
+      contextWamid?: string | null;
+    }
+  | { kind: 'contacts'; contacts: unknown[]; contextWamid?: string | null };
 
 export type SendRequestBody = {
   clientToken?: string;
@@ -98,9 +111,19 @@ export const MAX_TEXT_LENGTH = 4096;
 
 const MEDIA_KINDS = new Set(['image', 'video', 'audio', 'document', 'sticker']);
 
+/** Meta's own ceiling on a `contacts` message. */
+export const MAX_CONTACT_CARDS = 10;
+
 export type ParseResult =
   | { ok: true; message: ClientMessage }
-  | { ok: false; error: string };
+  /**
+   * `fields` is present only where a builder can point at what it rejected.
+   * A quick-reply form that receives `"interactive is invalid"` has to make the
+   * rep re-read every box; one that receives
+   * `action.buttons.1.reply.title / TOO_LONG / 20` puts the message under the
+   * box that caused it (spec §"Server hardening required").
+   */
+  | { ok: false; error: string; fields?: FieldError[] };
 
 const asString = (value: unknown): string | null =>
   typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
@@ -160,6 +183,12 @@ export const parseClientMessage = (raw: unknown): ParseResult => {
           filePath,
           filename: asString(message.filename),
           caption: asString(message.caption),
+          /**
+           * Only audio can be a voice note. Accepting the flag on an image
+           * would store a lie the transcript then renders — a photo with a
+           * microphone label — and nothing downstream would contradict it.
+           */
+          voice: mediaKind === 'audio' && message.voice === true,
           contextWamid: asString(message.contextWamid),
         },
       };
@@ -180,6 +209,7 @@ export const parseClientMessage = (raw: unknown): ParseResult => {
         message: {
           kind: 'template',
           templateId,
+          contextWamid: asString(message.contextWamid),
           parameters: {
             ...parameters,
             buttons: Array.isArray(parameters.buttons) ? parameters.buttons : [],
@@ -191,8 +221,24 @@ export const parseClientMessage = (raw: unknown): ParseResult => {
     case 'interactive': {
       const interactive = message.interactive;
 
-      if (interactive === null || typeof interactive !== 'object') {
-        return { ok: false, error: 'interactive must be an object' };
+      /**
+       * The route used to accept any non-null object here and queue it.
+       *
+       * That produced a `QUEUED` row and an optimistic bubble for a message
+       * Meta was always going to refuse — a duplicate row id, a title one
+       * character over the limit — and the refusal arrived minutes later,
+       * inside the sender, as an API error nobody could map back to a field.
+       * The validator is the difference between a builder that can correct
+       * itself and a message that fails after the builder is gone.
+       */
+      const validation = validateInteractive(interactive);
+
+      if (!validation.ok) {
+        return {
+          ok: false,
+          error: 'INTERACTIVE_INVALID',
+          fields: validation.errors,
+        };
       }
 
       return {
@@ -227,6 +273,16 @@ export const parseClientMessage = (raw: unknown): ParseResult => {
         return { ok: false, error: 'latitude and longitude must be numbers' };
       }
 
+      /**
+       * Out-of-range coordinates are rejected here rather than by Meta. A
+       * transposed pair — 13.23, -8.91 for Luanda — is accepted by the API and
+       * sends the customer to a point in the Atlantic, which is a silent
+       * failure of exactly the kind FR-CID-2 treats as unacceptable.
+       */
+      if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) {
+        return { ok: false, error: 'latitude or longitude is out of range' };
+      }
+
       return {
         ok: true,
         message: {
@@ -235,6 +291,43 @@ export const parseClientMessage = (raw: unknown): ParseResult => {
           longitude,
           name: asString(message.name),
           address: asString(message.address),
+          contextWamid: asString(message.contextWamid),
+        },
+      };
+    }
+
+    case 'contacts': {
+      const contacts = Array.isArray(message.contacts) ? message.contacts : null;
+
+      if (contacts === null || contacts.length === 0) {
+        return { ok: false, error: 'contacts must be a non-empty array' };
+      }
+
+      if (contacts.length > MAX_CONTACT_CARDS) {
+        return { ok: false, error: `contacts takes at most ${MAX_CONTACT_CARDS} cards` };
+      }
+
+      /**
+       * A card with no name is a card the recipient sees as blank. Meta accepts
+       * it; the person on the other end gets an empty contact they cannot use.
+       */
+      const named = contacts.every((entry) => {
+        const card = entry as { name?: { formatted_name?: unknown; first_name?: unknown } };
+
+        return (
+          asString(card?.name?.formatted_name) !== null ||
+          asString(card?.name?.first_name) !== null
+        );
+      });
+
+      if (!named) return { ok: false, error: 'every contact needs a name' };
+
+      return {
+        ok: true,
+        message: {
+          kind: 'contacts',
+          contacts,
+          contextWamid: asString(message.contextWamid),
         },
       };
     }
@@ -255,6 +348,7 @@ const MESSAGE_TYPE_FOR: Record<string, MessageType> = {
   interactive: MESSAGE_TYPE.INTERACTIVE,
   reaction: MESSAGE_TYPE.REACTION,
   location: MESSAGE_TYPE.LOCATION,
+  contacts: MESSAGE_TYPE.CONTACTS,
 };
 
 export const messageTypeFor = (message: ClientMessage): MessageType =>
@@ -266,7 +360,11 @@ export const messageTypeFor = (message: ClientMessage): MessageType =>
 export const toSendSpec = (message: ClientMessage): SendSpec => {
   switch (message.kind) {
     case 'template':
-      return { kind: 'template', templateId: message.templateId };
+      return {
+        kind: 'template',
+        templateId: message.templateId,
+        contextWamid: message.contextWamid,
+      };
     case 'media':
       return {
         kind: 'media',
@@ -276,6 +374,7 @@ export const toSendSpec = (message: ClientMessage): SendSpec => {
         filePath: message.filePath,
         filename: message.filename,
         caption: message.caption,
+        ...(message.voice === true ? { voice: true } : {}),
         contextWamid: message.contextWamid,
       };
     default:
@@ -371,7 +470,15 @@ export const handler = async (
 
     const parsed = parseClientMessage(body.message);
 
-    if (!parsed.ok) return new Response({ error: parsed.error }, { status: 400 });
+    if (!parsed.ok) {
+      return new Response(
+        {
+          error: parsed.error,
+          ...(parsed.fields === undefined ? {} : { fields: parsed.fields }),
+        },
+        { status: 400 },
+      );
+    }
 
     /**
      * Idempotency before anything else that writes.

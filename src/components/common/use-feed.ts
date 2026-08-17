@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RestApiClient } from 'twenty-client-sdk/rest';
 import { getApplicationVariable } from 'twenty-sdk/front-component';
 
+import type { ThreadCapabilities } from '../../domain/feed/capabilities';
 import type {
   AccountProjection,
   MessageProjection,
@@ -81,6 +82,17 @@ export type FeedEnvelope = {
   olderCursor?: string | null;
   nextCursor?: string | null;
   policy?: FeedPolicy;
+  /**
+   * One verdict per composer action (spec §"Capability matrix").
+   *
+   * Sent on every thread read, delta included, and deliberately so: the 24-hour
+   * window closes on a clock, not on an event, so a capability set cached from
+   * the last full load would keep the ＋ menu lit for hours after every action
+   * in it had become impossible. Seven small verdicts is the right price for
+   * that — unlike the template catalogue, which is sixty rows and changes
+   * rarely (`mergeEnvelope`).
+   */
+  capabilities?: ThreadCapabilities;
   templates?: FeedTemplate[];
   campaign?: Record<string, unknown>;
   campaigns?: Record<string, unknown>[];
@@ -108,6 +120,14 @@ export type UseFeedOptions = {
    * counts feed asks for one row rather than fifty it would throw away.
    */
   limit?: number;
+  /**
+   * Campaign scope: ask for the archive instead of the live list.
+   *
+   * Changing it starts a new subject, like a change of `filter` — the two lists
+   * are different pages and merging one into the other's state would show the
+   * archive's rows under the live list's heading for one interval.
+   */
+  archived?: boolean;
 };
 
 export type UseFeedResult = {
@@ -203,6 +223,7 @@ export const useFeed = ({
   enabled = true,
   counts = false,
   limit,
+  archived = false,
 }: UseFeedOptions): UseFeedResult => {
   const [data, setData] = useState<FeedEnvelope | null>(null);
   const [messages, setMessages] = useState<MessageProjection[]>([]);
@@ -249,6 +270,7 @@ export const useFeed = ({
         if (by !== undefined) query.by = by;
         if (filter !== undefined) query.filter = filter;
         if (counts) query.counts = '1';
+        if (archived) query.archived = '1';
         if (limit !== undefined) query.limit = String(limit);
         if (mode === 'delta' && since.current !== null) query.since = since.current;
         if (mode === 'older' && olderCursor.current !== null) {
@@ -309,7 +331,7 @@ export const useFeed = ({
         setIsLoading(false);
       }
     },
-    [by, client, counts, filter, id, limit, scope],
+    [archived, by, client, counts, filter, id, limit, scope],
   );
 
   const refresh = useCallback(() => {
@@ -349,7 +371,7 @@ export const useFeed = ({
     setMessages([]);
     setData(null);
     setHasOlder(false);
-  }, [scope, id, by, filter]);
+  }, [scope, id, by, filter, archived]);
 
   useEffect(() => {
     if (!enabled || isSuspended) return;

@@ -130,6 +130,49 @@ describe('visibleCampaigns', () => {
 
     expect(visibleCampaigns(rows, 'running', 'agosto').map((row) => row.id)).toEqual(['a']);
   });
+
+  /**
+   * The archive is a different request, not a narrower view of this one. Every
+   * row the server sent for it is archived by construction, so the client must
+   * not second-guess the field — least of all in the moment after archiving,
+   * when the row on screen is stale in exactly that column.
+   */
+  it('shows everything the archive request returned', () => {
+    const rows = [
+      campaign({ id: 'a', status: 'COMPLETED', archivedAt: '2026-08-10T00:00:00.000Z' }),
+      campaign({ id: 'b', status: 'CANCELLED', archivedAt: null }),
+    ];
+
+    expect(visibleCampaigns(rows, 'archived', '').map((row) => row.id)).toEqual(['a', 'b']);
+  });
+
+  /**
+   * And it keeps the server's order — most recently filed first. Lifting a
+   * failed campaign to the top of the archive would argue with the decision to
+   * archive it.
+   */
+  it('does not re-sort the archive by urgency', () => {
+    const rows = [
+      campaign({ id: 'done', status: 'COMPLETED' }),
+      campaign({ id: 'broke', status: 'FAILED' }),
+    ];
+
+    expect(visibleCampaigns(rows, 'archived', '').map((row) => row.id)).toEqual([
+      'done',
+      'broke',
+    ]);
+    // The live list does the opposite, deliberately.
+    expect(visibleCampaigns(rows, 'all', '').map((row) => row.id)).toEqual(['broke', 'done']);
+  });
+
+  it('still searches inside the archive', () => {
+    const rows = [
+      campaign({ id: 'a', name: 'Agosto', status: 'COMPLETED' }),
+      campaign({ id: 'b', name: 'Setembro', status: 'COMPLETED' }),
+    ];
+
+    expect(visibleCampaigns(rows, 'archived', 'setem').map((row) => row.id)).toEqual(['b']);
+  });
 });
 
 describe('deliveryFunnel', () => {

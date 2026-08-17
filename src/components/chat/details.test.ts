@@ -1,84 +1,159 @@
 import { describe, expect, it } from 'vitest';
 
 import { projectMessage, type MessageProjection } from '../../domain/feed/projection';
-import { messageDetails } from './details';
+import { isCopyKey, messageDetails } from './details';
 
-const message = (
-  messageType: string,
-  payload: Record<string, unknown> | null,
-): MessageProjection => projectMessage({ id: 'm1', messageType, payload });
+const message = (overrides: Record<string, unknown>): MessageProjection =>
+  projectMessage({ id: 'm1', ...overrides });
 
 /**
- * The bubble used to answer "Ver detalhes" with the raw webhook object. What
- * replaces it must show the handful of things the body genuinely drops — and,
- * just as importantly, must show *nothing* for the many types where the body
- * already says everything, so those bubbles lose the button entirely.
+ * The panel's job changed with the renderer registry.
+ *
+ * It used to lift an address or a phone number out of the payload, because the
+ * bubble showed neither. The bubble shows both now, and the spec is explicit
+ * that no location or contact should need "Show details" to be understandable —
+ * so what is left here is the delivery story, and the ids an automation keys
+ * off. Never the raw webhook object, which is what it showed before either
+ * version of this file existed.
  */
 describe('messageDetails', () => {
-  it('gives a location its address and coordinates', () => {
+  it('tells the delivery story in the order it happened', () => {
     expect(
       messageDetails(
-        message('LOCATION', {
-          latitude: -8.83,
-          longitude: 13.23,
-          name: 'Mercado',
-          address: 'Rua Rainha Ginga 12',
+        message({
+          messageType: 'TEXT',
+          direction: 'OUTBOUND',
+          statusTimestamps: {
+            read: 1_786_809_900,
+            accepted: 1_786_809_498,
+            delivered: 1_786_809_700,
+          },
         }),
+        () => 'HH:MM',
       ),
     ).toEqual([
-      { key: 'chat.detail.address', value: 'Rua Rainha Ginga 12' },
-      { key: 'chat.detail.coordinates', value: '-8.83, 13.23' },
+      { key: 'chat.detail.type', value: 'chat.type.TEXT' },
+      { key: 'chat.detail.accepted', value: 'HH:MM' },
+      { key: 'chat.detail.delivered', value: 'HH:MM' },
+      { key: 'chat.detail.read', value: 'HH:MM' },
     ]);
   });
 
-  it('omits the coordinates when only one half arrived', () => {
-    expect(messageDetails(message('LOCATION', { latitude: -8.83 }))).toEqual([]);
+  /**
+   * Epoch *seconds*, which is what Meta sends. Reading them as milliseconds
+   * dates every message to January 1970 — a unit bug that looks like a
+   * formatting one.
+   */
+  it('reads the stored timestamps as seconds', () => {
+    const rows = messageDetails(
+      message({ messageType: 'TEXT', statusTimestamps: { sent: 1_786_809_498 } }),
+      (iso) => iso,
+    );
+
+    expect(rows).toContainEqual({
+      key: 'chat.detail.sent',
+      value: new Date(1_786_809_498_000).toISOString(),
+    });
   });
 
-  it('flattens a shared contact card to name and number', () => {
+  it('shows the id behind a quick reply, which is the one thing the bubble cannot', () => {
     expect(
       messageDetails(
-        message('CONTACTS', {
-          contacts: [
-            {
-              name: { formatted_name: 'Ana Paula' },
-              phones: [{ phone: '+244 923 456 789' }],
-            },
-          ],
+        message({
+          messageType: 'BUTTON_REPLY',
+          body: 'Sim',
+          payload: { id: 'btn_yes', title: 'Sim' },
         }),
       ),
-    ).toEqual([{ key: 'chat.detail.contact', value: 'Ana Paula · +244 923 456 789' }]);
-  });
+    ).toContainEqual({ key: 'chat.detail.buttonId', value: 'btn_yes' });
 
-  it('still shows a contact card that has only a name', () => {
-    expect(
-      messageDetails(message('CONTACTS', { contacts: [{ name: { first_name: 'Ana' } }] })),
-    ).toEqual([{ key: 'chat.detail.contact', value: 'Ana' }]);
-  });
-
-  it('drops a contact entry that carries neither a name nor a number', () => {
-    expect(messageDetails(message('CONTACTS', { contacts: [{}, null] }))).toEqual([]);
-  });
-
-  it('gives a list reply its second line', () => {
     expect(
       messageDetails(
-        message('LIST_REPLY', { id: 'x', title: 'Entrega', description: 'Chega amanhã' }),
+        message({
+          messageType: 'LIST_REPLY',
+          payload: { id: 'row_b', title: 'Opção B', description: 'Entrega em 48h' },
+        }),
       ),
-    ).toEqual([{ key: 'chat.detail.description', value: 'Chega amanhã' }]);
+    ).toContainEqual({ key: 'chat.detail.rowId', value: 'row_b' });
   });
 
   /**
-   * The whole point. A button reply's payload is `{id, title}` and the bubble
-   * already prints the title — there is nothing left to reveal, so no button.
+   * The description is in the bubble now. Repeating it here would make the
+   * panel a second, worse copy of the message.
    */
-  it('has nothing to add for the types whose body already says it', () => {
-    expect(messageDetails(message('BUTTON_REPLY', { id: 'x', title: 'Sim' }))).toEqual([]);
-    expect(messageDetails(message('TEXT', { body: 'olá' }))).toEqual([]);
-    expect(messageDetails(message('SYSTEM', { body: 'number changed' }))).toEqual([]);
+  it('does not repeat what the renderer already shows', () => {
+    const rows = messageDetails(
+      message({
+        messageType: 'LIST_REPLY',
+        payload: { id: 'row_b', title: 'Opção B', description: 'Entrega em 48h' },
+      }),
+    );
+
+    expect(rows.map((row) => row.value)).not.toContain('Entrega em 48h');
   });
 
-  it('answers nothing at all for a message with no payload', () => {
-    expect(messageDetails(message('LOCATION', null))).toEqual([]);
+  it('names the file and its size for an attachment', () => {
+    expect(
+      messageDetails(
+        message({
+          messageType: 'DOCUMENT',
+          mediaMeta: { filename: 'Proposta.pdf', fileSize: 82_000 },
+        }),
+      ),
+    ).toEqual([
+      { key: 'chat.detail.type', value: 'chat.type.DOCUMENT' },
+      { key: 'chat.detail.file', value: 'Proposta.pdf' },
+      { key: 'chat.detail.size', value: '80 kB' },
+    ]);
+  });
+
+  it('names the template’s language and category, which the bubble does not', () => {
+    const rows = messageDetails(
+      message({
+        messageType: 'TEMPLATE',
+        templateName: 'boas_vindas',
+        templateLanguage: 'pt_PT',
+        templateCategory: 'UTILITY',
+      }),
+    );
+
+    expect(rows).toContainEqual({ key: 'chat.detail.template', value: 'boas_vindas' });
+    expect(rows).toContainEqual({ key: 'chat.detail.language', value: 'pt_PT' });
+  });
+
+  it('attributes reactions, which the chips can only do in a hover label', () => {
+    expect(
+      messageDetails(
+        message({
+          messageType: 'TEXT',
+          payload: {
+            reactions: [{ waId: '244900000001', actorLabel: 'Marcos', emoji: '👍' }],
+          },
+        }),
+      ),
+    ).toContainEqual({ key: 'chat.detail.reactions', value: '👍 Marcos' });
+  });
+
+  it('counts attempts only when there were any', () => {
+    expect(
+      messageDetails(message({ messageType: 'TEXT', retryCount: 2 })),
+    ).toContainEqual({ key: 'chat.detail.attempts', value: '2' });
+
+    expect(
+      messageDetails(message({ messageType: 'TEXT', retryCount: 0 })).map((row) => row.key),
+    ).not.toContain('chat.detail.attempts');
+  });
+});
+
+describe('isCopyKey', () => {
+  /**
+   * The type row's value is itself a copy key and must be translated; a
+   * filename must not. Translating everything would render `Proposta.pdf` as
+   * the literal string `Proposta.pdf` — harmless — and translating nothing
+   * would show a rep the raw key `chat.type.IMAGE`, which is not.
+   */
+  it('separates a translatable value from data', () => {
+    expect(isCopyKey('chat.type.IMAGE')).toBe(true);
+    expect(isCopyKey('Proposta.pdf')).toBe(false);
   });
 });

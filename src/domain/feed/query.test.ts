@@ -33,7 +33,33 @@ describe('parseFeedQuery', () => {
         before: null,
         limit: DEFAULT_MESSAGE_PAGE,
         counts: false,
+        archived: false,
       },
+    });
+  });
+
+  /**
+   * The campaign list and the campaign archive are two pages of the same 50-row
+   * budget, so which one is being asked for cannot be guessed: `archived=yes`
+   * silently meaning "the live list" would leave an operator looking at their
+   * campaigns while the screen said "Arquivo".
+   */
+  it('treats a missing archived flag as the live list, and refuses anything but 0 or 1', () => {
+    expect(parseFeedQuery({ scope: 'campaign' })).toMatchObject({
+      ok: true,
+      query: { archived: false },
+    });
+    expect(parseFeedQuery({ scope: 'campaign', archived: '1' })).toMatchObject({
+      ok: true,
+      query: { archived: true },
+    });
+    expect(parseFeedQuery({ scope: 'campaign', archived: '0' })).toMatchObject({
+      ok: true,
+      query: { archived: false },
+    });
+    expect(parseFeedQuery({ scope: 'campaign', archived: 'yes' })).toEqual({
+      ok: false,
+      error: 'archived must be 0 or 1: yes',
     });
   });
 

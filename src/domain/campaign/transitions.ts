@@ -59,6 +59,124 @@ export const isTerminal = (status: CampaignStatus): boolean =>
 export const isActive = (status: CampaignStatus): boolean =>
   status === S.RUNNING || status === S.TIER_WAITING;
 
+/**
+ * The states from which a campaign may be **deleted** (FR-CAM-8, SEC-12).
+ *
+ * Deletion is not a transition — it removes the row rather than moving it — but
+ * it is the same kind of judgement as `cancel is final`, so it lives beside the
+ * table rather than in the route that offers it.
+ *
+ * The rule is narrow on purpose: only a campaign that was never launched. A
+ * `CANCELLED` or `COMPLETED` campaign is the record of what went out to real
+ * people — its counters, its exclusion breakdown and its recipient rows are the
+ * evidence the launch audit line points at — and a record that can be deleted
+ * by whoever is embarrassed by it is not evidence. Stopping a campaign is
+ * `cancel`; there is no follow-up that makes it never have happened.
+ *
+ * `SNAPSHOTTING` is included because a build in flight has still sent nothing.
+ * The snapshot job finds the campaign gone and stops, which is the same
+ * outcome as a build cancelled halfway.
+ */
+export const DELETABLE_STATUSES: readonly CampaignStatus[] = [
+  S.DRAFT,
+  S.SNAPSHOTTING,
+  S.READY,
+];
+
+export type DeletionVerdict = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Whether this campaign may be deleted.
+ *
+ * Takes the loose record shape both callers hold — the route reads it from the
+ * repository, the detail screen from the feed — because the two agree on the
+ * four fields that matter and on nothing else.
+ *
+ * The counters are checked *as well as* the status, and not as a formality: a
+ * campaign that reached `READY`, launched, and was somehow written back to
+ * `DRAFT` would pass the status test while holding sent messages. The status is
+ * what a campaign says about itself; `sentCount` and `startedAt` are what
+ * happened.
+ */
+export const canDeleteCampaign = (campaign: {
+  status?: string | null;
+  sentCount?: number | null;
+  queuedCount?: number | null;
+  startedAt?: string | null;
+}): DeletionVerdict => {
+  const status = (campaign.status ?? S.DRAFT) as CampaignStatus;
+
+  if (!DELETABLE_STATUSES.includes(status)) {
+    return {
+      ok: false,
+      reason: `A ${status} campaign is the record of a send that was made and cannot be deleted. Only a campaign that was never launched can be.`,
+    };
+  }
+
+  const moved = (campaign.sentCount ?? 0) > 0 || (campaign.queuedCount ?? 0) > 0;
+
+  if (moved || (campaign.startedAt ?? null) !== null) {
+    return {
+      ok: false,
+      reason:
+        'This campaign has already queued or sent messages, so it is kept as the record of them. Cancel it if you need it stopped.',
+    };
+  }
+
+  return { ok: true };
+};
+
+/**
+ * The states a campaign may be **archived** from (FR-CAM-10).
+ *
+ * Archiving hides a finished campaign from the campaigns page and changes
+ * nothing else: no status moves, no counter is touched, the rollup keeps
+ * aggregating its delivery statuses. It is the answer to "I cannot delete a
+ * cancelled campaign and I do not want to look at forty of them", which is the
+ * other half of the deletion rule above — a record that must be kept still has
+ * to be got out of the way.
+ *
+ * Only campaigns that have stopped. A `RUNNING` or `SCHEDULED` campaign hidden
+ * from the only page that shows it would keep sending to thousands of people
+ * with nothing on screen to pause it, which is the one outcome archiving must
+ * never produce. `FAILED` is included — it has stopped — and is the reason
+ * `transitionCampaign` unarchives: a failed campaign an admin recovers has to
+ * come back into view.
+ */
+export const ARCHIVABLE_STATUSES: readonly CampaignStatus[] = [
+  S.COMPLETED,
+  S.CANCELLED,
+  S.FAILED,
+];
+
+export type ArchiveVerdict = { ok: true } | { ok: false; reason: string };
+
+export const isArchivedCampaign = (campaign: { archivedAt?: string | null }): boolean =>
+  (campaign.archivedAt ?? null) !== null;
+
+/**
+ * Whether this campaign may be archived.
+ *
+ * Unarchiving has no rule of its own: anything that is archived can be brought
+ * back, always. A hidden state you cannot leave is the failure the inbox's
+ * `closed` filter was added to avoid, and it would be worse here — the campaign
+ * that cannot be found again is also the one that cannot be reported on.
+ */
+export const canArchiveCampaign = (campaign: {
+  status?: string | null;
+}): ArchiveVerdict => {
+  const status = (campaign.status ?? S.DRAFT) as CampaignStatus;
+
+  if (!ARCHIVABLE_STATUSES.includes(status)) {
+    return {
+      ok: false,
+      reason: `A ${status} campaign has not finished, so it cannot be archived. Cancel it first if you want it out of the way.`,
+    };
+  }
+
+  return { ok: true };
+};
+
 export type TransitionVerdict =
   | { ok: true; noop: boolean }
   | { ok: false; reason: string };

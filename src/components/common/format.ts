@@ -155,6 +155,50 @@ export const fileSize = (bytes: number | null | undefined): string => {
   return `${value < 10 && unit > 0 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 };
 
+/**
+ * `2:07` — a media duration, in the one format every player uses.
+ *
+ * Not localised, and deliberately so: a colon between minutes and seconds is
+ * how a duration is written in both pt and en, and running it through
+ * `Intl.RelativeTimeFormat` would turn "2:07" into "há 2 minutos", which is a
+ * statement about *when* rather than *how long*.
+ */
+export const duration = (seconds: number | null | undefined): string => {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '';
+
+  const whole = Math.round(seconds);
+  const minutes = Math.floor(whole / 60);
+
+  return `${minutes}:${String(whole % 60).padStart(2, '0')}`;
+};
+
+/**
+ * The coordinates a location card shows as its quiet third line.
+ *
+ * Six decimal places is roughly 10 cm, which is far more precision than a
+ * dropped pin has; four is ~11 m and is what a rep can act on without the
+ * number wrapping onto a second line in a narrow pane.
+ */
+export const coordinates = (
+  latitude: number | null,
+  longitude: number | null,
+): string | null =>
+  latitude === null || longitude === null
+    ? null
+    : `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+
+/**
+ * An external map link for a dropped pin.
+ *
+ * A plain link rather than an embedded tile: the sandbox renders with an opaque
+ * origin, so a third-party tile server is a request that either fails or leaks
+ * the customer's location to a host nobody chose (spec §"Location").
+ */
+export const mapLink = (latitude: number | null, longitude: number | null): string | null =>
+  latitude === null || longitude === null
+    ? null
+    : `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+
 /** `+244 928 863 659` — grouped for reading, never for dialling. */
 export const displayPhone = (value: string | null | undefined): string => {
   if (typeof value !== 'string' || value.length === 0) return '';

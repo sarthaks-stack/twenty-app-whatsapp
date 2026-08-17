@@ -3,15 +3,19 @@ import { Response, type RoutePayload } from 'twenty-sdk/logic-function';
 
 import { LF_THREAD_ACTIONS_ROUTE } from '../constants/universal-identifiers';
 import { THREAD_STATUS, type ThreadStatus } from '../domain/constants';
+import { splitE164, toE164 } from '../domain/phone/normalise';
 import { getProvider } from '../providers/whatsapp';
 import { AUDIT_ACTION, audit } from '../server/audit';
 import { authErrorResponse, requireCaller, requireRole } from '../server/auth';
-import { config } from '../server/config';
+import { config, forAccount } from '../server/config';
 import { describeError, logger } from '../server/logger';
 import { TIMELINE_EVENT, THREAD_OBJECT_UID, writeTimelineActivity } from '../server/timeline';
 import { findAccountById } from '../server/repositories/accounts';
 import { findNewestInboundWamid } from '../server/repositories/messages';
-import { findPersonById } from '../server/repositories/people';
+import {
+  createPersonFromWhatsApp,
+  findPersonById,
+} from '../server/repositories/people';
 import {
   findThreadById,
   patchThread,
@@ -37,7 +41,8 @@ export type ThreadAction =
   | 'link'
   | 'relink'
   | 'markRead'
-  | 'snooze';
+  | 'snooze'
+  | 'createPerson';
 
 export type ThreadActionBody = {
   action?: ThreadAction;
@@ -48,6 +53,16 @@ export type ThreadActionBody = {
   personId?: string | null;
   /** `snooze`: ISO timestamp; null clears. */
   snoozedUntil?: string | null;
+  /**
+   * `createPerson`: the values a rep **reviewed**, not the raw vCard.
+   *
+   * The card is third-party data and may carry five numbers; which one becomes
+   * the Person's primary is a decision, and this route receives the decision
+   * rather than making one (spec §"Shared contacts").
+   */
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
 };
 
 /**
@@ -273,6 +288,68 @@ export const handler = async (
         await patchThread(thread.id, { snoozedUntil });
 
         return new Response({ threadId: thread.id, snoozedUntil }, { status: 200 });
+      }
+
+      /**
+       * A Person created from a shared contact card (spec §"Shared contacts").
+       *
+       * The card is a *third party's* details, sent by the customer without
+       * that person's involvement — so nothing here happens automatically. The
+       * rep reviews the name and number in a form first, and the values this
+       * route receives are the ones they confirmed, never the raw vCard: a
+       * card carrying five numbers must not silently decide which is primary.
+       *
+       * `createPersonFromWhatsApp` sets consent to `UNKNOWN`, which is exactly
+       * right and not incidental — being mentioned in somebody else's message
+       * is about as far from marketing consent as a contact can get (R-11).
+       */
+      case 'createPerson': {
+        const firstName = (body.firstName ?? '').trim();
+        const lastName = (body.lastName ?? '').trim();
+        const phone = (body.phone ?? '').trim();
+
+        if (firstName.length === 0 && lastName.length === 0) {
+          return new Response({ error: 'a name is required' }, { status: 400 });
+        }
+
+        const account =
+          typeof thread.accountId === 'string'
+            ? await findAccountById(thread.accountId)
+            : null;
+
+        const e164 =
+          phone.length === 0
+            ? null
+            : toE164(
+                phone,
+                forAccount(
+                  account?.defaultCountryCallingCode,
+                  config.defaultCountryCallingCode,
+                ),
+              );
+
+        if (phone.length > 0 && e164 === null) {
+          return new Response({ error: 'INVALID_PHONE' }, { status: 400 });
+        }
+
+        const parts = e164 === null ? null : splitE164(e164);
+
+        const person = await createPersonFromWhatsApp({
+          firstName,
+          lastName,
+          nationalNumber: parts?.nationalNumber ?? '',
+          callingCode: parts?.callingCode ?? '',
+          countryCode: null,
+        });
+
+        audit({
+          action: AUDIT_ACTION.PERSON_CREATED_FROM_CARD,
+          actorId: caller.workspaceMemberId,
+          subject: { threadId: thread.id, personId: person.id },
+          details: { source: 'shared_contact_card' },
+        });
+
+        return new Response({ threadId: thread.id, personId: person.id }, { status: 201 });
       }
 
       default:

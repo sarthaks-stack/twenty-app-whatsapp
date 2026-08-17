@@ -215,6 +215,7 @@ FR-CAM-1…14. `labelIdentifier` = `name`.
 | `maxFailureRatePct` | NUMBER | N | `10` | Circuit breaker (AR-22). |
 | `pacingObserved` | BOOLEAN | N | `false` | Set when Meta's marketing pacing is detected, to explain a slow run rather than alarm (FR-CAM-11, R-12). |
 | `lastRunTickAt` | DATE_TIME | Y | — | Runner heartbeat (AR-20). |
+| `archivedAt` | DATE_TIME | Y | — | Set when a finished campaign is filed off the campaigns page. **Visibility only** — no worker reads it, and an archived campaign keeps counting deliveries (07 §9). |
 | `testRecipientPhones` | ARRAY | Y | — | FR-CAM-12. |
 
 **Relations:** `account` (N-1 → whatsappAccount, `onDelete: RESTRICT` — an account with campaigns

@@ -6,6 +6,7 @@ import {
   ACCOUNT_STATUS,
   CONSENT_STATUS,
   LANE,
+  MESSAGE_TYPE,
   QUALITY,
   type AccountStatus,
   type ConsentStatus,
@@ -20,6 +21,10 @@ import {
   type FeedQuery,
 } from '../domain/feed/query';
 import {
+  capabilitiesFor,
+  type ThreadCapabilities,
+} from '../domain/feed/capabilities';
+import {
   projectAccount,
   projectMessage,
   projectPerson,
@@ -28,7 +33,14 @@ import {
   type MessageProjection,
   type PersonProjection,
   type ThreadProjection,
+  type ViewerContext,
 } from '../domain/feed/projection';
+import type { ContactCardProjection } from '../domain/feed/content';
+import {
+  attachContactMatches,
+  contactPhoneCandidates,
+} from '../domain/feed/contact-match';
+import { attachQuotes, quotedWamids } from '../domain/feed/quote';
 import { toE164, toWaId } from '../domain/phone/normalise';
 import {
   evaluateSendPermission,
@@ -43,10 +55,14 @@ import { toDate } from '../server/repositories/base';
 import { findCampaignById, listCampaigns } from '../server/repositories/campaigns';
 import { listRecipients } from '../server/repositories/campaign-recipients';
 import {
+  findFeedMessagesByWamids,
   listThreadMessages,
   listThreadMessagesSince,
 } from '../server/repositories/messages';
-import { findPersonById } from '../server/repositories/people';
+import {
+  findPeopleByPrimaryPhone,
+  findPersonById,
+} from '../server/repositories/people';
 import { listTemplatesForAccount } from '../server/repositories/templates';
 import {
   countInboxThreads,
@@ -118,6 +134,15 @@ export type FeedEnvelope = {
   olderCursor?: string | null;
   nextCursor?: string | null;
   policy?: FeedPolicy;
+  /**
+   * One verdict per composer action (spec §"Capability matrix").
+   *
+   * `policy` stays beside it and keeps its meaning — "can a rep type and press
+   * send" — because that is what the composer's primary state is driven by and
+   * removing it would be a change to every surface for no gain. This is the
+   * finer grain the ＋ menu needs.
+   */
+  capabilities?: ThreadCapabilities;
   templates?: unknown[];
   campaign?: unknown;
   campaigns?: unknown[];
@@ -146,35 +171,42 @@ const asPolicy = (verdict: SendVerdict): FeedPolicy => ({
  * exactly the state that swaps the primary button for **Escolher modelo**
  * (FR-OUT-2), so the denial is the instruction.
  */
+export const sendContextFor = (
+  thread: { serviceWindowExpiresAt?: string | null; isBlocked?: boolean | null },
+  account: { status?: string | null; qualityRating?: string | null } | null,
+  person: { whatsappOptInStatus?: string | null } | null,
+  now: Date,
+): SendContext => ({
+  now,
+  thread: {
+    serviceWindowExpiresAt: toDate(thread.serviceWindowExpiresAt),
+    isBlocked: thread.isBlocked === true,
+  },
+  person:
+    person === null
+      ? null
+      : {
+          whatsappOptInStatus: (person.whatsappOptInStatus ??
+            CONSENT_STATUS.UNKNOWN) as ConsentStatus,
+        },
+  account: {
+    status: (account?.status ?? ACCOUNT_STATUS.PENDING) as AccountStatus,
+    qualityRating: (account?.qualityRating ?? QUALITY.UNKNOWN) as Quality,
+  },
+});
+
 export const threadPolicy = (
   thread: { serviceWindowExpiresAt?: string | null; isBlocked?: boolean | null },
   account: { status?: string | null; qualityRating?: string | null } | null,
   person: { whatsappOptInStatus?: string | null } | null,
   now: Date,
-): FeedPolicy => {
-  const context: SendContext = {
-    now,
-    thread: {
-      serviceWindowExpiresAt: toDate(thread.serviceWindowExpiresAt),
-      isBlocked: thread.isBlocked === true,
-    },
-    person:
-      person === null
-        ? null
-        : {
-            whatsappOptInStatus: (person.whatsappOptInStatus ??
-              CONSENT_STATUS.UNKNOWN) as ConsentStatus,
-          },
-    account: {
-      status: (account?.status ?? ACCOUNT_STATUS.PENDING) as AccountStatus,
-      qualityRating: (account?.qualityRating ?? QUALITY.UNKNOWN) as Quality,
-    },
-  };
-
-  return asPolicy(
-    evaluateSendPermission({ kind: 'FREEFORM', lane: LANE.INTERACTIVE }, context),
+): FeedPolicy =>
+  asPolicy(
+    evaluateSendPermission(
+      { kind: 'FREEFORM', lane: LANE.INTERACTIVE },
+      sendContextFor(thread, account, person, now),
+    ),
   );
-};
 
 export const inboxSpecFor = (
   query: FeedQuery,
@@ -256,6 +288,66 @@ const publishedTemplates = async (accountId: string | null | undefined) => {
     }));
 };
 
+/**
+ * Matches every shared contact card on a page against the CRM, in one read.
+ *
+ * The comparison is on E.164, not on the string Meta sent: a card carries
+ * `+244 923 000 000` and a `wa_id` of `244923000000`, and a Person is stored as
+ * a national number beside its calling code. Three spellings of one number,
+ * and a naive comparison finds none of them.
+ *
+ * A number that will not normalise is dropped rather than guessed at. The cost
+ * of a wrong match here is a rep opening somebody else's record from a
+ * stranger's contact card.
+ */
+const withContactMatches = async <T extends { content: { kind: string; contacts?: ContactCardProjection[] } }>(
+  messages: T[],
+  account: { defaultCountryCallingCode?: string | null } | null,
+): Promise<T[]> => {
+  const cards = messages.flatMap((message) =>
+    message.content.kind === 'contacts' ? (message.content.contacts ?? []) : [],
+  );
+
+  if (cards.length === 0) return messages;
+
+  const region = forAccount(account?.defaultCountryCallingCode, config.defaultCountryCallingCode);
+
+  const normalise = (value: string): string | null => toE164(value, region);
+
+  const wanted = contactPhoneCandidates(cards)
+    .map(normalise)
+    .filter((value): value is string => value !== null);
+
+  if (wanted.length === 0) return messages;
+
+  const people = await findPeopleByPrimaryPhone(wanted);
+
+  const byPhone = new Map<string, string>();
+
+  for (const person of people) {
+    const e164 = normalise(
+      `${person.phones?.primaryPhoneCallingCode ?? ''}${person.phones?.primaryPhoneNumber ?? ''}`,
+    );
+
+    if (e164 !== null) byPhone.set(e164, person.id);
+  }
+
+  return attachContactMatches(messages, (card) => {
+    for (const phone of [...card.phones]) {
+      for (const raw of [phone.waId, phone.phone]) {
+        if (raw === null) continue;
+
+        const e164 = normalise(raw);
+        const match = e164 === null ? undefined : byPhone.get(e164);
+
+        if (match !== undefined) return match;
+      }
+    }
+
+    return null;
+  });
+};
+
 const threadScope = async (
   query: FeedQuery,
   caller: Caller,
@@ -324,6 +416,15 @@ const threadScope = async (
           person,
           now,
         ),
+        capabilities: capabilitiesFor({
+          context: sendContextFor(
+            { serviceWindowExpiresAt: null, isBlocked: false },
+            fallback,
+            person,
+            now,
+          ),
+          canSend: caller.isAgent,
+        }),
         start: {
           accountId: fallback?.id ?? null,
           waId: e164 === null ? null : toWaId(e164),
@@ -344,7 +445,67 @@ const threadScope = async (
     ? await listThreadMessagesSince(thread.id, query.since!, now.toISOString())
     : await listThreadMessages(thread.id, { limit: query.limit, before: query.before });
 
-  const messages = page.messages.map(projectMessage);
+  const projectedPerson = projectPerson(person);
+
+  /**
+   * Who is reading, so the server can say which reactions are the caller's own
+   * and what to call the customer — neither of which the browser may assert
+   * for itself (D-53).
+   */
+  const personName = [projectedPerson?.firstName, projectedPerson?.lastName]
+    .filter((part): part is string => typeof part === 'string' && part.length > 0)
+    .join(' ');
+
+  const viewer: ViewerContext = {
+    workspaceMemberId: caller.workspaceMemberId,
+    contactWaId: thread.waId ?? null,
+    contactLabel:
+      personName.length > 0 ? personName : (thread.profileName ?? null),
+  };
+
+  /**
+   * A reaction is not a row in the transcript (spec §"Reaction UX").
+   *
+   * Every reaction already appears as a chip under the message it is about,
+   * patched onto that message's payload by the inbound processor and by the
+   * sender. Rendering the reaction *record* as well put a bubble saying "👍"
+   * between two sentences, breaking the conversation in half to repeat
+   * something shown two rows up. The records still exist and are still audited;
+   * they are simply not part of the conversation the reader is following.
+   *
+   * The filter runs after paging rather than in the query so the page size and
+   * cursors keep their meaning — a page that returned forty rows and rendered
+   * thirty-one is normal.
+   */
+  const conversational = page.messages.filter(
+    (message) => message.messageType !== MESSAGE_TYPE.REACTION,
+  );
+
+  const projected = conversational.map((message) => projectMessage(message, viewer));
+
+  /**
+   * The one extra read the whole reply feature costs (spec §"Reply UX").
+   *
+   * Only for quotes reaching outside the page, only on a page that has any, and
+   * capped by the repository. A delta usually asks for nothing at all.
+   */
+  const missing = quotedWamids(projected);
+  const resolved =
+    missing.length === 0
+      ? []
+      : (await findFeedMessagesByWamids(missing)).map((message) =>
+          projectMessage(message, viewer),
+        );
+
+  const quoted = attachQuotes(projected, resolved, viewer.contactLabel);
+
+  /**
+   * Shared contact cards, matched against the CRM in one batched query.
+   *
+   * Skipped entirely when the page carries no contact card, which is nearly
+   * every page — the cost is paid only by the conversations that share one.
+   */
+  const messages = await withContactMatches(quoted, account);
 
   return {
     serverTime: now.toISOString(),
@@ -353,10 +514,14 @@ const threadScope = async (
     scope: FEED_SCOPE.THREAD,
     permissions: permissionsFor(caller),
     account: projectAccount(account),
-    thread: projectThread(thread, projectPerson(person)),
+    thread: projectThread(thread, projectedPerson),
     messages,
     olderCursor: 'olderCursor' in page ? page.olderCursor : null,
     policy: threadPolicy(thread, account, person, now),
+    capabilities: capabilitiesFor({
+      context: sendContextFor(thread, account, person, now),
+      canSend: caller.isAgent,
+    }),
     /**
      * The catalogue rides along on a full load and never on a delta. The picker
      * needs it the moment the window is closed, and re-sending sixty templates
@@ -402,6 +567,7 @@ const EMPTY_QUERY: FeedQuery = {
   before: null,
   limit: DEFAULT_THREAD_PAGE,
   counts: false,
+  archived: false,
 };
 
 const inboxScope = async (
@@ -444,8 +610,17 @@ const campaignScope = async (
     permissions: permissionsFor(caller),
   };
 
+  /**
+   * The list, or the archive — never both. `archived` is a *different page* of
+   * the same 50-row budget rather than a filter over one page, which is what
+   * keeps the live list from being crowded out by however many campaigns have
+   * been filed away (specs/07 §9).
+   */
   if (query.id === null) {
-    return { ...base, campaigns: await listCampaigns(DEFAULT_THREAD_PAGE) };
+    return {
+      ...base,
+      campaigns: await listCampaigns(DEFAULT_THREAD_PAGE, { archived: query.archived }),
+    };
   }
 
   const campaign = await findCampaignById(query.id);

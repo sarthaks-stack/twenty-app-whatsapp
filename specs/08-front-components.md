@@ -42,6 +42,7 @@ five surfaces share one cached bundle.
 | `filter` | inbox only: `mine` · `unassigned` · `all` · `campaign_replies` · `window_expiring` · `closed` |
 | `before` | opaque cursor: thread — older messages; inbox — the next page of rows |
 | `limit` | 1…200, default 50 |
+| `archived` | campaign list only: `0` (default, the live campaigns) · `1` (the archive). A page of its own, not a filter over the live one — see [07 §9.1](07-campaigns.md#91-the-archive) |
 
 Every unrecognised value is **refused with a 400**, never defaulted. A typo in `filter`
 falling back to `all` would show a rep every conversation in the workspace under a heading
@@ -224,6 +225,20 @@ widget (documented sandbox behaviour).
   linking to each Person and thread.
 - **Controls**: pause / resume / cancel behind `openCommandConfirmationModal`, visible only when
   `permissions.canManageCampaigns` (SEC-12).
+- **Archive**: an `Arquivadas` chip beside the six filters, which asks the server for a different
+  page (`archived=1`) rather than narrowing this one, on a 60-second poll because nothing in it is
+  moving. The archive names itself in the heading, drops the "New campaign" button, dates its rows by
+  `archivedAt` instead of `createdAt`, and is reachable from the empty state as well as the chips —
+  archiving the last campaign must not hide the archive along with it. Archive and unarchive sit in
+  the detail screen's header with no confirmation modal ([07 §9.1](07-campaigns.md#91-the-archive));
+  an archived campaign says so on its own record, because a campaign quietly missing from the list is
+  one somebody will report as deleted.
+- **Delete**: last on the detail screen, and only while the campaign has never launched
+  ([07 §9](07-campaigns.md#9-controls-fr-cam-8--wa-campaign-control)). A campaign that has sent
+  something shows *nothing* there — no disabled button and no explanation of a rule that cannot be
+  broken, because the honest answer to "how do I delete this" is that the record of a bulk send
+  stays. While it is still deletable, the note says that launching ends the option, which is the one
+  moment the rule is worth a sentence.
 
 ---
 

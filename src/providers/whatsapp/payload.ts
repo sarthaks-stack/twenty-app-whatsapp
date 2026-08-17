@@ -54,12 +54,15 @@ export const buildMediaPayload = ({
   mediaId,
   caption,
   filename,
+  voice = false,
   contextWamid,
 }: BaseSend & {
   kind: MediaKind;
   mediaId: string;
   caption?: string | null;
   filename?: string | null;
+  /** Audio only: renders as a voice note on the recipient's device. */
+  voice?: boolean;
 }): SendPayload => {
   // Stickers and audio carry no caption; Meta rejects the field outright.
   const acceptsCaption = kind === 'image' || kind === 'video' || kind === 'document';
@@ -74,6 +77,12 @@ export const buildMediaPayload = ({
       ...(kind === 'document' && filename !== null && filename !== undefined
         ? { filename }
         : {}),
+      /**
+       * Only ever set, never sent as `false`. Meta treats the field's
+       * *presence* as the signal on some Graph versions, and a `voice: false`
+       * on an ordinary audio attachment is a field with no defined meaning.
+       */
+      ...(kind === 'audio' && voice ? { voice: true } : {}),
     },
   };
 };

@@ -7,6 +7,18 @@
  * conditional.
  */
 
+/**
+ * `archived` is last and is not like the others.
+ *
+ * The first six narrow *the list the server sent*; `archived` asks the server
+ * for a different list — the campaigns an admin has filed away. It sits in the
+ * same row of chips because to the person using it, it is the same gesture, and
+ * because the alternative is a second control that means "and now show me the
+ * hidden ones".
+ *
+ * It exists at all for the reason the inbox's `closed` filter does: a hidden
+ * state with no way back is a bug, not a feature.
+ */
 export const CAMPAIGN_FILTERS = [
   'all',
   'drafts',
@@ -14,9 +26,13 @@ export const CAMPAIGN_FILTERS = [
   'running',
   'completed',
   'attention',
+  'archived',
 ] as const;
 
 export type CampaignFilter = (typeof CAMPAIGN_FILTERS)[number];
+
+/** Whether this filter reads the archive rather than the live list. */
+export const isArchiveFilter = (filter: CampaignFilter): boolean => filter === 'archived';
 
 /** The statuses that mean "this campaign is moving right now". */
 export const RUNNING_STATUSES = new Set([
@@ -70,6 +86,15 @@ export const matchesCampaignFilter = (
       return status === 'COMPLETED' || status === 'CANCELLED';
     case 'attention':
       return needsAttention(campaign);
+    /**
+     * Everything the archive request answered is archived, so there is nothing
+     * left to narrow. Re-checking `archivedAt` here would be a second opinion
+     * about a question the server already answered — and the wrong one for the
+     * moment between archiving a campaign and the next poll, when the row on
+     * screen is stale in exactly that field.
+     */
+    case 'archived':
+      return true;
     default:
       return true;
   }
@@ -107,13 +132,21 @@ export const visibleCampaigns = <T extends Record<string, unknown>>(
   campaigns: T[],
   filter: CampaignFilter,
   search: string,
-): T[] =>
-  orderCampaigns(
-    campaigns.filter(
-      (campaign) =>
-        matchesCampaignFilter(campaign, filter) && matchesCampaignSearch(campaign, search),
-    ),
+): T[] => {
+  const matching = campaigns.filter(
+    (campaign) =>
+      matchesCampaignFilter(campaign, filter) && matchesCampaignSearch(campaign, search),
   );
+
+  /**
+   * The archive keeps the server's order — most recently filed first — instead
+   * of being re-sorted by urgency. "Needs attention" is a claim about work
+   * outstanding, and an archived campaign is one somebody has explicitly
+   * finished with: lifting a failed campaign to the top of the archive would
+   * argue with the decision to archive it.
+   */
+  return isArchiveFilter(filter) ? matching : orderCampaigns(matching);
+};
 
 export type Funnel = { key: string; value: number; share: number }[];
 

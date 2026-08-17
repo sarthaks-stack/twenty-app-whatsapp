@@ -40,6 +40,12 @@ export type CampaignDetailProps = {
   onBack: () => void;
   onChanged: () => void;
   /**
+   * Back into the builder with this campaign loaded (D-61). A draft used to be
+   * readable and not editable, so an interrupted campaign could only be deleted
+   * and started again.
+   */
+  onEdit: () => void;
+  /**
    * Separate from `onChanged` because there is no longer a campaign to refresh:
    * re-reading a deleted campaign answers 404 and the screen would sit on
    * "loading" for a record that is gone.
@@ -90,6 +96,7 @@ export const CampaignDetail = ({
   now,
   onBack,
   onChanged,
+  onEdit,
   onDeleted,
 }: CampaignDetailProps) => {
   const theme = useTheme();
@@ -241,8 +248,18 @@ export const CampaignDetail = ({
           disabling it: there is a deliberate path for that case further down,
           behind an acknowledgement, and two ways to do the same dangerous thing
           is one too many.
+
+          An empty audience removes it too. The route already answers 409 for a
+          campaign with no qualified recipient — but the button was offered
+          anyway, so a campaign whose only contact had been excluded for missing
+          consent invited an operator to confirm sending to nobody and then
+          refused. The banner below says which it is (D-60).
         */}
-        {canManage && status === 'READY' && preflight !== null && preflight.quality.gate.allowed ? (
+        {canManage &&
+        status === 'READY' &&
+        preflight !== null &&
+        preflight.recipients.total > 0 &&
+        preflight.quality.gate.allowed ? (
           <ActionButton
             label={t('campaign.launch')}
             tone="primary"
@@ -259,6 +276,19 @@ export const CampaignDetail = ({
               )
             }
           />
+        ) : null}
+        {/*
+          Back into the builder, for a campaign that has not sent anything
+          (D-61). A draft was previously a dead end: readable, deletable, and
+          impossible to finish — so an interrupted campaign meant starting over.
+
+          `READY` is offered too because the server already models the
+          consequence: editing a snapshot-defining field returns the campaign to
+          `draft` and forces a rebuild, so the frozen recipient rows can never
+          be launched against a template they were not resolved for (D-28).
+        */}
+        {canManage && (status === 'DRAFT' || status === 'READY') ? (
+          <ActionButton label={t('campaign.edit')} icon="edit" onClick={onEdit} />
         ) : null}
         {canManage && (status === 'RUNNING' || status === 'TIER_WAITING') ? (
           <ActionButton
@@ -345,6 +375,17 @@ export const CampaignDetail = ({
 
       {canManage && status === 'READY' && preflight === null && error === null ? (
         <Banner>{t('campaign.launchNeedsPreflight')}</Banner>
+      ) : null}
+
+      {/*
+        Why there is no Launch button. A campaign whose every contact was
+        excluded looked ready, and the only way to discover otherwise was to
+        press Launch and read a 409 (D-60).
+      */}
+      {canManage && status === 'READY' && preflight !== null && preflight.recipients.total === 0 ? (
+        <Banner tone="danger">
+          {t('campaign.launchNoRecipients', { excluded: preflight.recipients.excluded })}
+        </Banner>
       ) : null}
 
       {campaign.statusReason === null || campaign.statusReason === undefined ? null : (
@@ -544,7 +585,13 @@ export const CampaignDetail = ({
               </label>
             )}
 
-            {acknowledgeQuality && status === 'READY' ? (
+            {/*
+              "Launch anyway" overrides the *quality* gate and nothing else. An
+              empty audience is not a risk an admin can accept — there is no
+              send to accept the risk of — so it withdraws this button too
+              (D-60).
+            */}
+            {acknowledgeQuality && status === 'READY' && preflight.recipients.total > 0 ? (
               <ActionButton
                 label={t('campaign.launchAnyway')}
                 tone="danger"

@@ -32,6 +32,20 @@ describe('isRetryableError', () => {
     expect(isRetryableError('UNKNOWN_ACCEPTANCE')).toBe(false);
   });
 
+  /**
+   * The one internal exception (D-58). Nothing reached Meta — the file could
+   * not be read out of Twenty's own storage — and what fixes it is in the
+   * rep's hands: a re-copied address, or a file store that answers this time.
+   */
+  it('offers a retry when the attachment could not be read', () => {
+    expect(isRetryableError('ATTACHMENT_UNREADABLE')).toBe(true);
+  });
+
+  /** Meta losing a file it once held is not the same event, and is terminal. */
+  it('refuses a retry when Meta no longer has the media', () => {
+    expect(isRetryableError('MEDIA_UNAVAILABLE')).toBe(false);
+  });
+
   it('refuses a retry for a code with no catalogue row', () => {
     // Absence of evidence that a retry is safe is not evidence that it is.
     expect(isRetryableError('999999')).toBe(false);

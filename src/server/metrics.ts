@@ -125,6 +125,14 @@ export const METRIC = {
   SEND_SPACING_DEFERRED: 'wa.send.spacing_deferred',
   SEND_MEDIA_UPLOADED: 'wa.send.media_uploaded',
   SEND_MEDIA_CACHE_HIT: 'wa.send.media_cache_hit',
+  /**
+   * An attachment that could not be read out of Twenty's own storage — the
+   * send never reached Meta. Counted apart from the terminal failures because
+   * it is a workspace or configuration problem, not a messaging one, and it
+   * was invisible for as long as it shared a code with Meta's own media error
+   * (D-58).
+   */
+  SEND_ATTACHMENT_UNREADABLE: 'wa.send.attachment_unreadable',
 
   POLICY_DENIED_ACCOUNT: 'wa.policy.denied_account',
   POLICY_DENIED_WINDOW: 'wa.policy.denied_window',
@@ -178,6 +186,15 @@ export const METRIC = {
 
   TEMPLATE_EVENT: 'wa.template.event',
   TEMPLATE_UNPUBLISHED_ON_DEGRADATION: 'wa.template.unpublished_on_degradation',
+
+  MCP_TEMPLATE_DISCOVERY_READY: 'wa.mcp.template_discovery.ready',
+  MCP_TEMPLATE_DISCOVERY_DENIED: 'wa.mcp.template_discovery.denied',
+  MCP_TEMPLATE_DISCOVERY_FAILED: 'wa.mcp.template_discovery.failed',
+  MCP_TEMPLATE_SEND_ACCEPTED: 'wa.mcp.template_send.accepted',
+  MCP_TEMPLATE_SEND_DENIED: 'wa.mcp.template_send.denied',
+  MCP_TEMPLATE_SEND_REPLAYED: 'wa.mcp.template_send.replayed',
+  MCP_TEMPLATE_SEND_CONFLICT: 'wa.mcp.template_send.idempotency_conflict',
+  MCP_TEMPLATE_SEND_FAILED: 'wa.mcp.template_send.failed',
 
   ACCOUNT_QUALITY_CHANGE: 'wa.account.quality_change',
   ACCOUNT_RESTRICTED: 'wa.account.restricted',

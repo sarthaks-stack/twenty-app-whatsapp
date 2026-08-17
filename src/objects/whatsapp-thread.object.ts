@@ -21,7 +21,23 @@ export default defineObject({
   description: 'A WhatsApp conversation with one contact',
   icon: 'IconMessageCircle',
   isUICreatable: false,
-  labelIdentifierFieldMetadataUniversalIdentifier: THREAD_PROFILE_NAME,
+  /**
+   * The phone number, not the profile name (D-67).
+   *
+   * The label identifier is what Twenty calls a record *everywhere it names
+   * one* — most visibly in the Person timeline, which filled with "linked a
+   * whatsapp conversation **Untitled**", one line per link, saying nothing.
+   * `profileName` is the wrong field for the job: Meta sends `profile.name`
+   * only on inbound and only when the contact has set one, so every
+   * conversation a rep started had no label at all.
+   *
+   * `dialablePhone` is set for every thread on creation and is what a person
+   * recognises a conversation by in the absence of a name. The chat surfaces
+   * still prefer the profile name — see `threadName`, where the precedence is a
+   * deliberate product decision — and are unaffected by this: nothing in the
+   * app reads the label identifier.
+   */
+  labelIdentifierFieldMetadataUniversalIdentifier: f('dialablePhone'),
   fields: [
     {
       universalIdentifier: THREAD_PROFILE_NAME,

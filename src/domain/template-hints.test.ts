@@ -6,6 +6,7 @@ import {
   buttonVariableHints,
   contextFor,
   headerVariableHints,
+  mediaHeaderOf,
 } from './template-hints';
 import {
   emptyParameters,
@@ -180,11 +181,7 @@ describe('headerVariableHints', () => {
     ]);
   });
 
-  /**
-   * A media header needs a file, not a word, and this composer has no path to
-   * one. Such templates are refused at sync as unusable, so the picker never
-   * sees them — offering an input would be a box that cannot help.
-   */
+  /** A media header needs a file, not a word; `mediaHeaderOf` covers it. */
   it('offers nothing for a media header', () => {
     expect(headerVariableHints(withHeader({ format: 'IMAGE' }))).toEqual([]);
   });
@@ -193,6 +190,43 @@ describe('headerVariableHints', () => {
     expect(headerVariableHints(withHeader({ variableCount: 0, indices: [] }))).toEqual([]);
     expect(headerVariableHints(spec())).toEqual([]);
     expect(headerVariableHints(null)).toEqual([]);
+  });
+});
+
+/**
+ * D-59. `assessSupport` refuses only a *location* header, so a template with an
+ * image header syncs as usable and is offered in both the picker and the
+ * campaign builder — while `validateParameters` counts its file as a required
+ * parameter and neither form collected one. Send was permanently disabled, and
+ * a campaign built on such a template excluded every recipient for "missing
+ * variables". The comment beside `headerVariableHints` asserted these templates
+ * "never reach the picker", which was never true.
+ */
+describe('mediaHeaderOf', () => {
+  const withHeader = (
+    header: Partial<NonNullable<VariableSpec['header']>>,
+  ): VariableSpec => ({
+    ...spec(),
+    header: {
+      format: 'IMAGE',
+      variableCount: 0,
+      indices: [],
+      names: [],
+      text: null,
+      example: ['4::aW1hZ2UvcG5n:ARZ…'],
+      ...header,
+    },
+  });
+
+  it.each(['IMAGE', 'VIDEO', 'DOCUMENT'] as const)('asks for a file for a %s header', (format) => {
+    expect(mediaHeaderOf(withHeader({ format }))).toEqual({ format });
+  });
+
+  it('asks for nothing where there is no file to collect', () => {
+    expect(mediaHeaderOf(withHeader({ format: 'TEXT' }))).toBeNull();
+    expect(mediaHeaderOf(withHeader({ format: 'LOCATION' }))).toBeNull();
+    expect(mediaHeaderOf(spec())).toBeNull();
+    expect(mediaHeaderOf(null)).toBeNull();
   });
 });
 
@@ -255,18 +289,28 @@ describe('buttonVariableHints', () => {
 describe('the fields the picker renders cover everything the validator wants', () => {
   const fill = (spec: VariableSpec): ResolvedParameters => {
     const header = headerVariableHints(spec);
+    const media = mediaHeaderOf(spec);
     const buttons = buttonVariableHints(spec);
 
     return {
       body: bodyVariableHints(spec).map((_, index) => `body ${index}`),
-      ...(header.length === 0
-        ? {}
-        : {
+      ...(media !== null
+        ? {
             header: {
-              kind: 'text' as const,
-              values: header.map((_, index) => `header ${index}`),
+              kind: 'media' as const,
+              mediaId: null,
+              fileId: null,
+              fileUrl: 'https://crm.test/files/attachment/header.png',
             },
-          }),
+          }
+        : header.length === 0
+          ? {}
+          : {
+              header: {
+                kind: 'text' as const,
+                values: header.map((_, index) => `header ${index}`),
+              },
+            }),
       buttons: buttons.map((button) => ({
         index: button.index,
         subType: button.subType,
@@ -299,6 +343,33 @@ describe('the fields the picker renders cover everything the validator wants', (
           text: 'Responder',
           url: 'https://pixel.ao/r/{{1}}',
         },
+      ],
+    };
+
+    const result = validateParameters(full, fill(full));
+
+    expect(result.missingKeys).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
+
+  /**
+   * The template QA got stuck on: six body variables, an image header and a
+   * dynamic button. Every visible box filled, and Send still disabled, because
+   * the header had no box at all (D-59).
+   */
+  it('satisfies a template with a media header, body variables and a dynamic button', () => {
+    const full: VariableSpec = {
+      ...spec(),
+      header: {
+        format: 'IMAGE',
+        variableCount: 0,
+        indices: [],
+        names: [],
+        text: null,
+        example: ['4::aW1hZ2UvcG5n:ARZ…'],
+      },
+      buttons: [
+        { index: 0, type: 'URL', hasVariable: true, text: 'Confirmar', url: 'https://x/{{1}}' },
       ],
     };
 

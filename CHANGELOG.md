@@ -2,6 +2,79 @@
 
 All notable changes to this application are documented in this file.
 
+## Unreleased — end-to-end QA fixes
+
+Ten defects from the first full end-to-end pass on a live number. Two of them made features
+unusable rather than awkward, and both had the same shape: the code was right and the *only path a
+person could take to it* was closed.
+
+### Fixed — outbound attachments (P0)
+
+- **Every outbound image, video, audio file and PDF failed** (D-58). The attachment panel asks a rep
+  to "copy the file's address from its record in Twenty", and the address in a browser is the
+  *front-end* host — while `server/files.ts` refused anything whose origin was not `TWENTY_API_URL`.
+  The origin is now **rebuilt** rather than validated: the path and the signed token are re-hung on
+  the workspace API origin, which is a stronger guarantee than the check it replaces (the fetch
+  target is workspace-origin by construction, so no input can name the host) and the path
+  restriction that stops `/rest/people` being read with the app's token is untouched.
+- A handle carrying only `filePath` resolved to `/attachment/…` and was refused for being exactly
+  what `uploadFile` returns. Bare storage paths are now mounted under the file store.
+- **Redirects are followed**, by hand, up to three hops, dropping the app's bearer token on any hop
+  that leaves the workspace origin. `redirect: 'error'` made an object-storage backend unsendable;
+  `redirect: 'follow'` would have handed a workspace credential to the bucket's host.
+- **The failure said the wrong thing about the wrong system.** A workspace read that never reached
+  Meta was reported as `MEDIA_UNAVAILABLE` — "the file is no longer available from Meta". It is now
+  `ATTACHMENT_UNREADABLE`, it carries the real reason into the sentence a rep reads, it is
+  retryable, and **Repetir** on an attachment resends the stored spec rather than needing a caption
+  to exist. The send route rejects an unusable address up front, and the panel rejects one before
+  the rep presses send.
+
+### Fixed — templates with more than a body (P0)
+
+- **A template with a media header could never be sent** (D-59). `assessSupport` refuses only a
+  *location* header, so an image header syncs as usable and appears in both the composer and the
+  campaign builder — while `validateParameters` counted its file as required and neither form
+  offered anywhere to put one. Send stayed disabled under a counter naming a component with no
+  field. Both forms now collect it.
+- **The campaign builder wrote `{ body }` and the resolver reads a header and buttons too.** A
+  campaign on such a template was buildable, launchable, and excluded every recipient for "missing
+  variables". `buildVariableMapping` is now the whole shape, pure and tested against
+  `resolveParameters`.
+
+### Fixed — campaigns
+
+- **A campaign with no qualified recipient offered a Launch button** and answered 409 when pressed
+  (D-60). The button is withdrawn — including the quality-gate override, which is a risk an admin
+  can accept and an empty audience is not — and a banner names the exclusion count instead.
+- **A draft was a one-way door** (D-61): the builder wrote one on every step, the detail screen
+  could show it, and nothing led back in. **Continuar a editar** reopens it on the furthest step
+  already answered, with every field read back out of the record.
+- **The counters disagreed with the recipient rows** for up to a minute (D-62) — a cron on sixty
+  seconds against a screen polling every five. The detail read now runs the same recount on the way
+  through, and only when the campaign's change hint says something moved.
+
+### Fixed — the rest
+
+- **The People command-menu action never appeared** (D-63). `conditionalAvailabilityExpression` is
+  compiled from the source of a real comparison against the SDK's context bindings, and this one
+  was a string literal — which type-checks, builds, installs, and never matches. An architecture
+  test now refuses the string form.
+- **The inbox contradicted itself after every action taken in the thread pane** (D-64). The list and
+  the filter totals are separate polls on separate clocks; `ThreadView` now tells them when a
+  conversation changed as a row.
+- **Failed sends were in no diagnostic list** (D-65). "Failed deliveries" is inbound and the stuck
+  list is messages nothing moved, so a message something *decided* to fail was invisible — which is
+  the whole of D-58. Settings → Diagnostics now shows failed sends with their code and their reason,
+  and the health panel has a row for them.
+- **Every button on the settings page was offered to a caller who could use none of them** (D-66).
+  The page opens by reading diagnostics; one 403 is enough to disable the actions and say why once.
+- **"linked a whatsapp conversation Untitled"** (D-67). The thread's label identifier was
+  `profileName`, which Meta sends only on inbound and only when the contact has set one; it is now
+  the phone number, which every thread has. Re-linking a conversation to the contact it is already
+  linked to writes nothing at all.
+- **Twenty variables in one undifferentiated list, each with its own Save** (D-68), is now eleven
+  named sections and one sticky bar that lists the keys it is about to change.
+
 ## Unreleased — phase 10: automation, operations, release
 
 The operational tail. Everything in phases 0–10 that is code is now written; what remains before
@@ -10,6 +83,11 @@ the release gate is the human-run part, scripted in
 
 ### Added
 
+- **Twenty MCP WhatsApp tools** — `whatsapp-list-sendable-templates` discovers only approved,
+  published templates that pass the current Person/account policy, and `whatsapp-send-template`
+  queues one exact template with a mandatory UUID-v4 idempotency key. Agent sends are audited and
+  shown in the transcript as `AI_AGENT`; retries replay the original result or refuse a changed
+  intent instead of contacting the customer twice.
 - **`wa-send-template-action`** — "Send WhatsApp template" as a workflow step (FR-WF-1). A policy
   denial is a *result* (`status: 'denied'` with a machine reason) so an automation can branch on
   it; only infrastructure failures throw. It reuses the same policy gate as a rep's send, which is

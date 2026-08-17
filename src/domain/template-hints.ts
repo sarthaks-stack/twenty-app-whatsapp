@@ -113,10 +113,8 @@ export const bodyVariableHints = (spec: VariableSpec | null): VariableHint[] => 
  * Filling all six visible boxes left Send disabled and a counter reading
  * "Missing: 8" with nothing on screen to fill.
  *
- * A media header is not here on purpose — it needs a file, not a word, and this
- * composer has no path to one (spec §"Attachment and file-picker feasibility").
- * Such a template is refused at sync as unusable in the CRM, so the picker
- * never sees it.
+ * A media header is not here, because it needs a file rather than a word —
+ * `mediaHeaderOf` below is its counterpart.
  */
 export const headerVariableHints = (spec: VariableSpec | null): VariableHint[] => {
   const header = spec?.header ?? null;
@@ -140,6 +138,37 @@ export const headerVariableHints = (spec: VariableSpec | null): VariableHint[] =
         typeof example === 'string' && example.trim().length > 0 ? example.trim() : null,
     };
   });
+};
+
+/**
+ * The media a header needs, when it needs one.
+ *
+ * This was the other half of the "Missing: 8" defect, and the worse half.
+ * `assessSupport` only refuses a *location* header, so a template with an image
+ * header syncs as usable and appears in the picker — but neither the picker nor
+ * the campaign builder ever offered anywhere to put the image, while
+ * `validateParameters` counted it as missing. Send was therefore permanently
+ * disabled on those templates, with a counter naming a component that had no
+ * field on screen. The comment above this function's sibling asserted such
+ * templates "never reach the picker", which was simply not true (D-59).
+ *
+ * Returns null for a text header, a location header, and no header at all —
+ * the three cases with no file to collect.
+ */
+export const mediaHeaderOf = (
+  spec: VariableSpec | null,
+): { format: 'IMAGE' | 'VIDEO' | 'DOCUMENT' } | null => {
+  const format = spec?.header?.format ?? null;
+
+  if (format !== 'IMAGE' && format !== 'VIDEO' && format !== 'DOCUMENT') return null;
+
+  /**
+   * The format and nothing else. Meta's synced example for a media header is a
+   * `header_handle` — an opaque upload token — so there is no example value a
+   * form could usefully show, and offering one would be offering an address
+   * that cannot be reused.
+   */
+  return { format };
 };
 
 export type ButtonVariableHint = {

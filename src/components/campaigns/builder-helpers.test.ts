@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
+import { resolveParameters } from '../../domain/campaign/variable-resolution';
 import type { AccountProjection } from '../../domain/feed/projection';
-import { accountWarnings, standIn } from './CampaignBuilder';
+import type { VariableSpec } from '../../domain/template-spec';
+import {
+  accountWarnings,
+  bindingsFromMapping,
+  buildVariableMapping,
+  openedFrom,
+  standIn,
+} from './CampaignBuilder';
+
+type Binding = Parameters<typeof standIn>[0];
 
 const account = (over: Partial<AccountProjection> = {}): AccountProjection => ({
   id: 'a1',
@@ -100,5 +110,348 @@ describe('standIn', () => {
    */
   it('resolves to nothing when a field binding has no path', () => {
     expect(standIn({ kind: 'field', path: '', value: '', fallback: '' })).toBe('');
+  });
+});
+
+/**
+ * D-59. The builder wrote `{ body }` and the resolver reads a header and
+ * buttons too, so a campaign on a template with either was buildable,
+ * launchable, and excluded every single recipient for "missing variables" —
+ * with nothing on any screen naming a component the form had never asked
+ * about. These tests hold the two shapes together.
+ */
+describe('buildVariableMapping', () => {
+  const spec = (over: Partial<VariableSpec> = {}): VariableSpec => ({
+    namedParameters: false,
+    header: null,
+    body: {
+      variableCount: 2,
+      indices: [1, 2],
+      names: [],
+      text: 'Olá {{1}}, {{2}}',
+      example: [],
+    },
+    footer: null,
+    buttons: [],
+    totalVariableCount: 2,
+    ...over,
+  });
+
+  const field = (path: string): Binding => ({ kind: 'field', path, value: '', fallback: '' });
+  const empty = { bindings: [], headerBindings: [], headerFileUrl: '', buttonBindings: {} };
+
+  it('maps body variables onto Meta’s own 1-based indices', () => {
+    const mapping = buildVariableMapping({
+      ...empty,
+      spec: spec(),
+      bindings: [field('person.name.firstName'), field('person.city')],
+    });
+
+    expect(mapping.body).toEqual([
+      { index: 1, kind: 'field', path: 'person.name.firstName' },
+      { index: 2, kind: 'field', path: 'person.city' },
+    ]);
+  });
+
+  it('says nothing about a header or buttons a template does not have', () => {
+    const mapping = buildVariableMapping({ ...empty, spec: spec() });
+
+    expect(mapping.header).toBeUndefined();
+    expect(mapping.buttons).toBeUndefined();
+  });
+
+  it('carries a media header’s file for the whole campaign', () => {
+    const mapping = buildVariableMapping({
+      ...empty,
+      spec: spec({
+        header: {
+          format: 'IMAGE',
+          variableCount: 0,
+          indices: [],
+          names: [],
+          text: null,
+          example: [],
+        },
+      }),
+      headerFileUrl: ' https://crm.test/files/attachment/convite.png ',
+    });
+
+    expect(mapping.header).toEqual({
+      kind: 'media',
+      fileUrl: 'https://crm.test/files/attachment/convite.png',
+    });
+  });
+
+  /**
+   * An address the sender cannot read is worse than none: it resolves, so the
+   * campaign launches, and then fails for every recipient (D-58).
+   */
+  it('refuses an address outside Twenty’s file store', () => {
+    const mapping = buildVariableMapping({
+      ...empty,
+      spec: spec({
+        header: {
+          format: 'IMAGE',
+          variableCount: 0,
+          indices: [],
+          names: [],
+          text: null,
+          example: [],
+        },
+      }),
+      headerFileUrl: 'https://images.example.test/convite.png',
+    });
+
+    expect(mapping.header).toEqual({ kind: 'media', fileUrl: null });
+  });
+
+  it('binds a text header per recipient, 1-based like the body', () => {
+    const mapping = buildVariableMapping({
+      ...empty,
+      spec: spec({
+        header: {
+          format: 'TEXT',
+          variableCount: 1,
+          indices: [1],
+          names: [],
+          text: 'Convite para {{1}}',
+          example: [],
+        },
+      }),
+      headerBindings: [field('account.displayName')],
+    });
+
+    expect(mapping.header).toEqual({
+      kind: 'text',
+      bindings: [{ index: 1, kind: 'field', path: 'account.displayName' }],
+    });
+  });
+
+  /** Buttons keep Meta's 0-based index and carry the sub_type the payload needs. */
+  it('binds only the buttons that have a variable', () => {
+    const mapping = buildVariableMapping({
+      ...empty,
+      spec: spec({
+        buttons: [
+          { index: 0, type: 'QUICK_REPLY', hasVariable: false, text: 'Sim', url: null },
+          { index: 1, type: 'URL', hasVariable: true, text: 'Abrir', url: 'https://x/{{1}}' },
+        ],
+      }),
+      buttonBindings: { 1: field('person.id') },
+    });
+
+    expect(mapping.buttons).toEqual([
+      { index: 1, kind: 'field', path: 'person.id', subType: 'url' },
+    ]);
+  });
+
+  /**
+   * The template QA got stuck on, end to end: six body variables, an image
+   * header and a dynamic button all reach the resolver.
+   */
+  it('covers every variable the resolver counts', () => {
+    const full = spec({
+      header: {
+        format: 'IMAGE',
+        variableCount: 0,
+        indices: [],
+        names: [],
+        text: null,
+        example: [],
+      },
+      buttons: [
+        { index: 0, type: 'URL', hasVariable: true, text: 'Confirmar', url: 'https://x/{{1}}' },
+      ],
+    });
+
+    const mapping = buildVariableMapping({
+      spec: full,
+      bindings: [field('person.name.firstName'), field('person.city')],
+      headerBindings: [],
+      headerFileUrl: 'https://crm.test/files/attachment/convite.png',
+      buttonBindings: { 0: { kind: 'static', path: '', value: 'abc', fallback: '' } },
+    });
+
+    const resolved = resolveParameters({
+      spec: full,
+      mapping,
+      subject: {
+        person: { name: { firstName: 'Marcos' }, city: 'Luanda' },
+        now: new Date('2026-08-17T10:00:00Z'),
+      },
+    });
+
+    expect(resolved.ok).toBe(true);
+  });
+});
+
+/**
+ * D-61. A draft was a one-way door: the builder wrote one on every step, the
+ * detail screen could show it, and nothing led back in — so an interrupted
+ * campaign was work that could only be deleted and redone. Reopening is only a
+ * resume if the form comes back filled and lands where it was left.
+ */
+describe('openedFrom', () => {
+  const templates = [
+    {
+      id: 'tpl-1',
+      name: 'convite',
+      language: 'pt_PT',
+      category: 'MARKETING',
+      variableSpec: {
+        namedParameters: false,
+        header: null,
+        body: {
+          variableCount: 2,
+          indices: [1, 2],
+          names: [],
+          text: 'Olá {{1}}, {{2}}',
+          example: [],
+        },
+        footer: null,
+        buttons: [],
+        totalVariableCount: 2,
+      },
+    },
+  ] as unknown as Parameters<typeof openedFrom>[1];
+
+  it('starts an empty builder when there is nothing to reopen', () => {
+    expect(openedFrom(null, templates)).toMatchObject({ campaignId: null, step: 0, name: '' });
+  });
+
+  it('reads the fields back out of the record', () => {
+    const opened = openedFrom(
+      {
+        id: 'c-1',
+        name: 'Convite Agosto',
+        accountId: 'acc-1',
+        templateId: 'tpl-1',
+        scheduledAt: '2026-09-01T09:30:00.000Z',
+        audienceDefinition: { kind: 'view', viewId: 'view-9' },
+        variableMapping: {
+          body: [
+            { index: 1, kind: 'field', path: 'person.name.firstName' },
+            { index: 2, kind: 'static', value: 'Luanda', fallback: 'Angola' },
+          ],
+        },
+      },
+      templates,
+    );
+
+    expect(opened).toMatchObject({
+      campaignId: 'c-1',
+      name: 'Convite Agosto',
+      accountId: 'acc-1',
+      templateId: 'tpl-1',
+      audienceKind: 'view',
+      viewId: 'view-9',
+    });
+    expect(opened.bindings).toEqual([
+      { kind: 'field', path: 'person.name.firstName', value: '', fallback: '' },
+      { kind: 'static', path: '', value: 'Luanda', fallback: 'Angola' },
+    ]);
+  });
+
+  /**
+   * `datetime-local` reads `YYYY-MM-DDTHH:mm` and nothing else. Handing it the
+   * whole ISO instant leaves the box empty, which reads as "not scheduled" for
+   * a campaign that is.
+   */
+  it('trims a stored instant to what a datetime-local input can read', () => {
+    expect(
+      openedFrom({ id: 'c-1', scheduledAt: '2026-09-01T09:30:00.000Z' }, templates).scheduledAt,
+    ).toBe('2026-09-01T09:30');
+  });
+
+  it('joins a manual audience back into the text area it came from', () => {
+    expect(
+      openedFrom(
+        { id: 'c-1', audienceDefinition: { kind: 'manual', personIds: ['p1', 'p2'] } },
+        templates,
+      ),
+    ).toMatchObject({ audienceKind: 'manual', personIds: 'p1\np2' });
+  });
+
+  /** The furthest step already answered — a resume that starts over is not one. */
+  it.each([
+    ['nothing at all', {}, 0],
+    ['a name and a number', { name: 'x', accountId: 'a' }, 1],
+    ['a template', { name: 'x', accountId: 'a', templateId: 'tpl-1' }, 2],
+    [
+      'an audience',
+      {
+        name: 'x',
+        accountId: 'a',
+        templateId: 'tpl-1',
+        audienceDefinition: { kind: 'view', viewId: 'v' },
+      },
+      3,
+    ],
+  ])('opens on the step after %s', (_label, record, step) => {
+    expect(openedFrom({ id: 'c-1', ...record }, templates).step).toBe(step);
+  });
+
+  /** An audience naming a view that was never chosen is not an audience. */
+  it('does not count an empty view as an audience', () => {
+    expect(
+      openedFrom(
+        {
+          id: 'c-1',
+          name: 'x',
+          accountId: 'a',
+          templateId: 'tpl-1',
+          audienceDefinition: { kind: 'view', viewId: '' },
+        },
+        templates,
+      ).step,
+    ).toBe(2);
+  });
+});
+
+/** What the builder writes must be what it reads back. */
+describe('a mapping survives a round trip through the form', () => {
+  const spec: VariableSpec = {
+    namedParameters: false,
+    header: {
+      format: 'IMAGE',
+      variableCount: 0,
+      indices: [],
+      names: [],
+      text: null,
+      example: [],
+    },
+    body: {
+      variableCount: 2,
+      indices: [1, 2],
+      names: [],
+      text: 'Olá {{1}}, {{2}}',
+      example: [],
+    },
+    footer: null,
+    buttons: [
+      { index: 0, type: 'URL', hasVariable: true, text: 'Abrir', url: 'https://x/{{1}}' },
+    ],
+    totalVariableCount: 3,
+  };
+
+  it('reads back every component it wrote', () => {
+    const form = {
+      spec,
+      bindings: [
+        { kind: 'field' as const, path: 'person.name.firstName', value: '', fallback: '' },
+        { kind: 'static' as const, path: '', value: 'Luanda', fallback: '' },
+      ],
+      headerBindings: [],
+      headerFileUrl: 'https://crm.test/files/attachment/convite.png',
+      buttonBindings: {
+        0: { kind: 'field' as const, path: 'person.id', value: '', fallback: '' },
+      },
+    };
+
+    const reopened = bindingsFromMapping(spec, buildVariableMapping(form));
+
+    expect(reopened.bindings).toEqual(form.bindings);
+    expect(reopened.headerFileUrl).toBe(form.headerFileUrl);
+    expect(reopened.buttonBindings).toEqual(form.buttonBindings);
   });
 });

@@ -1,5 +1,5 @@
 import type { Quality, TemplateCategory, TemplateStatus } from '../../domain/constants';
-import { nodesOf, query, type JsonObject } from './base';
+import { nodesOf, pageOf, query, type JsonObject } from './base';
 
 /**
  * `whatsappTemplate`.
@@ -108,6 +108,90 @@ export const listTemplatesForAccount = async (
   );
 
   return nodesOf<WhatsappTemplateRecord>(result.whatsappTemplates);
+};
+
+export type SendableTemplatePageInput = {
+  accountId: string;
+  language?: string | null;
+  category?: TemplateCategory | null;
+  nameContains?: string | null;
+  first?: number | null;
+  after?: string | null;
+};
+
+export type SendableTemplatePage = {
+  templates: WhatsappTemplateRecord[];
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+};
+
+export const MAX_SENDABLE_TEMPLATE_PAGE = 50;
+
+const escapeLike = (value: string): string => value.replace(/[\\%_]/g, '\\$&');
+
+/**
+ * The catalogue an AI tool may show as sendable.
+ *
+ * The three state predicates live in the database query rather than after a
+ * fixed-size read. Filtering a page in memory would make an eligible template
+ * beyond that page invisible and make the cursor describe rows the caller
+ * never saw (specs/17 §4.3).
+ */
+export const listSendableTemplatesPage = async ({
+  accountId,
+  language = null,
+  category = null,
+  nameContains = null,
+  first = 20,
+  after = null,
+}: SendableTemplatePageInput): Promise<SendableTemplatePage> => {
+  const pageSize = Math.min(
+    MAX_SENDABLE_TEMPLATE_PAGE,
+    Math.max(1, Math.trunc(typeof first === 'number' && Number.isFinite(first) ? first : 20)),
+  );
+  const wantedName = typeof nameContains === 'string' ? nameContains.trim() : '';
+
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappTemplates: {
+          __args: {
+            filter: {
+              accountId: { eq: accountId },
+              status: { eq: 'APPROVED' },
+              publishedToCrm: { eq: true },
+              isUsableInCrm: { eq: true },
+              ...(typeof language === 'string' && language.length > 0
+                ? { language: { eq: language } }
+                : {}),
+              ...(category === null ? {} : { category: { eq: category } }),
+              ...(wantedName.length === 0
+                ? {}
+                : { name: { ilike: `%${escapeLike(wantedName)}%` } }),
+            },
+            orderBy: [
+              { name: 'AscNullsLast' },
+              { language: 'AscNullsLast' },
+              { id: 'AscNullsFirst' },
+            ],
+            first: pageSize,
+            ...(after === null || after.length === 0 ? {} : { after }),
+          },
+          edges: { node: TEMPLATE_FIELDS },
+          pageInfo: { hasNextPage: true, endCursor: true },
+        },
+      }),
+    'templates.listSendablePage',
+  );
+
+  const page = pageOf<WhatsappTemplateRecord>(result.whatsappTemplates);
+
+  return {
+    templates: page.items,
+    pageInfo: {
+      hasNextPage: result.whatsappTemplates?.pageInfo?.hasNextPage === true,
+      endCursor: page.nextCursor,
+    },
+  };
 };
 
 /** Meta-owned columns. Written by sync and by webhook events, never by a user. */

@@ -168,6 +168,12 @@ export const ICON = {
   // Campaigns
   newCampaign: IconPlus,
   draft: IconEdit,
+  /**
+   * The same glyph as `draft`, under the name of the *action*. A button reading
+   * `icon="draft"` says what the campaign is rather than what pressing it does,
+   * and the two stop matching the moment either changes.
+   */
+  edit: IconEdit,
   scheduled: IconCalendarTime,
   running: IconPlayerPlay,
   paused: IconPlayerPause,

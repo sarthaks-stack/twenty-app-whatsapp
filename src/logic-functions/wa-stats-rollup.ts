@@ -178,6 +178,53 @@ export const rollupCampaign = async (
   };
 };
 
+/**
+ * The same recount, for one campaign, on the way to the screen showing it
+ * (D-62).
+ *
+ * The cron runs once a minute and the campaign detail polls every five
+ * seconds, so a recipient row marked DELIVERED sat next to a campaign header
+ * reading "Running · 0 delivered" for up to a minute. Two numbers describing
+ * the same event, disagreeing on one screen, with nothing to say which is the
+ * stale one.
+ *
+ * Deliberately the *same* function the cron calls rather than a second way of
+ * counting — two implementations of one number eventually disagree, and the
+ * disagreement is exactly the defect this fixes. Skipped entirely unless the
+ * campaign has a pending hint, so an idle one still costs a single `kv` read;
+ * and it never throws, because stale numbers beat no screen.
+ *
+ * Returns the campaign as it now stands, patched or not.
+ */
+export const reconcileCounters = async (
+  campaign: WhatsappCampaignRecord,
+  now: Date = new Date(),
+): Promise<WhatsappCampaignRecord> => {
+  if (!ACTIVE_STATUSES.includes((campaign.status ?? '') as never)) return campaign;
+
+  try {
+    const delta = await readCampaignChange(campaign.id);
+
+    if (!isPending(delta)) return campaign;
+
+    const patch = await rollupCampaign(campaign, now);
+
+    await patchCampaign(campaign.id, patch);
+    await clearCampaignChangeIfUnchanged(campaign.id, delta);
+
+    count(METRIC.CAMPAIGN_STATS_ROLLED);
+
+    return { ...campaign, ...patch };
+  } catch (error) {
+    logger.debug('wa.campaign.reconcile_failed', {
+      correlationId: campaign.id,
+      ...describeError(error),
+    });
+
+    return campaign;
+  }
+};
+
 export const rollup = async (now: Date = new Date()): Promise<RollupResult> => {
   const campaigns = await listCampaignsByStatus(ACTIVE_STATUSES, 30);
 

@@ -31,7 +31,10 @@ import {
   patchAccount,
   type WhatsappAccountRecord,
 } from '../server/repositories/accounts';
-import { findStuckQueuedMessages } from '../server/repositories/messages';
+import {
+  findFailedOutboundMessages,
+  findStuckQueuedMessages,
+} from '../server/repositories/messages';
 import { findFailedWebhookEvents } from '../server/repositories/webhook-events';
 import { STUCK_MESSAGE_MS } from './wa-health-check';
 
@@ -237,9 +240,17 @@ const diagnostics = async () => {
 
   const accounts = nodesOf<WhatsappAccountRecord>(result.whatsappAccounts);
 
-  const [failedEvents, stuck] = await Promise.all([
+  const [failedEvents, stuck, failedOutbound] = await Promise.all([
     findFailedWebhookEvents(60),
     findStuckQueuedMessages(new Date(now - STUCK_MESSAGE_MS), 60),
+    /**
+     * Sends that were refused (D-65). A stuck `QUEUED` row is a message nothing
+     * moved; a `FAILED` one is a message something decided about — and until
+     * now only the first was reported here, so every failed outbound
+     * attachment was invisible on the one screen an operator opens to ask what
+     * is wrong.
+     */
+    findFailedOutboundMessages(new Date(now - DAY_MS), 60),
   ]);
 
   const recentFailures = failedEvents.filter((event) => {
@@ -313,6 +324,11 @@ const diagnostics = async () => {
       ok: stuck.length === 0,
       detail: { count: stuck.length, olderThanMinutes: STUCK_MESSAGE_MS / 60_000 },
     },
+    {
+      key: 'failedOutbound',
+      ok: failedOutbound.length === 0,
+      detail: { count: failedOutbound.length },
+    },
   );
 
   return {
@@ -331,6 +347,20 @@ const diagnostics = async () => {
     stuckOutbound: stuck.slice(0, 20).map((message) => ({
       id: message.id,
       threadId: message.threadId ?? null,
+      createdAt: message.createdAt ?? null,
+    })),
+    /**
+     * The code *and* the detail. The code is what a dashboard groups by; the
+     * detail is the only place the actual cause survives — "only /files/ paths
+     * are workspace files" is the sentence that ends an investigation, and it
+     * exists nowhere else (D-58, D-65).
+     */
+    failedOutbound: failedOutbound.slice(0, 20).map((message) => ({
+      id: message.id,
+      threadId: message.threadId ?? null,
+      type: message.messageType ?? null,
+      errorCode: message.errorCode ?? null,
+      errorDetail: message.errorDetail ?? null,
       createdAt: message.createdAt ?? null,
     })),
   };

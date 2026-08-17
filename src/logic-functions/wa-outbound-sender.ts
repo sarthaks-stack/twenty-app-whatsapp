@@ -922,16 +922,25 @@ export const sendOutbound = async (
     accepted = { wamid: result.wamid, mediaId };
   } catch (error) {
     if (error instanceof WorkspaceFileError) {
+      /**
+       * `ATTACHMENT_UNREADABLE`, not `MEDIA_UNAVAILABLE`. Nothing reached Meta:
+       * the file could not be read out of Twenty's own storage, and saying
+       * "no longer available from Meta" sent every investigation of D-58
+       * looking at the wrong system.
+       */
+      count(METRIC.SEND_ATTACHMENT_UNREADABLE);
+      log.warn('wa.send.attachment_unreadable', { detail: error.message });
+
       await failMessage({
         message,
-        errorCode: INTERNAL_ERROR.MEDIA_UNAVAILABLE,
+        errorCode: INTERNAL_ERROR.ATTACHMENT_UNREADABLE,
         errorDetail: error.message,
         thread,
         classification: null,
         account,
       });
 
-      return { outcome: 'failed', reason: 'media unavailable' };
+      return { outcome: 'failed', reason: 'attachment unreadable' };
     }
 
     const metaError =

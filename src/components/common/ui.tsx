@@ -68,10 +68,18 @@ export const Card = ({
 export const Field = ({
   label,
   hint,
+  error,
   children,
 }: {
   label: string;
   hint?: string;
+  /**
+   * Shown in place of the hint, in the danger colour, and announced. A field
+   * that can be wrong needs somewhere to say so next to itself — the campaign
+   * builder's header-file box was the first, and putting its refusal in the
+   * form-level banner would have separated the sentence from the box (D-59).
+   */
+  error?: string;
   children: React.ReactNode;
 }) => {
   const theme = useTheme();
@@ -93,7 +101,14 @@ export const Field = ({
         {label}
       </span>
       {children}
-      {hint === undefined ? null : (
+      {error !== undefined ? (
+        <span
+          role="alert"
+          style={{ fontSize: theme.font.size.xs, color: theme.font.color.danger }}
+        >
+          {error}
+        </span>
+      ) : hint === undefined ? null : (
         <span style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}>
           {hint}
         </span>

@@ -11,11 +11,12 @@ import { BodyTooLargeError, readBodyCapped } from './read-body';
  *
  * **This is the one module outside the provider allowed to make an HTTP
  * request, and the allowance is narrow by construction.** `resolveFileUrl`
- * refuses any URL that is not on the workspace's own API origin, so the
- * function cannot be repurposed into a general HTTP client — in particular it
- * cannot be handed Meta's media CDN URL, which is the exact hole AR-11 exists
- * to close. A test asserts the guard is still here, because an exception to an
- * architectural rule that nobody re-checks is just a rule that was dropped.
+ * always returns a URL on the workspace's own API origin, under the file
+ * store, so the function cannot be repurposed into a general HTTP client — in
+ * particular it cannot be handed Meta's media CDN URL, which is the exact hole
+ * AR-11 exists to close. A test asserts the guard is still here, because an
+ * exception to an architectural rule that nobody re-checks is just a rule that
+ * was dropped.
  *
  * `RestApiClient` from the SDK is deliberately not used: it reads every
  * response with `response.text()`, which corrupts binary content silently.
@@ -53,18 +54,30 @@ const apiBaseUrl = (): string => {
 const FILE_STORE_PREFIX = '/files/';
 
 /**
- * Resolves a handle to an absolute URL **on the workspace's own origin and
- * inside the file store**, and throws otherwise.
+ * Resolves a handle to an absolute URL **on the workspace's own API origin and
+ * inside the file store**, and throws when the handle does not name a file
+ * store path at all.
  *
  * Relative forms are resolved rather than rejected because that is what the
  * platform hands us: a FILES column's `url` is frequently a path, and a caller
  * forced to reassemble the base URL would reassemble it wrongly somewhere.
  *
- * The path restriction is as load-bearing as the origin one. `fileUrl` and
- * `filePath` arrive from route callers, so without it any agent could name
- * `/rest/people?...`, have this module fetch the authenticated JSON with
- * `TWENTY_APP_ACCESS_TOKEN`, and send the workspace's CRM data to a WhatsApp
- * number as a "document" — an exfiltration channel, not a file read.
+ * **The origin is rebuilt, not validated** (D-58). The previous rule — refuse
+ * anything whose origin is not `TWENTY_API_URL` — refused every attachment a
+ * rep could actually supply: the panel asks them to "copy the file's address
+ * from its record in Twenty", and the address in a browser is the *front-end*
+ * host, while `TWENTY_API_URL` is the API one. Every outbound image, video,
+ * audio file and PDF failed on it, with a message about Meta that named the
+ * wrong system entirely. Taking `pathname` and `search` and re-hanging them on
+ * the API origin is *stronger* than the check it replaces: the fetch target is
+ * now workspace-origin by construction rather than by validation, so no input
+ * — a hostile one included — can make this module talk to another host.
+ *
+ * The path restriction survives untouched, and it is the load-bearing one.
+ * `fileUrl` and `filePath` arrive from route callers, so without it any agent
+ * could name `/rest/people?...`, have this module fetch the authenticated JSON
+ * with `TWENTY_APP_ACCESS_TOKEN`, and send the workspace's CRM data to a
+ * WhatsApp number as a "document" — an exfiltration channel, not a file read.
  */
 export const resolveFileUrl = (handle: WorkspaceFileHandle): string => {
   const base = apiBaseUrl();
@@ -72,29 +85,25 @@ export const resolveFileUrl = (handle: WorkspaceFileHandle): string => {
 
   if (raw.length === 0) throw new WorkspaceFileError('No file url or path was given');
 
+  /**
+   * `uploadFile` answers with a storage path — `attachment/x.png` — and not a
+   * file-store URL, so a handle carrying only `filePath` would otherwise
+   * resolve to `/attachment/x.png` and be refused by the prefix check below
+   * for being exactly what it was asked to be.
+   */
+  const relative = raw.replace(/^\/+/, '');
   const candidate = /^https?:\/\//i.test(raw)
     ? raw
-    : `${base}/${raw.replace(/^\/+/, '')}`;
+    : `${base}/${relative.startsWith('files/') ? relative : `files/${relative}`}`;
 
-  let resolved: URL;
+  let supplied: URL;
   let expected: URL;
 
   try {
-    resolved = new URL(candidate);
+    supplied = new URL(candidate);
     expected = new URL(base);
   } catch (error) {
     throw new WorkspaceFileError(`Could not parse the file url: ${String(error)}`);
-  }
-
-  /**
-   * Origin equality, not a prefix or a `startsWith` on the string. A prefix
-   * test passes for `https://twenty.example.com.attacker.test/`, which is the
-   * classic way this check is written wrong.
-   */
-  if (resolved.origin !== expected.origin) {
-    throw new WorkspaceFileError(
-      `Refusing to read a file from ${resolved.origin}: only ${expected.origin} is a workspace file store`,
-    );
   }
 
   /**
@@ -104,17 +113,32 @@ export const resolveFileUrl = (handle: WorkspaceFileHandle): string => {
    */
   const decodedPath = ((): string => {
     try {
-      return decodeURIComponent(resolved.pathname);
+      return decodeURIComponent(supplied.pathname);
     } catch {
-      return resolved.pathname;
+      return supplied.pathname;
     }
   })();
 
-  if (!resolved.pathname.startsWith(FILE_STORE_PREFIX) || decodedPath.includes('..')) {
+  /**
+   * A deployment whose API lives under a path — `https://host/api` — serves
+   * its files under that path too, and the address a rep copies carries it.
+   * Compared against the mount point rather than the bare prefix so neither
+   * shape is refused for the other's spelling.
+   */
+  const mount = `${expected.pathname.replace(/\/+$/, '')}${FILE_STORE_PREFIX}`;
+
+  if (!supplied.pathname.startsWith(mount) || decodedPath.includes('..')) {
     throw new WorkspaceFileError(
-      `Refusing to read ${resolved.pathname}: only ${FILE_STORE_PREFIX} paths are workspace files`,
+      `Refusing to read ${supplied.pathname}: only ${mount} paths are workspace files`,
     );
   }
+
+  // Path and query only. The query carries the file store's own signed token,
+  // which is what makes a copied address readable at all.
+  const resolved = new URL(expected.origin);
+
+  resolved.pathname = supplied.pathname;
+  resolved.search = supplied.search;
 
   return resolved.toString();
 };
@@ -138,31 +162,81 @@ export const FILE_TIMEOUT_MS = 30_000;
  */
 export const MAX_WORKSPACE_FILE_BYTES = 100 * 1024 * 1024;
 
+/**
+ * How many times the file store may point somewhere else before we stop.
+ *
+ * An object-storage backend answers a file read with a 302 to a pre-signed URL
+ * on the bucket's own host, so refusing every redirect refuses every send on
+ * such a deployment. One hop is the real shape; three is slack for a CDN in
+ * front of it, and a bound is what keeps a redirect loop from becoming the
+ * function timeout.
+ */
+export const MAX_FILE_REDIRECTS = 3;
+
 export const downloadWorkspaceFile = async (
   handle: WorkspaceFileHandle,
   { fetchImpl = globalThis.fetch }: { fetchImpl?: FetchLike } = {},
 ): Promise<DownloadedFile> => {
-  const url = resolveFileUrl(handle);
+  const first = resolveFileUrl(handle);
+  const origin = new URL(first).origin;
   const token = process.env.TWENTY_APP_ACCESS_TOKEN;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FILE_TIMEOUT_MS);
 
   try {
-    const response = await fetchImpl(url, {
-      method: 'GET',
-      headers:
-        typeof token === 'string' && token.length > 0
-          ? { Authorization: `Bearer ${token}` }
-          : {},
-      signal: controller.signal,
-      /**
-       * A redirect is a way out of the origin-and-path guard above: the file
-       * store answering 302 to somewhere else must be a refusal, not a fetch
-       * of wherever it pointed.
-       */
-      redirect: 'error',
-    });
+    let url = first;
+    let response!: Response;
+
+    for (let hop = 0; ; hop += 1) {
+      response = await fetchImpl(url, {
+        method: 'GET',
+        /**
+         * The app's token goes to the workspace and nowhere else. A pre-signed
+         * storage URL authenticates itself through its own signature, and
+         * forwarding a bearer token to whatever host a redirect names is how a
+         * workspace credential ends up in a third party's access log.
+         */
+        headers:
+          typeof token === 'string' && token.length > 0 && new URL(url).origin === origin
+            ? { Authorization: `Bearer ${token}` }
+            : {},
+        signal: controller.signal,
+        /**
+         * Followed by hand rather than by `fetch`, so the hop count is ours and
+         * the header decision above is re-made for each destination. `redirect:
+         * 'error'` used to stand here and made an object-storage backend
+         * unsendable; `redirect: 'follow'` would have leaked the token.
+         */
+        redirect: 'manual',
+      });
+
+      const location = response.headers.get('location');
+
+      if (response.status < 300 || response.status > 399 || location === null) break;
+
+      if (hop >= MAX_FILE_REDIRECTS) {
+        throw new WorkspaceFileError(
+          `The file store redirected more than ${MAX_FILE_REDIRECTS} times`,
+        );
+      }
+
+      const next = ((): URL => {
+        try {
+          return new URL(location, url);
+        } catch {
+          throw new WorkspaceFileError(`The file store redirected to an unreadable address`);
+        }
+      })();
+
+      if (next.protocol !== 'https:' && next.protocol !== 'http:') {
+        throw new WorkspaceFileError(
+          `Refusing to follow the file store to ${next.protocol}//…`,
+        );
+      }
+
+      url = next.toString();
+    }
 
     if (!response.ok) {
       throw new WorkspaceFileError(

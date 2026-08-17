@@ -66,6 +66,7 @@ export type Lane = (typeof LANE)[keyof typeof LANE];
 
 export const SOURCE_KIND = {
   AGENT: 'AGENT',
+  AI_AGENT: 'AI_AGENT',
   WORKFLOW: 'WORKFLOW',
   CAMPAIGN: 'CAMPAIGN',
   SYSTEM: 'SYSTEM',

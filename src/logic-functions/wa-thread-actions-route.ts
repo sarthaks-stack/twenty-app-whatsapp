@@ -88,6 +88,26 @@ export const statusAfterLink = (
   return personId === null ? null : THREAD_STATUS.OPEN;
 };
 
+/**
+ * Whether a link request would change anything at all (D-67).
+ *
+ * Re-linking a conversation to the contact it is already linked to is not an
+ * event, and it happens — a rep confirming an attribution, a double-click, a
+ * panel re-sending the same body. Each one used to write two timeline
+ * activities, one on each end of a move that did not happen, on top of Twenty's
+ * own relation entry: a Person's timeline filled with repeated "linked a
+ * whatsapp conversation" lines carrying no information.
+ *
+ * A thread awaiting review is never a no-op even when the person is the same:
+ * resolving the review *is* the change, and it clears the disambiguation
+ * banner.
+ */
+export const isRedundantLink = (
+  thread: { personId?: string | null; status?: string | null },
+  personId: string | null,
+): boolean =>
+  (thread.personId ?? null) === personId && thread.status !== THREAD_STATUS.NEEDS_REVIEW;
+
 const linkPatch = (
   thread: WhatsappThreadRecord,
   personId: string | null,
@@ -239,6 +259,12 @@ export const handler = async (
 
         const previousPersonId = thread.personId ?? null;
 
+        if (isRedundantLink(thread, personId)) {
+          log.debug('wa.thread.link_unchanged', { correlationId: thread.id });
+
+          return new Response({ threadId: thread.id, personId, changed: false }, { status: 200 });
+        }
+
         await patchThread(thread.id, linkPatch(thread, personId));
 
         audit({
@@ -263,6 +289,14 @@ export const handler = async (
             targetPersonId,
             linkedRecordId: thread.id,
             linkedObjectUniversalIdentifier: THREAD_OBJECT_UID,
+            /**
+             * Named, so the row is not a link to "Untitled" (D-67). The label
+             * identifier makes the record readable from now on, but a cached
+             * name written here is what the *existing* rows show, and the
+             * number is the thing the reader recognises.
+             */
+            linkedRecordCachedName:
+              thread.profileName ?? thread.dialablePhone ?? thread.waId ?? null,
           });
         }
 
@@ -271,7 +305,7 @@ export const handler = async (
          * record who was targeted at snapshot time, and an audit that changed
          * retroactively would not be one (specs/05 §2.4).
          */
-        return new Response({ threadId: thread.id, personId }, { status: 200 });
+        return new Response({ threadId: thread.id, personId, changed: true }, { status: 200 });
       }
 
       case 'markRead': {

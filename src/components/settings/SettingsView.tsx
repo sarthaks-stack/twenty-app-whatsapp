@@ -49,6 +49,8 @@ type Diagnostics = {
   };
   failedEvents: Record<string, any>[];
   stuckOutbound: Record<string, any>[];
+  /** Outbound sends the app itself refused or Meta rejected (D-65). */
+  failedOutbound: Record<string, any>[];
 };
 
 /**
@@ -63,6 +65,7 @@ const HEALTH_KEYS = [
   'tier',
   'failedWebhookEvents',
   'stuckOutbound',
+  'failedOutbound',
 ] as const;
 
 const Copyable = ({
@@ -95,6 +98,7 @@ const Copyable = ({
           {value}
         </code>
       </div>
+      {/* Copying a URL changes nothing, so it is not one of the gated actions. */}
       <ActionButton label={copyLabel} onClick={() => void copyToClipboard(value)} />
     </div>
   );
@@ -113,6 +117,13 @@ export const SettingsView = () => {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * The workspace refused this caller (D-66). Every action here needs the
+   * WhatsApp admin role, and the page opens by reading diagnostics — so one
+   * 403 on load is enough to know that none of the buttons can work, and to
+   * say so once instead of once per click.
+   */
+  const [forbidden, setForbidden] = useState(false);
 
   /**
    * The account id whose disconnect is one click from happening. No portals
@@ -147,6 +158,33 @@ export const SettingsView = () => {
   const now = new Date();
 
   /**
+   * Every button on this page, gated on the role the routes require (D-66).
+   *
+   * Written as one wrapper rather than as `disabled={forbidden || …}` on
+   * sixteen call sites, because sixteen places to remember is fifteen places to
+   * forget — and the one that was forgotten is how a viewer who could change
+   * nothing was invited to provision a notification workflow.
+   *
+   * A disabled button is still a courtesy and never a control: every route
+   * re-checks the role, which is why this can be derived from a refusal the
+   * page happened to see rather than from a permission it was told about.
+   */
+  const AdminAction = useMemo(
+    () =>
+      /**
+       * Memoised on `forbidden` alone, so the component *type* is stable across
+       * the renders this page does constantly — typing in the connect form is
+       * one. A closure redefined every render is a new type every render, and
+       * React unmounts and remounts everything under it: buttons would lose
+       * focus and blink out of their loading state mid-click.
+       */
+      ({ disabled = false, ...props }: Parameters<typeof ActionButton>[0]) => (
+        <ActionButton {...props} disabled={disabled || forbidden} />
+      ),
+    [forbidden],
+  );
+
+  /**
    * Returns `null` **and only null** when the request failed, having already
    * put the reason on screen. Every caller must check it before claiming
    * anything happened: the Test and Sync buttons used to announce success
@@ -163,9 +201,25 @@ export const SettingsView = () => {
       setNotice(null);
 
       try {
-        return await client.post<T>(path, body);
+        const result = await client.post<T>(path, body);
+
+        setForbidden(false);
+
+        return result;
       } catch (caught) {
-        const detail = caught as { body?: { error?: string } };
+        const detail = caught as { status?: number; body?: { error?: string } };
+
+        /**
+         * A refusal is remembered, not just announced (D-66).
+         *
+         * Every action on this page requires the WhatsApp admin role, and the
+         * page had no idea whether the person reading it had one — so a
+         * viewer who could not perform a single action was shown every button,
+         * enabled, and learned the truth one click and one red banner at a
+         * time. The first refused request is the answer, and it arrives on
+         * load: the page opens by reading diagnostics.
+         */
+        if (detail?.status === 403) setForbidden(true);
 
         setError(
           detail?.body?.error ??
@@ -357,6 +411,12 @@ export const SettingsView = () => {
         ]}
       />
 
+      {/*
+        Said once, at the top, instead of once per click (D-66). The page reads
+        diagnostics on load, so the refusal is known before the reader has
+        pressed anything.
+      */}
+      {forbidden ? <Banner tone="danger">{t('settings.needsAdminRole')}</Banner> : null}
       {error === null ? null : <Banner tone="danger">{error}</Banner>}
       {notice === null ? null : <Banner tone="success">{notice}</Banner>}
 
@@ -388,7 +448,7 @@ export const SettingsView = () => {
               />
 
               <div style={{ display: 'flex', gap: theme.spacing[2], flexWrap: 'wrap' }}>
-                <ActionButton
+                <AdminAction
                   label={t('settings.test')}
                   busy={busy}
                   onClick={async () => {
@@ -403,7 +463,7 @@ export const SettingsView = () => {
                     void load();
                   }}
                 />
-                <ActionButton
+                <AdminAction
                   label={t('settings.syncTemplates')}
                   busy={busy}
                   onClick={async () => {
@@ -447,7 +507,7 @@ export const SettingsView = () => {
                 </span>
                 {confirmingDisconnect === connected.id ? (
                   <div style={{ display: 'flex', gap: theme.spacing[2], flexWrap: 'wrap' }}>
-                    <ActionButton
+                    <AdminAction
                       label={t('settings.disconnectConfirm')}
                       tone="danger"
                       busy={busy}
@@ -465,14 +525,14 @@ export const SettingsView = () => {
                         if (disconnected !== null) void load();
                       }}
                     />
-                    <ActionButton
+                    <AdminAction
                       label={t('common.cancel')}
                       onClick={() => setConfirmingDisconnect(null)}
                     />
                   </div>
                 ) : (
                   <div style={{ display: 'flex' }}>
-                    <ActionButton
+                    <AdminAction
                       label={t('settings.disconnect')}
                       tone="danger"
                       busy={busy}
@@ -535,7 +595,7 @@ export const SettingsView = () => {
               />
               {t('settings.isTestAccount')}
             </label>
-            <ActionButton
+            <AdminAction
               label={t('settings.connect')}
               tone="primary"
               busy={busy}
@@ -593,7 +653,7 @@ export const SettingsView = () => {
             <div style={{ fontSize: theme.font.size.sm, color: theme.font.color.tertiary }}>
               {t('settings.requiredFields')}: {(data?.webhook.requiredFields ?? []).join(', ')}
             </div>
-            <ActionButton
+            <AdminAction
               label={t('settings.copyFields')}
               onClick={() =>
                 void copyToClipboard((data?.webhook.requiredFields ?? []).join('\n'))
@@ -608,7 +668,7 @@ export const SettingsView = () => {
         <Card
           title={t('settings.tab.health')}
           actions={
-            <ActionButton label={t('common.refresh')} busy={busy} onClick={() => void load()} />
+            <AdminAction label={t('common.refresh')} busy={busy} onClick={() => void load()} />
           }
         >
           {(data?.rows ?? []).length === 0 ? <Banner>{t('common.loading')}</Banner> : null}
@@ -670,7 +730,7 @@ export const SettingsView = () => {
         <Card
           title={t('settings.tab.templates')}
           actions={
-            <ActionButton
+            <AdminAction
               label={t('common.refresh')}
               busy={busy}
               onClick={() => void loadTemplates()}
@@ -723,7 +783,7 @@ export const SettingsView = () => {
               <span style={{ flex: '1 1 auto' }} />
 
               {template.publishedToCrm === true ? (
-                <ActionButton
+                <AdminAction
                   label={t('settings.unpublish')}
                   busy={busy}
                   onClick={async () => {
@@ -736,7 +796,7 @@ export const SettingsView = () => {
                   }}
                 />
               ) : (
-                <ActionButton
+                <AdminAction
                   label={t('settings.publish')}
                   tone="primary"
                   busy={busy}
@@ -798,7 +858,7 @@ export const SettingsView = () => {
             title={t('settings.failedEvents')}
             actions={
               <div style={{ display: 'flex', gap: theme.spacing[2] }}>
-                <ActionButton
+                <AdminAction
                   label={t('settings.replaySelected', { count: selectedEvents.length })}
                   onClick={() => void replaySelected()}
                   disabled={selectedEvents.length === 0}
@@ -806,14 +866,14 @@ export const SettingsView = () => {
                   tone="primary"
                 />
                 {pendingReplay === null ? (
-                  <ActionButton
+                  <AdminAction
                     label={t('settings.replayAllFailed')}
                     onClick={() => void armReplayAll()}
                     disabled={(data?.failedEvents ?? []).length === 0}
                     busy={busy}
                   />
                 ) : (
-                  <ActionButton
+                  <AdminAction
                     label={t('settings.replayConfirm', { count: pendingReplay })}
                     onClick={() => void replayAllFailed()}
                     busy={busy}
@@ -868,6 +928,50 @@ export const SettingsView = () => {
             })}
           </Card>
 
+          {/*
+            Sends that were refused (D-65).
+
+            "Failed deliveries" above is *inbound* — webhook events we could not
+            process — and the stuck list below is outbound messages nothing
+            moved. A message something decided to fail was in neither, so every
+            failed attachment was invisible on the one screen an operator opens
+            to ask what is wrong (D-58). The detail is shown in full: the code
+            is what groups them, the sentence beside it is what ends the
+            investigation.
+          */}
+          <Card title={t('settings.failedOutbound')}>
+            {(data?.failedOutbound ?? []).length === 0 ? (
+              <span style={{ fontSize: theme.font.size.md, color: theme.font.color.tertiary }}>
+                {t('common.none')}
+              </span>
+            ) : null}
+            {(data?.failedOutbound ?? []).map((message) => (
+              <div
+                key={String(message.id)}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  fontSize: theme.font.size.sm,
+                  color: theme.font.color.secondary,
+                  borderTop: `1px solid ${theme.border.color.light}`,
+                  paddingTop: theme.spacing[1],
+                }}
+              >
+                <span>
+                  {String(message.type ?? '—')} · {String(message.errorCode ?? '—')} ·{' '}
+                  {relativeTime(message.createdAt as string | null, now, lang)}
+                </span>
+                {message.errorDetail === null || message.errorDetail === undefined ? null : (
+                  <span
+                    style={{ fontSize: theme.font.size.xs, color: theme.font.color.tertiary }}
+                  >
+                    {String(message.errorDetail)}
+                  </span>
+                )}
+              </div>
+            ))}
+          </Card>
+
           <Card title={t('settings.stuckMessages')}>
             {(data?.stuckOutbound ?? []).length === 0 ? (
               <span style={{ fontSize: theme.font.size.md, color: theme.font.color.tertiary }}>
@@ -888,7 +992,7 @@ export const SettingsView = () => {
           <Card
             title={t('settings.notifications')}
             actions={
-              <ActionButton
+              <AdminAction
                 label={t('settings.createNotificationWorkflow')}
                 onClick={() => void createNotificationWorkflow()}
                 busy={busy}

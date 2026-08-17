@@ -34,7 +34,7 @@ import {
   parseClientMessage,
   toSendSpec,
 } from './wa-send-message-route';
-import { statusAfterLink } from './wa-thread-actions-route';
+import { isRedundantLink, statusAfterLink } from './wa-thread-actions-route';
 import {
   PROBE_FAILURES_BEFORE_ERROR,
   STALE_CLAIM_MS,
@@ -905,6 +905,35 @@ describe('re-linking a conversation', () => {
       expect(statusAfterLink(status, 'person-2')).toBeNull();
     },
   );
+
+  /**
+   * D-67. Linking to the contact a conversation is already linked to wrote two
+   * timeline activities describing a move that did not happen, plus Twenty's
+   * own relation entry — which is how a Person's timeline filled with repeated
+   * "linked a whatsapp conversation" lines carrying no information.
+   */
+  it('treats a link to the same person as nothing at all', () => {
+    expect(isRedundantLink({ personId: 'p-1', status: THREAD_STATUS.OPEN }, 'p-1')).toBe(true);
+  });
+
+  it('treats unlinking an already-unlinked conversation as nothing at all', () => {
+    expect(isRedundantLink({ personId: null, status: THREAD_STATUS.OPEN }, null)).toBe(true);
+  });
+
+  it.each([
+    ['a different person', { personId: 'p-1', status: THREAD_STATUS.OPEN }, 'p-2'],
+    ['a first link', { personId: null, status: THREAD_STATUS.OPEN }, 'p-2'],
+    ['an unlink', { personId: 'p-1', status: THREAD_STATUS.OPEN }, null],
+  ])('is a real change for %s', (_label, thread, personId) => {
+    expect(isRedundantLink(thread, personId)).toBe(false);
+  });
+
+  /** Resolving the review *is* the change, even when the person is the same. */
+  it('is a real change while the thread awaits review', () => {
+    expect(
+      isRedundantLink({ personId: 'p-1', status: THREAD_STATUS.NEEDS_REVIEW }, 'p-1'),
+    ).toBe(false);
+  });
 });
 
 describe('the hourly health check', () => {

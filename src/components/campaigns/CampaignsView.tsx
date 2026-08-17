@@ -46,6 +46,14 @@ export const CampaignsView = () => {
 
   const [screen, setScreen] = useState<'list' | 'builder'>('list');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * The campaign the builder is reopening, if it is reopening one (D-61).
+   *
+   * Held here rather than fetched by the builder: the detail screen already has
+   * the record polled and in hand, and a second read would race the write the
+   * builder is about to make.
+   */
+  const [editing, setEditing] = useState<Record<string, any> | null>(null);
   const [wide, setWide] = useState(true);
   const [filter, setFilter] = useState<CampaignFilter>('all');
   const [search, setSearch] = useState('');
@@ -155,10 +163,15 @@ export const CampaignsView = () => {
         <CampaignBuilder
           accounts={bootstrap.data?.accounts ?? []}
           templates={bootstrap.data?.templates ?? []}
-          onCancel={() => setScreen('list')}
+          resume={editing}
+          onCancel={() => {
+            setScreen('list');
+            setEditing(null);
+          }}
           onDone={(campaignId) => {
             setSelectedId(campaignId);
             setScreen('list');
+            setEditing(null);
             list.refresh();
           }}
         />
@@ -195,6 +208,17 @@ export const CampaignsView = () => {
             onChanged={() => {
               detail.refresh();
               list.refresh();
+            }}
+            /**
+             * Into the builder with the record this screen is already showing.
+             * The detail screen closes: the builder writes on every step, so
+             * leaving a stale copy of the campaign behind it would be a second
+             * source of truth for the same rows (D-61).
+             */
+            onEdit={() => {
+              setEditing(campaign);
+              setSelectedId(null);
+              setScreen('builder');
             }}
             /**
              * Back to the list, and refresh it — the deleted campaign is still
@@ -264,7 +288,10 @@ export const CampaignsView = () => {
             label={t('campaign.new')}
             tone="primary"
             icon="newCampaign"
-            onClick={() => setScreen('builder')}
+            onClick={() => {
+              setEditing(null);
+              setScreen('builder');
+            }}
           />
         ) : null}
       </div>
@@ -419,7 +446,10 @@ export const CampaignsView = () => {
                       label={t('campaign.new')}
                       tone="primary"
                       icon="newCampaign"
-                      onClick={() => setScreen('builder')}
+                      onClick={() => {
+                        setEditing(null);
+                        setScreen('builder');
+                      }}
                     />
                   ) : null}
                   <ActionButton

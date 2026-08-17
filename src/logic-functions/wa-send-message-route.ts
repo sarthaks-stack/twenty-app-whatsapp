@@ -34,6 +34,7 @@ import type { SendSpec } from '../domain/send-spec';
 import type { VariableSpec } from '../domain/template-spec';
 import { AUDIT_ACTION, audit } from '../server/audit';
 import { authErrorResponse, requireCaller, requireRole } from '../server/auth';
+import { WorkspaceFileError, resolveFileUrl } from '../server/files';
 import { describeError, logger } from '../server/logger';
 import { queueOutbound } from '../server/outbound';
 import { upsertThread } from '../server/threads';
@@ -507,6 +508,32 @@ export const handler = async (
         return new Response(
           { message: existing, threadId: existing.threadId, replayed: true },
           { status: 202 },
+        );
+      }
+    }
+
+    /**
+     * An attachment's address is checked here, before a record exists.
+     *
+     * The sender resolves the same handle a moment later, so this decides
+     * nothing the sender does not decide again — but it decides it *while the
+     * rep is still looking at the panel they typed the address into*. Without
+     * it, an address the file store cannot serve became a queued message, a job,
+     * and a failed bubble carrying a sentence about Meta, which is the shape
+     * D-58 took. The cheap half of the check — is this a workspace file path at
+     * all — catches every case seen so far and costs no network call.
+     */
+    if (parsed.message.kind === 'media') {
+      try {
+        resolveFileUrl({ url: parsed.message.fileUrl, path: parsed.message.filePath });
+      } catch (error) {
+        if (!(error instanceof WorkspaceFileError)) throw error;
+
+        log.info('wa.send.attachment_rejected', { detail: error.message });
+
+        return new Response(
+          { error: 'ATTACHMENT_UNREADABLE', detail: error.message },
+          { status: 400 },
         );
       }
     }

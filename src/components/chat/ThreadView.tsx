@@ -9,7 +9,7 @@ import type { QuoteProjection } from '../../domain/feed/quote';
 import type { FieldError } from '../../domain/interactive/validate';
 import type { ResolvedParameters } from '../../domain/template-render';
 import { newClientToken, useActions, type SendOutcome } from '../common/actions';
-import { useCopy } from '../common/copy';
+import { refusalCopy, useCopy } from '../common/copy';
 import { Glyph } from '../common/icons';
 import { SURFACE_MAX_HEIGHT, SURFACE_MIN_HEIGHT } from '../common/surface';
 import { ActionButton, Banner, EmptyState } from '../common/ui';
@@ -54,12 +54,24 @@ export type ThreadViewProps = {
   personId?: string | null;
   /** Chrome only. The conversation is identical in all three. */
   variant?: 'tab' | 'panel' | 'inbox';
+  /**
+   * Something about the conversation *as a row* changed — it was assigned,
+   * closed, blocked, or linked to a contact (D-64).
+   *
+   * The transcript refreshes itself, but the list beside it and the totals
+   * above it are separate polls on separate clocks: eight seconds and thirty.
+   * So taking a conversation from inside the pane left the row still reading
+   * "unassigned" and the "Mine" badge still a number short, for long enough
+   * that the honest reading of the screen was that the action had not worked.
+   */
+  onThreadChanged?: () => void;
 };
 
 export const ThreadView = ({
   threadId = null,
   personId = null,
   variant = 'tab',
+  onThreadChanged,
 }: ThreadViewProps) => {
   const theme = useTheme();
   const { t, lang } = useCopy();
@@ -251,7 +263,9 @@ export const ThreadView = ({
       }
 
       setRefusal(null);
-      feed.settleOptimistic(clientToken, { error: outcome.message });
+      feed.settleOptimistic(clientToken, {
+        error: refusalCopy(t, outcome.message, outcome.detail),
+      });
     },
     [feed, t],
   );
@@ -384,6 +398,15 @@ export const ThreadView = ({
               sizeBytes: null,
               caption: input.caption,
               ...(input.voice === undefined ? {} : { isVoice: input.voice }),
+              spec: {
+                kind: 'media',
+                mediaKind: input.mediaKind,
+                ...(input.fileUrl === undefined ? {} : { fileUrl: input.fileUrl }),
+                ...(input.filePath === undefined ? {} : { filePath: input.filePath }),
+                filename: input.filename,
+                caption: input.caption,
+                ...(input.voice === undefined ? {} : { voice: input.voice }),
+              },
             },
           ),
         (clientToken) =>
@@ -590,6 +613,20 @@ export const ThreadView = ({
   );
 
   /**
+   * Everything a thread action has to wake up: this pane, and whatever is
+   * showing the conversation *as a row* beside it (D-64).
+   *
+   * The list and the filter totals are separate polls on separate clocks —
+   * eight seconds and thirty — so an action taken here used to leave the row
+   * reading "unassigned" and the "Mine" badge a number short for long enough
+   * that the honest reading of the screen was that nothing had happened.
+   */
+  const refreshAll = useCallback(() => {
+    feed.refresh();
+    onThreadChanged?.();
+  }, [feed, onThreadChanged]);
+
+  /**
    * A Person created from a contact card the customer shared.
    *
    * The name and number sent are the *card's*, which is what the rep has just
@@ -633,7 +670,8 @@ export const ThreadView = ({
         if (!outcome.ok) setActionError(outcome.error ?? t('error.unknown'));
         else setActionError(null);
 
-        feed.refresh();
+        // The row's contact name changes too, so the list has to hear about it.
+        refreshAll();
       } finally {
         /**
          * Released on both paths. A key left in the set would leave the button
@@ -649,7 +687,7 @@ export const ThreadView = ({
         });
       }
     },
-    [actions, creatingContacts, feed, t, thread],
+    [actions, creatingContacts, refreshAll, t, thread],
   );
 
   /**
@@ -662,9 +700,36 @@ export const ThreadView = ({
    */
   const retry = useCallback(
     (message: MessageProjection) => {
+      /**
+       * An attachment is retried from the *spec the send was built from*, not
+       * from its text — a media bubble's `body` is only its caption, and a
+       * caption-less photo therefore had nothing to press again with. The spec
+       * is on the row already (the `payload` column is what the sender rebuilds
+       * the wire form from), so the retry sends the same file rather than
+       * asking the rep to find it a second time (D-58).
+       */
+      const spec = message.payload;
+
+      if (spec?.kind === 'media') {
+        const kind = spec.mediaKind;
+
+        if (kind === 'image' || kind === 'video' || kind === 'audio' || kind === 'document') {
+          sendMedia({
+            mediaKind: kind,
+            ...(typeof spec.fileUrl === 'string' ? { fileUrl: spec.fileUrl } : {}),
+            ...(typeof spec.filePath === 'string' ? { filePath: spec.filePath } : {}),
+            filename: typeof spec.filename === 'string' ? spec.filename : null,
+            caption: typeof spec.caption === 'string' ? spec.caption : null,
+            ...(spec.voice === true ? { voice: true } : {}),
+          });
+
+          return;
+        }
+      }
+
       if (message.body !== null) sendText(message.body);
     },
-    [sendText],
+    [sendMedia, sendText],
   );
 
   const toggleBlock = useCallback(async () => {
@@ -673,8 +738,8 @@ export const ThreadView = ({
     await actions.threadAction(thread.isBlocked ? 'unblock' : 'block', {
       threadId: thread.id,
     });
-    feed.refresh();
-  }, [actions, feed, thread]);
+    refreshAll();
+  }, [actions, refreshAll, thread]);
 
   const toggleClose = useCallback(async () => {
     if (thread === null) return;
@@ -682,8 +747,8 @@ export const ThreadView = ({
     await actions.threadAction(thread.status === 'CLOSED' ? 'reopen' : 'close', {
       threadId: thread.id,
     });
-    feed.refresh();
-  }, [actions, feed, thread]);
+    refreshAll();
+  }, [actions, refreshAll, thread]);
 
   /**
    * Take the conversation, or give it back.
@@ -706,8 +771,8 @@ export const ThreadView = ({
     if (!outcome.ok) setActionError(outcome.error ?? t('chat.assignFailed'));
     else setActionError(null);
 
-    feed.refresh();
-  }, [actions, feed, t, thread, viewerId]);
+    refreshAll();
+  }, [actions, refreshAll, t, thread, viewerId]);
 
   /**
    * Opening a conversation with a contact who has none.

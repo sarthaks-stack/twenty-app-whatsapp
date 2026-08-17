@@ -28,7 +28,13 @@ export type SendOutcome =
    * showing one sentence about a message with eight fields.
    */
   | { ok: false; kind: 'invalid'; fields: FieldError[]; message: string }
-  | { ok: false; kind: 'error'; message: string };
+  /**
+   * `message` is the route's machine code where it sent one, and `detail` the
+   * sentence beside it. Kept apart so the component can translate the code and
+   * still show what the server actually said — an attachment refusal is useless
+   * without the reason (D-58).
+   */
+  | { ok: false; kind: 'error'; message: string; detail?: string | null };
 
 export type { FieldError };
 
@@ -36,6 +42,7 @@ type ErrorBody = {
   code?: string;
   warnings?: string[];
   error?: string;
+  detail?: string;
   missing?: string[];
   fields?: FieldError[];
 };
@@ -197,6 +204,7 @@ export const useActions = (): Actions => {
           kind: 'error',
           message:
             body.error ?? (error instanceof Error ? error.message : String(error)),
+          detail: typeof body.detail === 'string' ? body.detail : null,
         };
       }
     },

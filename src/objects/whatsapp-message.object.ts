@@ -265,9 +265,10 @@ export default defineObject({
       defaultValue: "'AGENT'",
       options: [
         { value: 'AGENT', label: 'Agent', position: 0, color: 'blue' },
-        { value: 'WORKFLOW', label: 'Workflow', position: 1, color: 'purple' },
-        { value: 'CAMPAIGN', label: 'Campaign', position: 2, color: 'violet' },
-        { value: 'SYSTEM', label: 'System', position: 3, color: 'gray' },
+        { value: 'AI_AGENT', label: 'AI agent', position: 1, color: 'turquoise' },
+        { value: 'WORKFLOW', label: 'Workflow', position: 2, color: 'purple' },
+        { value: 'CAMPAIGN', label: 'Campaign', position: 3, color: 'violet' },
+        { value: 'SYSTEM', label: 'System', position: 4, color: 'gray' },
       ],
     },
     {
@@ -275,7 +276,7 @@ export default defineObject({
       name: 'clientToken',
       label: 'Client token',
       description:
-        'Browser-generated idempotency key: a repeat send with the same token returns the existing message instead of sending twice',
+        'Caller-generated idempotency key: a repeat send with the same token returns the existing message instead of sending twice',
       icon: 'IconKey',
       type: FieldType.TEXT,
       isNullable: true,

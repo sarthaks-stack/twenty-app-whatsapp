@@ -6,6 +6,7 @@ import {
   buttonLabels,
   buttonVariableHints,
   headerVariableHints,
+  mediaHeaderOf,
 } from '../../domain/template-hints';
 import {
   emptyParameters,
@@ -15,6 +16,7 @@ import {
   type ResolvedParameters,
 } from '../../domain/template-render';
 import type { VariableSpec } from '../../domain/template-spec';
+import { isWorkspaceFileAddress } from '../../domain/workspace-file';
 import type { Translate } from '../common/copy';
 import { Glyph } from '../common/icons';
 import type { FeedTemplate } from '../common/use-feed';
@@ -84,6 +86,8 @@ export const TemplatePicker = ({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [values, setValues] = useState<string[]>([]);
   const [headerValues, setHeaderValues] = useState<string[]>([]);
+  /** A media header's file, as an address in Twenty's own storage (D-59). */
+  const [headerFileUrl, setHeaderFileUrl] = useState('');
   /** Keyed by button index, because the indices are Meta's and need not be dense. */
   const [buttonValues, setButtonValues] = useState<Record<number, string>>({});
   /** Empty fields are marked only once a send has been attempted. */
@@ -111,8 +115,16 @@ export const TemplatePicker = ({
 
   const hints = useMemo(() => bodyVariableHints(spec), [spec]);
   const headerHints = useMemo(() => headerVariableHints(spec), [spec]);
+  const mediaHeader = useMemo(() => mediaHeaderOf(spec), [spec]);
   const buttonHints = useMemo(() => buttonVariableHints(spec), [spec]);
   const buttons = useMemo(() => buttonLabels(spec), [spec]);
+
+  /**
+   * The same address rule the send route applies. A media header pointing
+   * outside Twenty's file store fails for the recipient rather than here, so it
+   * is caught while the box is still on screen (D-58).
+   */
+  const headerFileValid = isWorkspaceFileAddress(headerFileUrl);
 
   /**
    * Everything the validator counts, not just the body.
@@ -125,16 +137,41 @@ export const TemplatePicker = ({
     () => ({
       ...emptyParameters(),
       body: values,
-      ...(headerHints.length === 0
-        ? {}
-        : { header: { kind: 'text' as const, values: headerValues } }),
+      /**
+       * A media header and a text header are mutually exclusive — a template
+       * has one header — so this is a choice, not two spreads that could both
+       * apply. Only a *valid* address is offered as the header: handing the
+       * validator a half-typed URL would light Send up on a send that cannot
+       * work (D-59).
+       */
+      ...(mediaHeader !== null
+        ? {
+            header: {
+              kind: 'media' as const,
+              mediaId: null,
+              fileId: null,
+              fileUrl: headerFileValid ? headerFileUrl.trim() : null,
+            },
+          }
+        : headerHints.length === 0
+          ? {}
+          : { header: { kind: 'text' as const, values: headerValues } }),
       buttons: buttonHints.map((button) => ({
         index: button.index,
         subType: button.subType,
         value: buttonValues[button.index] ?? '',
       })),
     }),
-    [values, headerValues, buttonValues, headerHints, buttonHints],
+    [
+      values,
+      headerValues,
+      buttonValues,
+      headerHints,
+      buttonHints,
+      mediaHeader,
+      headerFileUrl,
+      headerFileValid,
+    ],
   );
 
   const validation = useMemo(
@@ -210,15 +247,23 @@ export const TemplatePicker = ({
     hint,
     value,
     badge,
+    errorCode,
     onChange,
   }: {
     id: string;
     hint: { token: string; context: string | null; example: string | null };
     value: string;
     badge?: string;
+    /**
+     * The `builder.error.*` code to show instead of "required". A media header
+     * has two ways to be wrong — empty, and pointing outside Twenty's file
+     * store — and they need different sentences (D-59).
+     */
+    errorCode?: string | null;
     onChange: (value: string) => void;
   }) => {
-    const missing = attempted && isBlank(value);
+    const missing =
+      errorCode === undefined ? attempted && isBlank(value) : errorCode !== null;
 
     return (
       <div
@@ -287,7 +332,7 @@ export const TemplatePicker = ({
             }}
           >
             <Glyph name="warning" />
-            {t('builder.error.REQUIRED')}
+            {t(`builder.error.${errorCode ?? 'REQUIRED'}`)}
           </span>
         ) : null}
       </div>
@@ -329,6 +374,7 @@ export const TemplatePicker = ({
             // values over would fill {{2}} with something meant for {{1}}.
             setValues([]);
             setHeaderValues([]);
+            setHeaderFileUrl('');
             setButtonValues({});
             setAttempted(false);
           }}
@@ -477,6 +523,40 @@ export const TemplatePicker = ({
             {t(previewOpen ? 'common.less' : 'common.more')}
           </button>
         )}
+
+        {/*
+          The header image, video or document (D-59).
+
+          Templates like `convite_inicial` carry one, `validateParameters`
+          counts it, and until now nothing on this screen collected it — so Send
+          was permanently disabled and the footer read "Missing: 1" about a
+          component with no field. The same address rule as the attachment
+          panel, because it is the same read on the server.
+        */}
+        {mediaHeader === null
+          ? null
+          : field({
+              id: 'wa-template-header-media',
+              hint: {
+                token: t(`chat.templateHeader.${mediaHeader.format}`),
+                context: t('chat.templateHeaderMedia'),
+                /*
+                  A shape, not `mediaHeader.example`. Meta's synced example is a
+                  `header_handle` — an opaque upload token — which as a
+                  placeholder would look like an address a rep should copy and
+                  is the one thing here that cannot be.
+                */
+                example: t('chat.fileUrlPlaceholder'),
+              },
+              badge: t('chat.templateHeader'),
+              value: headerFileUrl,
+              errorCode: !attempted || headerFileValid
+                ? null
+                : isBlank(headerFileUrl)
+                  ? 'REQUIRED'
+                  : 'NOT_A_FILE_URL',
+              onChange: setHeaderFileUrl,
+            })}
 
         {headerHints.map((hint, index) =>
           field({

@@ -134,7 +134,13 @@ export const upsertThread = async ({
     thread = await createThread({
       accountId: account.id,
       waId,
-      dialablePhone: waIdToE164(waId),
+      /**
+       * Never null, because it is the record's label (D-67). `waIdToE164`
+       * returns null for a `wa_id` it cannot parse, and a thread with no
+       * dialable phone *and* no profile name is a record Twenty calls
+       * "Untitled" everywhere it names one.
+       */
+      dialablePhone: waIdToE164(waId) ?? waId,
       profileName: profileName ?? null,
       personId,
       assigneeId: assignment?.assigneeId ?? null,

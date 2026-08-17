@@ -335,6 +335,18 @@ export const InboxView = () => {
    * belongs — the header can do it too, but reaching it means opening the
    * thread you may not be taking.
    */
+  /**
+   * The list and the badges, together.
+   *
+   * They are separate polls on separate clocks — eight seconds and thirty — so
+   * anything that changes a conversation's row has to wake both, or the count
+   * beside "Minhas" disagrees with the rows under it for half a minute (D-64).
+   */
+  const refreshList = useCallback(() => {
+    feed.refresh();
+    counts.refresh();
+  }, [counts, feed]);
+
   const assignToMe = useCallback(
     async (threadId: string) => {
       if (viewerId === null) return;
@@ -345,10 +357,9 @@ export const InboxView = () => {
       });
 
       setActionError(outcome.ok ? null : (outcome.error ?? t('chat.assignFailed')));
-      feed.refresh();
-      counts.refresh();
+      refreshList();
     },
-    [actions, counts, feed, t, viewerId],
+    [actions, refreshList, t, viewerId],
   );
 
   /**
@@ -759,7 +770,18 @@ export const InboxView = () => {
           {selectedId === null ? (
             <EmptyState icon="inbox" title={t('inbox.pick')} body={t('inbox.pickBody')} />
           ) : (
-            <ThreadView threadId={selectedId} variant="inbox" />
+            /*
+              The pane tells the list when the conversation changed as a *row*
+              — assigned, closed, blocked, linked. Without it the two halves of
+              this screen ran on their own clocks and contradicted each other
+              for up to thirty seconds after every action taken on the right
+              (D-64).
+            */
+            <ThreadView
+              threadId={selectedId}
+              variant="inbox"
+              onThreadChanged={refreshList}
+            />
           )}
         </div>
       </div>

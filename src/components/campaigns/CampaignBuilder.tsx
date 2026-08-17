@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTheme } from 'twenty-ui/theme-constants';
 
+import type {
+  VariableBinding,
+  VariableMapping,
+} from '../../domain/campaign/variable-resolution';
 import type { AccountProjection } from '../../domain/feed/projection';
+import {
+  buttonVariableHints,
+  headerVariableHints,
+  mediaHeaderOf,
+} from '../../domain/template-hints';
 import { emptyParameters, renderTemplate } from '../../domain/template-render';
 import type { VariableSpec } from '../../domain/template-spec';
+import { isWorkspaceFileAddress } from '../../domain/workspace-file';
 import type { FeedTemplate } from '../common/use-feed';
 import { useCopy, type Translate } from '../common/copy';
 import { Glyph } from '../common/icons';
@@ -44,6 +54,16 @@ import { useCampaignActions } from './campaign-actions';
 export type CampaignBuilderProps = {
   accounts: AccountProjection[];
   templates: FeedTemplate[];
+  /**
+   * A campaign record to reopen, or null to start a new one (D-61).
+   *
+   * A draft used to be a one-way door: the builder wrote one on every step and
+   * the detail screen could show it, but nothing led back in — so an
+   * interrupted campaign was work that could only be deleted and redone. The
+   * record carries everything the form holds, so reopening is a matter of
+   * reading it rather than of storing anything new.
+   */
+  resume?: Record<string, unknown> | null;
   onDone: (campaignId: string) => void;
   onCancel: () => void;
 };
@@ -95,6 +115,232 @@ export const standIn = (binding: Binding): string => {
   const leaf = binding.path.split('.').filter((part) => part.length > 0).pop();
 
   return leaf === undefined ? '' : `«${leaf}»`;
+};
+
+/** A binding row in the shape `resolveParameters` reads. */
+const bindingOf = (binding: Binding | undefined, index: number): VariableBinding => {
+  const row = binding ?? { kind: 'field' as const, path: '', value: '', fallback: '' };
+
+  return {
+    index,
+    kind: row.kind,
+    ...(row.kind === 'field' ? { path: row.path } : { value: row.value }),
+    ...(row.fallback === '' ? {} : { fallback: row.fallback }),
+  };
+};
+
+/**
+ * Everything the campaign has to say about the template's variables (D-59).
+ *
+ * It used to say `{ body }` and nothing else, while `resolveParameters` reads a
+ * header and buttons too. A template with either was therefore buildable,
+ * launchable, and excluded every recipient for "missing variables" — a
+ * campaign that could not have sent a single message, with nothing on any
+ * screen explaining why. The two shapes are now the same shape, and this is
+ * pure and exported so a test can hold them together.
+ *
+ * The index conventions are Meta's and differ by component: body variables are
+ * 1-based, buttons are 0-based. Neither is normalised, because the resolver
+ * matches on them.
+ */
+export const buildVariableMapping = ({
+  spec,
+  bindings,
+  headerBindings,
+  headerFileUrl,
+  buttonBindings,
+}: {
+  spec: VariableSpec | null;
+  bindings: Binding[];
+  headerBindings: Binding[];
+  headerFileUrl: string;
+  buttonBindings: Record<number, Binding>;
+}): VariableMapping => {
+  const mediaHeader = mediaHeaderOf(spec);
+  const headerHints = headerVariableHints(spec);
+  const buttonHints = buttonVariableHints(spec);
+
+  return {
+    body: bindings.map((binding, index) =>
+      bindingOf(
+        binding,
+        spec?.namedParameters === true ? index + 1 : (spec?.body.indices[index] ?? index + 1),
+      ),
+    ),
+    /**
+     * A media header is resolved once for the campaign rather than per
+     * recipient: the sender uploads the file to Meta and every recipient reuses
+     * the id. A text header binds per recipient, exactly like the body.
+     *
+     * An address that is not a workspace file is carried as null rather than
+     * as itself — the resolver would accept the string and the send would fail
+     * for the whole audience (D-58).
+     */
+    ...(mediaHeader !== null
+      ? {
+          header: {
+            kind: 'media' as const,
+            fileUrl: isWorkspaceFileAddress(headerFileUrl) ? headerFileUrl.trim() : null,
+          },
+        }
+      : headerHints.length === 0
+        ? {}
+        : {
+            header: {
+              kind: 'text' as const,
+              bindings: headerBindings.map((binding, index) => bindingOf(binding, index + 1)),
+            },
+          }),
+    ...(buttonHints.length === 0
+      ? {}
+      : {
+          buttons: buttonHints.map((button) => ({
+            ...bindingOf(buttonBindings[button.index], button.index),
+            subType: button.subType,
+          })),
+        }),
+  };
+};
+
+/** A stored binding read back into the row shape the form edits. */
+const rowOf = (binding: VariableBinding | undefined): Binding => ({
+  kind: binding?.kind === 'field' ? 'field' : 'static',
+  path: binding?.path ?? '',
+  value: binding?.value ?? '',
+  fallback: binding?.fallback ?? '',
+});
+
+/**
+ * `buildVariableMapping` read backwards, so a draft can be reopened (D-61).
+ *
+ * A draft could be created and then only *looked at*: the detail screen had no
+ * way back into the builder, so an interrupted campaign was abandoned work with
+ * a record beside it. Reopening is only useful if the form comes back filled,
+ * which means reading the stored mapping — and reading it by index rather than
+ * by position, because that is how it was written and a template edited in
+ * between could have changed the order.
+ */
+export const bindingsFromMapping = (
+  spec: VariableSpec | null,
+  mapping: VariableMapping | null,
+): {
+  bindings: Binding[];
+  headerBindings: Binding[];
+  headerFileUrl: string;
+  buttonBindings: Record<number, Binding>;
+} => {
+  const body = mapping?.body ?? [];
+  const header = mapping?.header ?? null;
+
+  const bodyIndices =
+    spec === null
+      ? []
+      : spec.namedParameters
+        ? spec.body.names.map((_unused, position) => position + 1)
+        : spec.body.indices;
+
+  return {
+    bindings: bodyIndices.map((index) => rowOf(body.find((row) => row.index === index))),
+    headerBindings:
+      header?.kind === 'text'
+        ? headerVariableHints(spec).map((_unused, position) =>
+            rowOf(header.bindings.find((row) => row.index === position + 1)),
+          )
+        : [],
+    headerFileUrl: header?.kind === 'media' ? (header.fileUrl ?? '') : '',
+    buttonBindings: Object.fromEntries(
+      buttonVariableHints(spec).map((button) => [
+        button.index,
+        rowOf((mapping?.buttons ?? []).find((row) => row.index === button.index)),
+      ]),
+    ),
+  };
+};
+
+export type OpenedCampaign = {
+  campaignId: string | null;
+  step: number;
+  name: string;
+  accountId: string;
+  scheduledAt: string;
+  templateId: string;
+  audienceKind: AudienceKind;
+  viewId: string;
+  personIds: string;
+  bindings: Binding[];
+  headerBindings: Binding[];
+  headerFileUrl: string;
+  buttonBindings: Record<number, Binding>;
+};
+
+const EMPTY_OPENED: OpenedCampaign = {
+  campaignId: null,
+  step: 0,
+  name: '',
+  accountId: '',
+  scheduledAt: '',
+  templateId: '',
+  audienceKind: 'view',
+  viewId: '',
+  personIds: '',
+  bindings: [],
+  headerBindings: [],
+  headerFileUrl: '',
+  buttonBindings: {},
+};
+
+/**
+ * A stored campaign, read back into the form's initial state (D-61).
+ *
+ * **The step it opens on is the furthest one already answered**, not the first.
+ * A draft abandoned at the variables screen that reopened on "Basics" would ask
+ * an operator to press Continue past three screens they had already filled in
+ * — which is a resume in name only.
+ *
+ * Pure and exported: it is the inverse of five screens of writes, and the kind
+ * of mapping that is wrong in one field for a long time before anybody notices.
+ */
+export const openedFrom = (
+  campaign: Record<string, unknown> | null | undefined,
+  templates: FeedTemplate[],
+): OpenedCampaign => {
+  if (campaign === null || campaign === undefined) return EMPTY_OPENED;
+
+  const text = (value: unknown): string => (typeof value === 'string' ? value : '');
+  const audience = (campaign.audienceDefinition ?? null) as {
+    kind?: string;
+    viewId?: string;
+    personIds?: string[];
+  } | null;
+
+  const templateId = text(campaign.templateId);
+  const spec = specOf(templates.find((candidate) => candidate.id === templateId));
+
+  const name = text(campaign.name);
+  const accountId = text(campaign.accountId);
+  const hasAudience =
+    audience?.kind === 'view'
+      ? text(audience.viewId).length > 0
+      : (audience?.personIds ?? []).length > 0;
+
+  return {
+    ...EMPTY_OPENED,
+    campaignId: text(campaign.id) === '' ? null : text(campaign.id),
+    step: hasAudience ? 3 : templateId !== '' ? 2 : name !== '' && accountId !== '' ? 1 : 0,
+    name,
+    accountId,
+    /**
+     * `datetime-local` reads `YYYY-MM-DDTHH:mm` and nothing else; the stored
+     * value is a full ISO instant, and handing it over whole leaves the field
+     * empty — which reads as "not scheduled" for a campaign that is.
+     */
+    scheduledAt: text(campaign.scheduledAt).slice(0, 16),
+    templateId,
+    audienceKind: audience?.kind === 'manual' ? 'manual' : 'view',
+    viewId: text(audience?.viewId),
+    personIds: (audience?.personIds ?? []).join('\n'),
+    ...bindingsFromMapping(spec, (campaign.variableMapping ?? null) as VariableMapping | null),
+  };
 };
 
 /**
@@ -204,6 +450,7 @@ const SummaryRow = ({ label, value }: { label: string; value: string }) => {
 export const CampaignBuilder = ({
   accounts,
   templates,
+  resume = null,
   onDone,
   onCancel,
 }: CampaignBuilderProps) => {
@@ -212,19 +459,44 @@ export const CampaignBuilder = ({
   const { t } = useCopy();
   const { call } = useCampaignActions();
 
-  const [step, setStep] = useState(0);
-  const [campaignId, setCampaignId] = useState<string | null>(null);
+  /**
+   * What the record was when this builder opened.
+   *
+   * Read once, into the initial state of each field, and never watched: a
+   * reopened draft is edited here and written back on every step, so a poll
+   * arriving mid-edit must not reach in and replace what somebody is typing.
+   * `useState`'s initialiser is the whole mechanism — there is no effect to
+   * fight with (D-61).
+   */
+  const opened = useMemo(() => openedFrom(resume, templates), [resume, templates]);
+
+  const [step, setStep] = useState(opened.step);
+  const [campaignId, setCampaignId] = useState<string | null>(opened.campaignId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [name, setName] = useState('');
-  const [accountId, setAccountId] = useState(accounts[0]?.id ?? '');
-  const [scheduledAt, setScheduledAt] = useState('');
-  const [templateId, setTemplateId] = useState('');
-  const [audienceKind, setAudienceKind] = useState<AudienceKind>('view');
-  const [viewId, setViewId] = useState('');
-  const [personIds, setPersonIds] = useState('');
-  const [bindings, setBindings] = useState<Binding[]>([]);
+  const [name, setName] = useState(opened.name);
+  const [accountId, setAccountId] = useState(opened.accountId || (accounts[0]?.id ?? ''));
+  const [scheduledAt, setScheduledAt] = useState(opened.scheduledAt);
+  const [templateId, setTemplateId] = useState(opened.templateId);
+  const [audienceKind, setAudienceKind] = useState<AudienceKind>(opened.audienceKind);
+  const [viewId, setViewId] = useState(opened.viewId);
+  const [personIds, setPersonIds] = useState(opened.personIds);
+  const [bindings, setBindings] = useState<Binding[]>(opened.bindings);
+  /**
+   * The rest of the template, which this builder used to ignore (D-59).
+   *
+   * `variableMapping` carried only `body`, so a template with a header or a
+   * dynamic button was launchable and then excluded every recipient for
+   * "missing variables" — the resolver counts those components, and nothing
+   * here ever supplied them. A media header is one file for the whole audience;
+   * a text header and a button value bind per recipient like any body variable.
+   */
+  const [headerBindings, setHeaderBindings] = useState<Binding[]>(opened.headerBindings);
+  const [headerFileUrl, setHeaderFileUrl] = useState(opened.headerFileUrl);
+  const [buttonBindings, setButtonBindings] = useState<Record<number, Binding>>(
+    opened.buttonBindings,
+  );
 
   const [views, setViews] = useState<{ id: string; name: string }[]>([]);
   const [paths, setPaths] = useState<string[]>([]);
@@ -255,6 +527,19 @@ export const CampaignBuilder = ({
       : spec.body.indices.map((i) => `{{${i}}}`);
   }, [spec]);
 
+  const headerHints = useMemo(() => headerVariableHints(spec), [spec]);
+  const mediaHeader = useMemo(() => mediaHeaderOf(spec), [spec]);
+  const buttonHints = useMemo(() => buttonVariableHints(spec), [spec]);
+
+  const headerFileValid = isWorkspaceFileAddress(headerFileUrl);
+
+  /** Whether the variables step has anything at all to ask for. */
+  const hasVariables =
+    labels.length > 0 ||
+    headerHints.length > 0 ||
+    mediaHeader !== null ||
+    buttonHints.length > 0;
+
   useEffect(() => {
     void call<{ views: { id: string; name: string }[]; bindingPaths: string[] }>(
       'audienceOptions',
@@ -268,13 +553,21 @@ export const CampaignBuilder = ({
 
   // One binding row per placeholder, kept in step with the chosen template.
   useEffect(() => {
-    setBindings((current) =>
-      labels.map(
-        (_, index) =>
-          current[index] ?? { kind: 'field', path: paths[0] ?? '', value: '', fallback: '' },
+    const blank = (): Binding => ({
+      kind: 'field',
+      path: paths[0] ?? '',
+      value: '',
+      fallback: '',
+    });
+
+    setBindings((current) => labels.map((_, index) => current[index] ?? blank()));
+    setHeaderBindings((current) => headerHints.map((_, index) => current[index] ?? blank()));
+    setButtonBindings((current) =>
+      Object.fromEntries(
+        buttonHints.map((button) => [button.index, current[button.index] ?? blank()]),
       ),
     );
-  }, [labels, paths]);
+  }, [labels, headerHints, buttonHints, paths]);
 
   const audienceDefinition = useMemo(() => {
     if (audienceKind === 'view') return viewId === '' ? null : { kind: 'view', viewId };
@@ -288,15 +581,15 @@ export const CampaignBuilder = ({
   }, [audienceKind, personIds, viewId]);
 
   const variableMapping = useMemo(
-    () => ({
-      body: bindings.map((binding, index) => ({
-        index: spec?.namedParameters === true ? index + 1 : (spec?.body.indices[index] ?? index + 1),
-        kind: binding.kind,
-        ...(binding.kind === 'field' ? { path: binding.path } : { value: binding.value }),
-        ...(binding.fallback === '' ? {} : { fallback: binding.fallback }),
-      })),
-    }),
-    [bindings, spec],
+    () =>
+      buildVariableMapping({
+        spec,
+        bindings,
+        headerBindings,
+        headerFileUrl,
+        buttonBindings,
+      }),
+    [bindings, spec, headerFileUrl, headerBindings, buttonBindings],
   );
 
   /** The template as it stands, with whatever the mapping can stand in for. */
@@ -307,8 +600,13 @@ export const CampaignBuilder = ({
         : renderTemplate(spec, {
             ...emptyParameters(),
             body: bindings.map(standIn),
+            // A text header's placeholders stand in too, so the preview stops
+            // showing `{{1}}` in the one line a reader looks at first.
+            ...(headerHints.length === 0
+              ? {}
+              : { header: { kind: 'text' as const, values: headerBindings.map(standIn) } }),
           }),
-    [bindings, spec],
+    [bindings, headerBindings, headerHints, spec],
   );
 
   const persist = useCallback(
@@ -433,7 +731,84 @@ export const CampaignBuilder = ({
         ? templateId !== ''
         : step === 2
           ? audienceDefinition !== null
-          : true;
+          : /**
+             * A media header is the one variable the builder can settle here,
+             * because it is one file for the whole audience rather than a
+             * per-recipient lookup. Advancing without it produces a campaign
+             * that excludes everyone, which is a worse way to learn the same
+             * thing (D-59).
+             */
+            step !== 3 || mediaHeader === null || headerFileValid;
+
+  /**
+   * One binding row, for a body variable, a text header or a dynamic button.
+   *
+   * A closure rather than a component so it keeps `input`, `paths` and `t`
+   * without threading them through props. It was inline in the body-variable
+   * map until the header and the buttons needed exactly the same three fields.
+   */
+  const bindingCard = ({
+    key,
+    title,
+    binding,
+    update,
+  }: {
+    key: string;
+    title: string;
+    binding: Binding | undefined;
+    update: (patch: Partial<Binding>) => void;
+  }) => {
+    const row = binding ?? { kind: 'field' as const, path: '', value: '', fallback: '' };
+
+    return (
+      <Card key={key} title={title}>
+        <Field label={t('campaign.source')}>
+          <select
+            value={row.kind}
+            onChange={(event) => update({ kind: event.target.value as 'field' | 'static' })}
+            style={input}
+          >
+            <option value="field">{t('campaign.bindingField')}</option>
+            <option value="static">{t('campaign.bindingStatic')}</option>
+          </select>
+        </Field>
+
+        {row.kind === 'field' ? (
+          <Field label={t('campaign.field')}>
+            <select
+              value={row.path}
+              onChange={(event) => update({ path: event.target.value })}
+              style={input}
+            >
+              {paths.map((path) => (
+                <option key={path} value={path}>
+                  {path}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : (
+          <Field label={t('campaign.text')}>
+            <input
+              type="text"
+              value={row.value}
+              onChange={(event) => update({ value: event.target.value })}
+              style={input}
+            />
+          </Field>
+        )}
+
+        <Field label={t('campaign.fallback')} hint={t('campaign.fallbackHint')}>
+          <input
+            type="text"
+            value={row.fallback}
+            onChange={(event) => update({ fallback: event.target.value })}
+            style={input}
+          />
+        </Field>
+      </Card>
+    );
+  };
 
   const warnings = accountWarnings(account);
   const missingRows = (sample ?? []).filter((row) => !row.ok);
@@ -609,78 +984,94 @@ export const CampaignBuilder = ({
 
         {step === 3 ? (
           <>
-            {labels.length === 0 ? (
+            {hasVariables ? null : (
               <span style={{ fontSize: theme.font.size.md, color: theme.font.color.tertiary }}>
                 {t('campaign.noVariables')}
               </span>
-            ) : null}
+            )}
 
-            {labels.map((label, index) => {
-              const binding = bindings[index] ?? {
-                kind: 'field' as const,
-                path: '',
-                value: '',
-                fallback: '',
-              };
+            {/*
+              The header file, when the template has one (D-59).
 
-              const update = (patch: Partial<Binding>) =>
-                setBindings((current) =>
-                  current.map((row, position) =>
-                    position === index ? { ...row, ...patch } : row,
+              One address for the whole campaign: the sender uploads it to Meta
+              once and every recipient reuses the id. Before this, a template
+              with an image header could be built and launched, and then
+              excluded every single recipient for a variable the builder had
+              never asked about.
+            */}
+            {mediaHeader === null ? null : (
+              <Card title={t(`chat.templateHeader.${mediaHeader.format}`)}>
+                <Field
+                  label={t('chat.templateHeaderMedia')}
+                  hint={t('chat.fileUrlHint')}
+                  {...(headerFileUrl.length === 0 || headerFileValid
+                    ? {}
+                    : { error: t('builder.error.NOT_A_FILE_URL') })}
+                >
+                  <input
+                    type="text"
+                    inputMode="url"
+                    value={headerFileUrl}
+                    placeholder={t('chat.fileUrlPlaceholder')}
+                    onChange={(event) => setHeaderFileUrl(event.target.value)}
+                    style={input}
+                  />
+                </Field>
+              </Card>
+            )}
+
+            {headerHints.map((hint, index) =>
+              bindingCard({
+                key: `header-${index}`,
+                title: `${t('chat.templateHeader')} · ${hint.context ?? hint.token}`,
+                binding: headerBindings[index],
+                update: (patch) =>
+                  setHeaderBindings((current) =>
+                    current.map((row, position) =>
+                      position === index ? { ...row, ...patch } : row,
+                    ),
                   ),
-                );
+              }),
+            )}
 
-              return (
-                <Card key={label} title={label}>
-                  <Field label={t('campaign.source')}>
-                    <select
-                      value={binding.kind}
-                      onChange={(event) =>
-                        update({ kind: event.target.value as 'field' | 'static' })
-                      }
-                      style={input}
-                    >
-                      <option value="field">{t('campaign.bindingField')}</option>
-                      <option value="static">{t('campaign.bindingStatic')}</option>
-                    </select>
-                  </Field>
+            {labels.map((label, index) =>
+              bindingCard({
+                key: label,
+                title: label,
+                binding: bindings[index],
+                update: (patch) =>
+                  setBindings((current) =>
+                    current.map((row, position) =>
+                      position === index ? { ...row, ...patch } : row,
+                    ),
+                  ),
+              }),
+            )}
 
-                  {binding.kind === 'field' ? (
-                    <Field label={t('campaign.field')}>
-                      <select
-                        value={binding.path}
-                        onChange={(event) => update({ path: event.target.value })}
-                        style={input}
-                      >
-                        {paths.map((path) => (
-                          <option key={path} value={path}>
-                            {path}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                  ) : (
-                    <Field label={t('campaign.text')}>
-                      <input
-                        type="text"
-                        value={binding.value}
-                        onChange={(event) => update({ value: event.target.value })}
-                        style={input}
-                      />
-                    </Field>
-                  )}
-
-                  <Field label={t('campaign.fallback')} hint={t('campaign.fallbackHint')}>
-                    <input
-                      type="text"
-                      value={binding.fallback}
-                      onChange={(event) => update({ fallback: event.target.value })}
-                      style={input}
-                    />
-                  </Field>
-                </Card>
-              );
-            })}
+            {buttonHints.map((button) =>
+              bindingCard({
+                key: `button-${button.index}`,
+                title: `${
+                  button.subType === 'copy_code'
+                    ? t('chat.templateCopyCode')
+                    : t('chat.templateButtonUrl')
+                } · ${button.label ?? t('chat.templateButton')}`,
+                binding: buttonBindings[button.index],
+                update: (patch) =>
+                  setButtonBindings((current) => ({
+                    ...current,
+                    [button.index]: {
+                      ...(current[button.index] ?? {
+                        kind: 'static',
+                        path: '',
+                        value: '',
+                        fallback: '',
+                      }),
+                      ...patch,
+                    },
+                  })),
+              }),
+            )}
 
             {/*
               Live, and local. Every keystroke re-renders it, which no server

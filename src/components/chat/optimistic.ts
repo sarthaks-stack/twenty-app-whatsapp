@@ -169,6 +169,14 @@ export const optimisticMedia = (
     sizeBytes: number | null;
     caption: string | null;
     isVoice?: boolean;
+    /**
+     * The send spec, carried on the bubble so that a refusal the rep can fix —
+     * an address the file store would not serve — is retryable without them
+     * finding the file again. The delivered row carries the same thing in its
+     * `payload` column; this is the local stand-in for the seconds before it
+     * exists (D-58).
+     */
+    spec?: Record<string, unknown> | null;
   },
 ): MessageProjection => {
   const type = MEDIA_TYPE[media.mediaKind] ?? 'DOCUMENT';
@@ -202,5 +210,6 @@ export const optimisticMedia = (
   return {
     ...optimisticMessage({ ...base, type, body: media.caption, content }),
     media: projection,
+    payload: media.spec ?? null,
   };
 };

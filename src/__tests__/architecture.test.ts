@@ -99,16 +99,39 @@ describe('the Meta seam', () => {
    * A file reader that would fetch any URL handed to it is a general HTTP
    * client wearing a different name — and the URL it would most plausibly be
    * handed is Meta's media CDN, which is precisely what AR-11 exists to route
-   * through one place. So the module must compare origins, and must do it with
-   * `URL.origin` rather than a prefix test: `startsWith` passes for
-   * `https://twenty.example.com.attacker.test/`.
+   * through one place.
+   *
+   * The rule used to be "compare origins and refuse a mismatch". D-58 replaced
+   * it with a stronger one: the first request's origin is *built* from
+   * `TWENTY_API_URL`, so no input can name the host, and the path must be
+   * inside the file store. `files.test.ts` asserts the behaviour; this asserts
+   * the construction is still the one that produces it, since an origin
+   * assembled from the supplied URL instead would reintroduce the hole
+   * silently.
    */
   it('lets the one HTTP exception fetch only the workspace origin', () => {
     const source = contentsOf(join(SRC, 'server', 'files.ts'));
 
-    expect(source).toMatch(/resolved\.origin\s*!==\s*expected\.origin/);
+    expect(source).toMatch(/new URL\(expected\.origin\)/);
+    expect(source).toMatch(/supplied\.pathname\.startsWith\(mount\)/);
     expect(source).toMatch(/resolveFileUrl\(/);
     expect(source).not.toMatch(/startsWith\s*\(\s*base/);
+  });
+
+  /**
+   * Redirects are the other way out of the guard, and the module follows them
+   * — an object-storage backend answers a file read with a 302 to a pre-signed
+   * URL, so refusing them refused every attachment on such a deployment. What
+   * must never happen is the app's workspace token travelling to whatever host
+   * the redirect named, so `redirect: 'follow'` is banned outright: it would
+   * hand the header off without anyone deciding to.
+   */
+  it('never lets fetch follow a redirect on the app’s behalf', () => {
+    const source = contentsOf(join(SRC, 'server', 'files.ts'));
+
+    expect(source).toMatch(/redirect:\s*'manual'/);
+    expect(source).not.toMatch(/redirect:\s*'follow'/);
+    expect(source).toMatch(/new URL\(url\)\.origin === origin/);
   });
 
   /**
@@ -275,6 +298,35 @@ describe('the campaign state machine', () => {
   });
 });
 
+describe('command menu availability', () => {
+  /**
+   * D-63. `conditionalAvailabilityExpression` is compiled from the *source* of
+   * a real comparison against the SDK's context bindings, and
+   * `'numberOfSelectedRecords === 1'` — the same thing in quotes — type-checks,
+   * builds, installs, and then never matches. The People command was absent
+   * from the command menu in every situation, including the single-selection
+   * one it was written for, and nothing anywhere reported a problem.
+   *
+   * A string is the only wrong shape that looks right, so it is the one thing
+   * checked.
+   */
+  const commandMenuFiles = files.filter(
+    (file) => file.startsWith(join(SRC, 'command-menu-items')) && !isTestFile(file),
+  );
+
+  it('has command menu items to check', () => {
+    expect(commandMenuFiles.length).toBeGreaterThan(0);
+  });
+
+  it('never writes an availability expression as a string', () => {
+    const offending = commandMenuFiles.filter((file) =>
+      /conditionalAvailabilityExpression:\s*['"`]/.test(contentsOf(file)),
+    );
+
+    expect(offending.map((file) => relative(SRC, file))).toEqual([]);
+  });
+});
+
 describe('logic function discovery', () => {
   /**
    * One function per file, declared on the **default** export.
@@ -308,6 +360,30 @@ describe('logic function discovery', () => {
     }
 
     expect(offending).toEqual([]);
+  });
+
+  /**
+   * MCP gets two deliberately narrow surfaces: catalogue discovery and one
+   * idempotent template send. Accidentally exposing the workflow action as a
+   * tool would bypass the exact-id/request-id contract and misattribute sends.
+   */
+  it('exposes only the two dedicated WhatsApp MCP tools', () => {
+    const tools = logicFunctionFiles
+      .filter((file) => /\btoolTriggerSettings\s*:/.test(contentsOf(file)))
+      .map((file) => relative(SRC, file))
+      .sort();
+
+    expect(tools).toEqual([
+      'logic-functions/wa-list-sendable-templates-tool.ts',
+      'logic-functions/wa-send-template-tool.ts',
+    ]);
+
+    for (const file of tools) {
+      const source = contentsOf(join(SRC, file));
+
+      expect(source).toMatch(/toolTriggerSettings\s*:\s*\{\s*inputSchema\s*:/);
+      expect(source).toMatch(/additionalProperties\s*:\s*false/);
+    }
   });
 });
 

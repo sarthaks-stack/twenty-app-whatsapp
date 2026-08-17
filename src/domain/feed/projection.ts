@@ -1,4 +1,4 @@
-import { ERROR_CATALOG, ERROR_CLASS } from '../../providers/whatsapp/errors';
+import { ERROR_CATALOG, ERROR_CLASS, INTERNAL_ERROR } from '../../providers/whatsapp/errors';
 import { projectContent, type MessageContentProjection } from './content';
 import type { MediaProjection } from './media';
 import type { QuoteProjection } from './quote';
@@ -171,6 +171,16 @@ const numberOrNull = (value: unknown): number | null =>
  */
 export const isRetryableError = (errorCode: string | null | undefined): boolean => {
   if (typeof errorCode !== 'string' || errorCode.length === 0) return false;
+
+  /**
+   * The one internal code worth pressing again. An attachment that could not be
+   * read out of Twenty's storage never reached Meta, and the thing that fixes
+   * it — a re-copied address, a file store that answers this time — is in the
+   * rep's hands rather than an administrator's. Every other internal code is
+   * either a policy refusal that will refuse again or a state only somebody
+   * else can change (D-58).
+   */
+  if (errorCode === INTERNAL_ERROR.ATTACHMENT_UNREADABLE) return true;
 
   const numeric = Number(errorCode);
 

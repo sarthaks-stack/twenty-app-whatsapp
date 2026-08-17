@@ -81,11 +81,15 @@ export const settleOptimisticMessages = (
           errorCode: null,
           errorDetail: outcome.error,
           /**
-           * Retryable in the plain sense: the text is still there and "retry"
-           * sends it again as a new message. It is not a claim that Meta said
-           * it was retryable — nothing reached Meta.
+           * Retryable in the plain sense: the send is still fully described
+           * here and "retry" performs it again as a new message. It is not a
+           * claim that Meta said it was retryable — nothing reached Meta.
+           *
+           * An attachment qualifies on its spec rather than its text: a photo
+           * sent without a caption has no body at all, so it used to be the one
+           * refusal with nothing to press (D-58).
            */
-          isRetryable: message.body !== null,
+          isRetryable: message.body !== null || message.payload?.kind === 'media',
         }
       : message,
   );

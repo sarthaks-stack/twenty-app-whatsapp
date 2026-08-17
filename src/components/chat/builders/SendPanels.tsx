@@ -3,6 +3,7 @@ import { useTheme } from 'twenty-ui/theme-constants';
 
 import type { ContactCardProjection } from '../../../domain/feed/content';
 import type { PersonProjection } from '../../../domain/feed/projection';
+import { isWorkspaceFileAddress } from '../../../domain/workspace-file';
 import type { Translate } from '../../common/copy';
 import { Glyph } from '../../common/icons';
 import { LocationContent } from '../renderers/rich';
@@ -357,17 +358,17 @@ export const AttachmentPanel = ({
   const [attempted, setAttempted] = useState(false);
 
   const trimmed = url.trim();
-  const wellFormed = (() => {
-    if (trimmed.length === 0) return false;
-
-    try {
-      const parsed = new URL(trimmed);
-
-      return parsed.protocol === 'https:' || parsed.protocol === 'http:';
-    } catch {
-      return false;
-    }
-  })();
+  /**
+   * Not merely "is this a URL" (D-58).
+   *
+   * The server will only read an address inside Twenty's file store, so a
+   * well-formed URL pointing anywhere else — a public image, a Drive link, a
+   * Meta CDN address out of a webhook — is a send that is already lost. Every
+   * outbound attachment failed for a variant of this, and the panel accepted
+   * all of them. The same rule the route applies, applied before the rep
+   * presses send.
+   */
+  const wellFormed = isWorkspaceFileAddress(trimmed);
 
   const submit = () => {
     setAttempted(true);
@@ -456,7 +457,7 @@ export const AttachmentPanel = ({
           ? {
               error: {
                 field: 'fileUrl',
-                code: trimmed.length === 0 ? 'REQUIRED' : 'UNSUPPORTED',
+                code: trimmed.length === 0 ? 'REQUIRED' : 'NOT_A_FILE_URL',
               },
             }
           : {})}

@@ -66,6 +66,7 @@ import {
   findPersonById,
 } from '../server/repositories/people';
 import { listTemplatesForAccount } from '../server/repositories/templates';
+import { reconcileCounters } from './wa-stats-rollup';
 import { findWorkspaceMembersByIds } from '../server/repositories/workspace-members';
 import {
   countInboxThreads,
@@ -649,9 +650,28 @@ const campaignScope = async (
     };
   }
 
-  const campaign = await findCampaignById(query.id);
+  const found = await findCampaignById(query.id);
 
-  if (campaign === null) return { status: 404, error: 'Unknown campaign' };
+  if (found === null) return { status: 404, error: 'Unknown campaign' };
+
+  /**
+   * The counters are recounted here, on the way to the screen that shows them
+   * (D-62).
+   *
+   * They are stored on the campaign and rebuilt from the recipient rows by a
+   * once-a-minute cron, while this screen polls every five seconds — so for up
+   * to a minute the detail showed a recipient marked DELIVERED beside a
+   * campaign header reading "Running · 0 delivered". Two numbers describing the
+   * same event, disagreeing, on one screen: the reader has no way to tell which
+   * is the stale one, and the honest-looking answer is the wrong one.
+   *
+   * The recount is the *same* function the cron runs — not a second way of
+   * counting, which would eventually disagree with the first — and it is
+   * skipped entirely unless something actually changed, so an idle campaign
+   * still costs one `kv` read per poll. Failures are swallowed: stale numbers
+   * are worse than fresh ones and better than no screen at all.
+   */
+  const campaign = await reconcileCounters(found, now);
 
   /**
    * The recipient sample is a *sample*, and says so. The detail view's table is

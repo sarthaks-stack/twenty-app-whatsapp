@@ -29,6 +29,14 @@ const rescheduleSend = vi.fn();
 const noteCampaignChange = vi.fn();
 const kvGet = vi.fn();
 const kvSet = vi.fn();
+const downloadWorkspaceFile = vi.fn();
+
+class FakeWorkspaceFileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WorkspaceFileError';
+  }
+}
 
 vi.mock('twenty-sdk/logic-function', () => ({
   kv: {
@@ -101,8 +109,8 @@ vi.mock('../server/campaign-deltas', () => ({
 vi.mock('../server/campaign-state', () => ({ transitionCampaign: vi.fn() }));
 
 vi.mock('../server/files', () => ({
-  downloadWorkspaceFile: vi.fn(),
-  WorkspaceFileError: class WorkspaceFileError extends Error {},
+  downloadWorkspaceFile: (...args: unknown[]) => downloadWorkspaceFile(...args),
+  WorkspaceFileError: FakeWorkspaceFileError,
 }));
 
 const { sendOutbound, acceptanceKey } = await import('./wa-outbound-sender');
@@ -143,6 +151,7 @@ beforeEach(() => {
     noteCampaignChange,
     kvGet,
     kvSet,
+    downloadWorkspaceFile,
   ]) {
     spy.mockReset();
   }
@@ -183,6 +192,63 @@ describe('the happy path', () => {
       wamid: 'wamid.HBg',
       status: 'ACCEPTED',
     });
+  });
+});
+
+/**
+ * D-58. Every outbound image, video, audio file and PDF failed under
+ * `MEDIA_UNAVAILABLE` — "the file is no longer available from Meta" — for a
+ * failure that happened before Meta was contacted at all, and which was in fact
+ * a read of Twenty's own storage. The code is what a rep's sentence and an
+ * operator's dashboard are both built from, so naming the wrong system sent
+ * every investigation the wrong way.
+ */
+describe('an attachment that cannot be read out of Twenty', () => {
+  const mediaMessage = () => ({
+    ...message(),
+    payload: {
+      kind: 'media',
+      mediaKind: 'image',
+      fileUrl: 'https://app.crm.example.test/files/attachment/x.png',
+      filename: 'x.png',
+      caption: null,
+    },
+    body: null,
+  });
+
+  beforeEach(() => {
+    findMessageById.mockResolvedValue(mediaMessage());
+    downloadWorkspaceFile.mockRejectedValue(
+      new FakeWorkspaceFileError('Reading the file failed with HTTP 404 Not Found'),
+    );
+  });
+
+  it('fails under its own code rather than Meta’s', async () => {
+    const result = await sendOutbound({ messageId: MESSAGE_ID });
+
+    expect(result).toEqual({ outcome: 'failed', reason: 'attachment unreadable' });
+    expect(
+      patchMessage.mock.calls.some(
+        (call) => (call[1] as { errorCode?: string }).errorCode === 'ATTACHMENT_UNREADABLE',
+      ),
+    ).toBe(true);
+  });
+
+  /** The sentence a rep reads is the only place the real cause survives. */
+  it('keeps the reason the read gave', async () => {
+    await sendOutbound({ messageId: MESSAGE_ID });
+
+    const failure = patchMessage.mock.calls
+      .map((call) => call[1] as { errorDetail?: string })
+      .find((patch) => typeof patch.errorDetail === 'string');
+
+    expect(failure?.errorDetail).toContain('404');
+  });
+
+  it('never contacts Meta', async () => {
+    await sendOutbound({ messageId: MESSAGE_ID });
+
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 });
 

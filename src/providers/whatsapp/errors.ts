@@ -233,6 +233,18 @@ export const INTERNAL_ERROR = {
   CANCELLED: 'CANCELLED',
   MEDIA_TOO_LARGE: 'MEDIA_TOO_LARGE',
   MEDIA_UNAVAILABLE: 'MEDIA_UNAVAILABLE',
+  /**
+   * The attachment could not be read out of **Twenty's** storage, so nothing
+   * was ever offered to Meta.
+   *
+   * Separate from `MEDIA_UNAVAILABLE`, which says the opposite — that Meta no
+   * longer holds a file it once did. Every outbound attachment failure was
+   * reported under that code, so the sentence a rep read named the wrong
+   * system and pointed the fix in the wrong direction (D-58). The two also
+   * differ in what to do next: Meta losing a file is terminal, a workspace read
+   * failing is worth trying again.
+   */
+  ATTACHMENT_UNREADABLE: 'ATTACHMENT_UNREADABLE',
   CONFIG_MISSING: 'CONFIG_MISSING',
 } as const;
 export type InternalErrorCode = (typeof INTERNAL_ERROR)[keyof typeof INTERNAL_ERROR];

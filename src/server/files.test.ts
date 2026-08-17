@@ -7,6 +7,14 @@ import { WorkspaceFileError, downloadWorkspaceFile, resolveFileUrl } from './fil
  * HTTP request, so its origin guard is load-bearing for AR-11 rather than
  * merely defensive. These tests are what keeps the exception narrow — the
  * architecture test asserts the guard exists; these assert it works.
+ *
+ * The guard changed shape in D-58: the origin is now *rebuilt* rather than
+ * *validated*, because validating it refused the only address a rep can
+ * actually supply (the front-end host, not the API one) and broke every
+ * outbound attachment. The invariant these tests hold to is therefore stronger
+ * than the one they held before — every resolved URL is on the workspace API
+ * origin, for every input — and the path restriction, which is the part that
+ * stops `/rest/people` being read with the app's token, is unchanged.
  */
 
 const ORIGINAL_ENV = { ...process.env };
@@ -36,10 +44,22 @@ describe('resolving a workspace file url', () => {
   });
 
   /**
+   * `uploadFile` answers with `attachment/<uuid>.<ext>` and nothing else, so a
+   * handle carrying only `filePath` — the voice recorder's — used to resolve to
+   * `/attachment/…` and be refused for not being under the file store.
+   */
+  it('mounts a bare storage path under the file store', () => {
+    expect(resolveFileUrl({ path: 'attachment/abc.ogg' })).toBe(
+      'https://crm.example.test/files/attachment/abc.ogg',
+    );
+  });
+
+  /**
    * The reason the guard exists. Meta's media CDN url arrives *inside* a
    * webhook payload, so a file reader that fetched whatever it was handed would
    * be a second, unclassified, unretried path to Meta — exactly what AR-11
-   * forbids.
+   * forbids. It is refused on its *path*, which is the check that survived
+   * D-58 — nothing outside `/files/` is readable, on any host.
    */
   it('refuses Meta’s media CDN', () => {
     expect(() =>
@@ -48,21 +68,27 @@ describe('resolving a workspace file url', () => {
   });
 
   /**
-   * A `startsWith` check passes for this host, which is why the guard compares
-   * `URL.origin` instead.
+   * D-58. The address a rep copies out of Twenty is the front-end one, and the
+   * app's `TWENTY_API_URL` is the API one; refusing the mismatch failed every
+   * outbound image, video, audio file and PDF. The path and the signed token
+   * are kept, the host is replaced with the workspace's own, and the request
+   * therefore cannot reach the host that was typed.
    */
-  it('refuses a hostname that merely begins with the workspace host', () => {
-    expect(() => resolveFileUrl({ url: 'https://crm.example.test.attacker.test/files/x' })).toThrow(
-      /Refusing to read a file/,
-    );
+  it.each([
+    ['a different front-end host', 'https://app.crm.example.test/files/a/b.png'],
+    ['a different scheme', 'http://crm.example.test/files/a/b.png'],
+    ['a different port', 'https://crm.example.test:8443/files/a/b.png'],
+    ['a hostname that merely begins with it', 'https://crm.example.test.attacker.test/files/a/b.png'],
+    ['a bare other host', 'https://evil.test/files/a/b.png'],
+  ])('re-hangs %s on the workspace api origin', (_label, url) => {
+    expect(resolveFileUrl({ url })).toBe('https://crm.example.test/files/a/b.png');
   });
 
-  it.each([
-    ['a different scheme', 'http://crm.example.test/files/x'],
-    ['a different port', 'https://crm.example.test:8443/files/x'],
-    ['a bare other host', 'https://evil.test/files/x'],
-  ])('refuses %s', (_label, url) => {
-    expect(() => resolveFileUrl({ url })).toThrow(WorkspaceFileError);
+  /** The signed token is what makes a copied address readable at all. */
+  it('keeps the file store’s signed token', () => {
+    expect(resolveFileUrl({ url: 'https://app.crm.example.test/files/a/b.png?token=abc.def' })).toBe(
+      'https://crm.example.test/files/a/b.png?token=abc.def',
+    );
   });
 
   it('refuses an empty handle', () => {
@@ -141,7 +167,7 @@ describe('downloading a workspace file', () => {
     expect(file.buffer.length).toBe(6);
   });
 
-  it('never issues a request for a foreign origin', async () => {
+  it('never issues a request for a path outside the file store', async () => {
     const fetchImpl = vi.fn();
 
     await expect(
@@ -152,6 +178,18 @@ describe('downloading a workspace file', () => {
     ).rejects.toThrow(WorkspaceFileError);
 
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  /** Whatever host was typed, the request goes to the workspace's own. */
+  it('requests the workspace origin even for a foreign address', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(response([1], 'image/png'));
+
+    await downloadWorkspaceFile(
+      { url: 'https://evil.test/files/a/b.png' },
+      { fetchImpl: fetchImpl as unknown as typeof globalThis.fetch },
+    );
+
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe('https://crm.example.test/files/a/b.png');
   });
 
   it('sends the app access token when there is one', async () => {
@@ -202,10 +240,11 @@ describe('downloading a workspace file', () => {
   });
 
   /**
-   * A redirect is a way out of the origin-and-path guard: the request the
-   * guard approved is not the request a 302 would make.
+   * Redirects are followed by hand, so the hop count and the token decision
+   * are ours. `redirect: 'follow'` would hand the app's bearer token to
+   * whatever host the file store named.
    */
-  it('tells fetch to treat redirects as errors', async () => {
+  it('follows redirects itself rather than letting fetch do it', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(response([1], 'image/png'));
 
     await downloadWorkspaceFile(
@@ -213,7 +252,63 @@ describe('downloading a workspace file', () => {
       { fetchImpl: fetchImpl as unknown as typeof globalThis.fetch },
     );
 
-    expect(fetchImpl.mock.calls[0]?.[1]?.redirect).toBe('error');
+    expect(fetchImpl.mock.calls[0]?.[1]?.redirect).toBe('manual');
+  });
+
+  const redirect = (location: string): Response =>
+    new Response(null, { status: 302, headers: { location } });
+
+  /**
+   * An object-storage backend answers a file read with a 302 to a pre-signed
+   * URL on the bucket's host. Refusing it refused every send on such a
+   * deployment.
+   */
+  it('follows the file store to pre-signed object storage', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(redirect('https://bucket.storage.test/o/abc?sig=xyz'))
+      .mockResolvedValueOnce(response([7, 8], 'image/png'));
+
+    const file = await downloadWorkspaceFile(
+      { path: 'files/x.png' },
+      { fetchImpl: fetchImpl as unknown as typeof globalThis.fetch },
+    );
+
+    expect([...file.buffer]).toEqual([7, 8]);
+    expect(fetchImpl.mock.calls[1]?.[0]).toBe('https://bucket.storage.test/o/abc?sig=xyz');
+  });
+
+  /**
+   * The app's token is a workspace credential. A pre-signed URL carries its own
+   * signature, so forwarding the bearer would only ever put ours in a third
+   * party's access log.
+   */
+  it('does not forward the app token off the workspace origin', async () => {
+    process.env.TWENTY_APP_ACCESS_TOKEN = 'token-abc';
+
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(redirect('https://bucket.storage.test/o/abc?sig=xyz'))
+      .mockResolvedValueOnce(response([1], 'image/png'));
+
+    await downloadWorkspaceFile(
+      { path: 'files/x.png' },
+      { fetchImpl: fetchImpl as unknown as typeof globalThis.fetch },
+    );
+
+    expect(fetchImpl.mock.calls[0]?.[1]?.headers).toEqual({ Authorization: 'Bearer token-abc' });
+    expect(fetchImpl.mock.calls[1]?.[1]?.headers).toEqual({});
+  });
+
+  it('stops rather than chasing a redirect loop', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(redirect('https://crm.example.test/files/loop'));
+
+    await expect(
+      downloadWorkspaceFile(
+        { path: 'files/x.png' },
+        { fetchImpl: fetchImpl as unknown as typeof globalThis.fetch },
+      ),
+    ).rejects.toThrow(/redirected more than/);
   });
 
   it('refuses a body whose declared length is over the media ceiling', async () => {

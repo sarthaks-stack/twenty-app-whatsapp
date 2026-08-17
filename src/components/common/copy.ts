@@ -152,6 +152,18 @@ const COPY = {
     pt: 'O ficheiro já não está disponível na Meta.',
     en: 'The file is no longer available from Meta.',
   },
+  /**
+   * The one error sentence that carries its own detail.
+   *
+   * Everywhere else the raw text is Meta's, written for a developer reading an
+   * API response, and hiding it is right. Here it is ours — "only /files/
+   * paths are workspace files", "HTTP 404" — and it is the difference between
+   * a rep re-copying the address and a rep giving up (D-58).
+   */
+  'error.ATTACHMENT_UNREADABLE': {
+    pt: 'Não foi possível ler o ficheiro no Twenty: {detail}',
+    en: 'The file could not be read from Twenty: {detail}',
+  },
   'error.CANCELLED': { pt: 'Cancelada.', en: 'Cancelled.' },
   'error.INTERNAL_TIMEOUT': { pt: 'Tempo esgotado.', en: 'Timed out.' },
   'error.CONFIG_MISSING': { pt: 'Configuração em falta.', en: 'Missing configuration.' },
@@ -204,6 +216,18 @@ const COPY = {
   'chat.send': { pt: 'Enviar', en: 'Send' },
   'chat.chooseTemplate': { pt: 'Escolher modelo', en: 'Choose a template' },
   'chat.templateHeader': { pt: 'Cabeçalho', en: 'Header' },
+  // The three media header formats, named as the thing the rep has to find.
+  'chat.templateHeader.IMAGE': { pt: 'Imagem', en: 'Image' },
+  'chat.templateHeader.VIDEO': { pt: 'Vídeo', en: 'Video' },
+  'chat.templateHeader.DOCUMENT': { pt: 'Documento', en: 'Document' },
+  'chat.templateHeaderMedia': {
+    pt: 'Ficheiro do cabeçalho, guardado no Twenty',
+    en: 'Header file, stored in Twenty',
+  },
+  'chat.fileUrlPlaceholder': {
+    pt: 'https://…/files/attachment/…',
+    en: 'https://…/files/attachment/…',
+  },
   'chat.templateButton': { pt: 'Botão', en: 'Button' },
   'chat.templateButtonUrl': { pt: 'Ligação do botão', en: 'Button link' },
   'chat.templateCopyCode': { pt: 'Código a copiar', en: 'Copy code' },
@@ -219,6 +243,7 @@ const COPY = {
   'chat.offline': { pt: 'Sem ligação ao servidor.', en: 'No connection to the server.' },
   'chat.sending': { pt: 'A enviar…', en: 'Sending…' },
   'chat.campaign': { pt: 'Campanha', en: 'Campaign' },
+  'chat.aiAgent': { pt: 'Agente de IA', en: 'AI agent' },
   'chat.template': { pt: 'Modelo', en: 'Template' },
   'chat.needsReview': { pt: 'Por identificar', en: 'Unidentified' },
   'chat.blocked': { pt: 'Bloqueada', en: 'Blocked' },
@@ -446,8 +471,8 @@ const COPY = {
   // ─── Sending media from Twenty's own files ────────────────────────────────
   'chat.fileUrlLabel': { pt: 'Endereço do ficheiro no Twenty', en: 'Twenty file URL' },
   'chat.fileUrlHint': {
-    pt: 'Copie o endereço do ficheiro a partir do registo no Twenty.',
-    en: 'Copy the file’s address from its record in Twenty.',
+    pt: 'Abra o ficheiro a partir do registo no Twenty e copie o endereço da barra do navegador. Tem de conter /files/.',
+    en: 'Open the file from its record in Twenty and copy the address from the browser bar. It has to contain /files/.',
   },
   'chat.fileNameLabel': { pt: 'Nome do ficheiro', en: 'File name' },
   'chat.captionLabel': { pt: 'Legenda (opcional)', en: 'Caption (optional)' },
@@ -558,6 +583,15 @@ const COPY = {
     pt: 'Este formato não é suportado.',
     en: 'That format is not supported.',
   },
+  /**
+   * The specific refusal, not the generic one. "That format is not supported"
+   * left a rep re-typing a perfectly valid address that simply pointed
+   * somewhere the workspace cannot read from (D-58).
+   */
+  'builder.error.NOT_A_FILE_URL': {
+    pt: 'Só é possível enviar ficheiros guardados no Twenty — o endereço tem de conter /files/.',
+    en: 'Only files stored in Twenty can be sent — the address has to contain /files/.',
+  },
   'builder.invalid': {
     pt: 'Corrija os campos assinalados antes de enviar.',
     en: 'Fix the highlighted fields before sending.',
@@ -647,6 +681,8 @@ const COPY = {
   // ─── Campaigns ────────────────────────────────────────────────────────────
   'campaign.title': { pt: 'Campanhas', en: 'Campaigns' },
   'campaign.new': { pt: 'Nova campanha', en: 'New campaign' },
+  /** "Continue" rather than "Edit": the builder reopens where it was left. */
+  'campaign.edit': { pt: 'Continuar a editar', en: 'Continue editing' },
   'campaign.none': { pt: 'Ainda não há campanhas.', en: 'No campaigns yet.' },
   'campaign.noneBody': {
     pt: 'Uma campanha envia um modelo aprovado a uma audiência escolhida, e mostra entregas, respostas e custo à medida que decorre.',
@@ -813,6 +849,15 @@ const COPY = {
     pt: 'A verificar destinatários e custo. O botão de lançamento aparece quando os números estiverem prontos.',
     en: 'Checking recipients and cost. The launch button appears once the numbers are ready.',
   },
+  /**
+   * Names the number that explains it. "No recipients" alone invites a rebuild
+   * of an audience that is not the problem — the contacts were found and then
+   * excluded, and the exclusion breakdown below says by what.
+   */
+  'campaign.launchNoRecipients': {
+    pt: 'Nenhum destinatário qualificado: {excluded} excluídos. Corrija os motivos abaixo e reconstrua a audiência.',
+    en: 'No recipient qualifies: {excluded} excluded. Fix the reasons below and rebuild the audience.',
+  },
   'campaign.launchSubtitle': {
     pt: '{count} destinatários, ~${cost}',
     en: '{count} recipients, ~${cost}',
@@ -894,6 +939,39 @@ const COPY = {
     en: 'Application settings. The keywords and the confirmation wording live here on purpose: changing them is an edit, never a deploy.',
   },
   'settings.variableSaved': { pt: '{key} guardada', en: '{key} saved' },
+  'settings.variableEdited': { pt: 'alterada', en: 'edited' },
+  /**
+   * The bar lists the keys beside this count. A single Save that commits a
+   * throttle and a legal sentence together is only acceptable if the operator
+   * can see that is what it is about to do (D-68).
+   */
+  'settings.unsavedChanges': {
+    pt: '{count} alteração(ões) por guardar',
+    en: '{count} unsaved change(s)',
+  },
+  'settings.saveChanges': { pt: 'Guardar {count}', en: 'Save {count}' },
+  // The sections the variables are grouped into, named by what they affect.
+  'settings.variableSection.connection': { pt: 'Ligação à Meta', en: 'Meta connection' },
+  'settings.variableSection.sending': { pt: 'Envio e ritmo', en: 'Sending and pacing' },
+  'settings.variableSection.window': {
+    pt: 'Janela de serviço',
+    en: 'Service window',
+  },
+  'settings.variableSection.consent': {
+    pt: 'Consentimento e confirmações',
+    en: 'Consent and confirmations',
+  },
+  'settings.variableSection.campaigns': { pt: 'Campanhas', en: 'Campaigns' },
+  'settings.variableSection.templates': { pt: 'Modelos', en: 'Templates' },
+  'settings.variableSection.media': { pt: 'Ficheiros', en: 'Media' },
+  'settings.variableSection.retention': {
+    pt: 'Retenção e cronologia',
+    en: 'Retention and timeline',
+  },
+  'settings.variableSection.billing': { pt: 'Tarifas', en: 'Rates' },
+  'settings.variableSection.interface': { pt: 'Interface', en: 'Interface' },
+  'settings.variableSection.access': { pt: 'Acessos', en: 'Access' },
+  'settings.variableSection.other': { pt: 'Outras', en: 'Other' },
 
   'settings.summary': {
     pt: '{displayName} · qualidade {quality} · escalão {tier}',
@@ -1008,6 +1086,15 @@ const COPY = {
     pt: 'Mensagens em fila há mais de 15 minutos. A verificação horária volta a tentar.',
     en: 'Messages queued for over 15 minutes. The hourly check retries them.',
   },
+  'settings.health.failedOutbound': { pt: 'Envios falhados (24h)', en: 'Failed sends (24h)' },
+  'settings.health.failedOutbound.remedy': {
+    pt: 'Mensagens que não chegaram ao destinatário. O motivo de cada uma está no separador Diagnóstico.',
+    en: 'Messages that never reached the recipient. Each one’s reason is in the Diagnostics tab.',
+  },
+  'settings.needsAdminRole': {
+    pt: 'Precisa da função de administrador do WhatsApp para alterar seja o que for nesta página. Pode ler; as acções estão desactivadas.',
+    en: 'Changing anything on this page needs the WhatsApp admin role. You can read it; the actions are disabled.',
+  },
   'settings.ok': { pt: 'OK', en: 'OK' },
   'settings.needsAttention': { pt: 'a precisar de atenção', en: 'needs attention' },
 
@@ -1020,6 +1107,15 @@ const COPY = {
 
   'settings.failedEvents': { pt: 'Entregas falhadas (24h)', en: 'Failed deliveries (24h)' },
   'settings.stuckMessages': { pt: 'Mensagens presas', en: 'Stuck messages' },
+  /**
+   * Distinct from "Entregas falhadas", which is *inbound* — webhook events we
+   * could not process. A rep reporting "my photo did not send" is asking about
+   * this list, and until D-65 there was no list to look at.
+   */
+  'settings.failedOutbound': {
+    pt: 'Envios falhados (24h)',
+    en: 'Failed sends (24h)',
+  },
   'settings.attempts': { pt: 'tentativas', en: 'attempts' },
   'settings.replay': { pt: 'Reprocessar', en: 'Replay' },
   'settings.replaySelected': {
@@ -1141,6 +1237,34 @@ export const errorCopy = (
   if (errorCode === null) return errorDetail ?? t('error.unknown');
 
   return Object.prototype.hasOwnProperty.call(COPY, `error.${errorCode}`)
-    ? t(`error.${errorCode}`)
+    ? /**
+       * `detail` is offered to every entry and consumed by the one that names
+       * it. A code whose sentence has no `{detail}` is unchanged, so this
+       * cannot leak Meta's developer English into copy that deliberately
+       * replaces it.
+       */
+      t(`error.${errorCode}`, { detail: errorDetail ?? '—' })
     : t('error.unknown');
+};
+
+/**
+ * The sentence for a send the *route* refused, which is a different problem
+ * from a send Meta refused.
+ *
+ * `errorCopy` answers "uncatalogued error" for anything it does not recognise,
+ * which is right under a bubble — Meta's raw English helps nobody there. Here
+ * the unrecognised value is usually a plain server sentence about this
+ * workspace, and replacing it with "uncatalogued error" is how a rep ends up
+ * with no idea which address to fix (D-58).
+ */
+export const refusalCopy = (
+  t: Translate,
+  code: string,
+  detail: string | null | undefined,
+): string => {
+  if (Object.prototype.hasOwnProperty.call(COPY, `error.${code}`)) {
+    return t(`error.${code}`, { detail: detail ?? '—' });
+  }
+
+  return typeof detail === 'string' && detail.length > 0 ? `${code}: ${detail}` : code;
 };

@@ -253,6 +253,45 @@ export const findStuckQueuedMessages = async (
 };
 
 /**
+ * Outbound messages that were refused (D-65).
+ *
+ * A stuck `QUEUED` row is a message nothing moved; a `FAILED` one is a message
+ * something decided about, and the decision is on the row. Diagnostics reported
+ * the first and not the second, so every failed outbound attachment — the whole
+ * of D-58 — was invisible to the one screen an operator opens to ask what is
+ * wrong. `errorCode` and `errorDetail` are already on `MESSAGE_FIELDS`, so this
+ * costs a query and nothing else.
+ *
+ * Newest first: an operator reading this is asking "what just broke", and the
+ * answer is at the top or it is a list nobody scrolls.
+ */
+export const findFailedOutboundMessages = async (
+  since: Date,
+  limit = 60,
+): Promise<WhatsappMessageRecord[]> => {
+  const result = await query(
+    (client) =>
+      client.query({
+        whatsappMessages: {
+          __args: {
+            filter: {
+              status: { eq: 'FAILED' },
+              direction: { eq: 'OUTBOUND' },
+              createdAt: { gte: since.toISOString() },
+            },
+            orderBy: [{ createdAt: 'DescNullsLast' }],
+            first: limit,
+          },
+          edges: { node: MESSAGE_FIELDS },
+        },
+      }),
+    'messages.findFailedOutbound',
+  );
+
+  return nodesOf<WhatsappMessageRecord>(result.whatsappMessages);
+};
+
+/**
  * The chat feed's selection: everything the record carries, plus the stored
  * file.
  *
@@ -417,7 +456,18 @@ export const createMessage = async (
   const result = await query(
     (client) =>
       client.mutation({
-        createWhatsappMessage: { __args: { data: input }, ...MESSAGE_FIELDS },
+        createWhatsappMessage: {
+          __args: {
+            /**
+             * The generated client reflects the currently installed workspace,
+             * while this app revision adds `AI_AGENT` to the select manifest.
+             * After apply/regeneration the types converge; keep the cast at this
+             * single manifest boundary instead of weakening SourceKind globally.
+             */
+            data: input as never,
+          },
+          ...MESSAGE_FIELDS,
+        },
       }),
     'messages.create',
   );

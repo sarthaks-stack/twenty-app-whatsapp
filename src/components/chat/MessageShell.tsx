@@ -256,6 +256,22 @@ export const MessageShell = ({
             </span>
           ) : null}
 
+          {message.sourceKind === 'AI_AGENT' ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                alignSelf: 'flex-start',
+                gap: theme.spacing[1],
+                fontSize: theme.font.size.xs,
+                color: theme.font.color.tertiary,
+              }}
+            >
+              <Glyph name="campaign_replies" />
+              {t('chat.aiAgent')}
+            </span>
+          ) : null}
+
           {message.quote === null ? null : <QuoteStrip quote={message.quote} t={t} />}
 
           <MessageContent message={message} t={t} callbacks={callbacks} />

@@ -136,3 +136,40 @@ export const mediaKindForHeaderFormat = (
       return null;
   }
 };
+
+/**
+ * Which WhatsApp kind a stored file should travel as, judged by its filename.
+ *
+ * The attachment picker offers workspace files, and an Attachment row carries
+ * no mime type — only a name and a storage path. Deliberately conservative,
+ * for the same reason the retired device picker was: WhatsApp accepts only
+ * jpeg/png as `image` and mp4/3gpp as `video`, so a webp photo or a .mov clip
+ * is suggested as a *document* — which arrives, with a filename, rather than
+ * being refused by Meta's validator after the rep pressed send. `.mp4` goes to
+ * video and `.m4a` to audio: the extension is the only signal there is, and
+ * that split is how the two are named in practice.
+ */
+const EXTENSION_KINDS: Record<string, Exclude<OutboundMediaKind, 'sticker'>> = {
+  jpg: 'image',
+  jpeg: 'image',
+  png: 'image',
+  mp4: 'video',
+  '3gp': 'video',
+  '3gpp': 'video',
+  aac: 'audio',
+  amr: 'audio',
+  mp3: 'audio',
+  m4a: 'audio',
+  ogg: 'audio',
+  opus: 'audio',
+};
+
+export const mediaKindForFilename = (
+  filename: string | null | undefined,
+): Exclude<OutboundMediaKind, 'sticker'> => {
+  const name = (filename ?? '').trim().toLowerCase();
+  const dot = name.lastIndexOf('.');
+  const extension = dot === -1 ? '' : name.slice(dot + 1);
+
+  return EXTENSION_KINDS[extension] ?? 'document';
+};

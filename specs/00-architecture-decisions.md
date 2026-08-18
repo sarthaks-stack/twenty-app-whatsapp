@@ -1200,6 +1200,27 @@ signed-in workspace administrator, and `permissions.workspaceMemberId` comes bac
 which is also why that field is now on the wire, so a null on a signed-in human is *visible*
 rather than indistinguishable from having no roles.
 
+### Field correction (2026-08-18) — a picked file's bytes never cross the bridge
+
+The `FileReader` row above was read as licence for a device file picker in the attachment
+panel: `FileReader` exists, and the voice recorder's `Blob.arrayBuffer()` works, so a picked
+`File` — being a `Blob` — should read the same way. It does not. In production the picked
+`File` arrives across the sandbox bridge as a metadata proxy (name, size, type) with **no
+`Blob` methods**: `arrayBuffer()` is absent (`e.arrayBuffer is not a function`, live), and
+`FileReader` cannot read the proxy either — a fallback through it failed the same pick. The
+platform docs' sentence — "a file input exposes its metadata and not its bytes" — was right
+all along; only the "`FileReader` is unavailable" half was wrong, and a `FileReader` with no
+readable input is a distinction without a difference.
+
+The lesson for future probes: `Blob.arrayBuffer()` was measured on a blob the page *created*
+(the recorder's). A capability measured on one object class does not transfer to another that
+merely shares its interface on paper — the bridge decides what survives serialisation.
+
+Consequence: the attachment panel's "from this device" source was removed (a tab whose every
+pick fails is worse than no tab), leaving "recent in this chat" and "already in Twenty". The
+voice recorder is unaffected; its blob is created inside the sandbox. `builders/upload.ts`
+remains the recorder's plumbing.
+
 ---
 
 ## D-54 — Twenty MCP orchestrates; it does not become a second outbound pipeline

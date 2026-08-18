@@ -110,10 +110,10 @@ export type Actions = {
   }) => Promise<SendOutcome>;
   /**
    * A file in Twenty storage, addressed by `fileUrl`/`filePath`/`fileId`. A
-   * device-picked file and a voice recording both arrive here *after* the
-   * composer stored them through `wa-upload-route` (the D-53 probe showed the
-   * sandbox can read a picked `File`'s bytes, contrary to the platform docs) —
-   * so by this point every attachment is an ordinary stored file.
+   * voice recording arrives here *after* the composer stored it through
+   * `wa-upload-route`; everything else was already a stored file — the
+   * sandbox cannot read a picked `File`'s bytes (D-53 field correction), so
+   * there is no other way for one to exist.
    */
   sendMedia: (
     input: SendBase & {
@@ -153,6 +153,23 @@ export type Actions = {
     action: ThreadActionName,
     input: Record<string, unknown>,
   ) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * The attachment picker's search over workspace files. `null` on failure
+   * rather than an outcome object: the picker degrades to the address box,
+   * which is not an error the rep must act on.
+   */
+  fileSearch: (query: string) => Promise<WorkspaceFileHit[] | null>;
+};
+
+/** A workspace attachment, as the picker shows and sends it. */
+export type WorkspaceFileHit = {
+  id: string;
+  name: string;
+  /** Storage path — what a media send carries as `filePath`. */
+  path: string;
+  /** A conservative default from the filename; the rep can override it. */
+  mediaKind: 'image' | 'video' | 'audio' | 'document';
+  createdAt: string;
 };
 
 export const useActions = (): Actions => {
@@ -317,6 +334,22 @@ export const useActions = (): Actions => {
             ok: false,
             error: body.error ?? (error instanceof Error ? error.message : String(error)),
           };
+        }
+      },
+      [client],
+    ),
+
+    fileSearch: useCallback(
+      async (query) => {
+        try {
+          const result = await client.post<{ files?: WorkspaceFileHit[] }>(
+            '/s/whatsapp/thread',
+            { action: 'fileSearch', query },
+          );
+
+          return Array.isArray(result.files) ? result.files : [];
+        } catch {
+          return null;
         }
       },
       [client],

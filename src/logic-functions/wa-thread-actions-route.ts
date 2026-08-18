@@ -3,6 +3,7 @@ import { Response, type RoutePayload } from 'twenty-sdk/logic-function';
 
 import { LF_THREAD_ACTIONS_ROUTE } from '../constants/universal-identifiers';
 import { THREAD_STATUS, type ThreadStatus } from '../domain/constants';
+import { mediaKindForFilename } from '../domain/media-limits';
 import { splitE164, toE164 } from '../domain/phone/normalise';
 import { getProvider } from '../providers/whatsapp';
 import { AUDIT_ACTION, audit } from '../server/audit';
@@ -12,6 +13,7 @@ import { describeError, logger } from '../server/logger';
 import { TIMELINE_EVENT, THREAD_OBJECT_UID, writeTimelineActivity } from '../server/timeline';
 import { findAccountById } from '../server/repositories/accounts';
 import { findNewestInboundWamid } from '../server/repositories/messages';
+import { searchAttachments } from '../server/repositories/attachments';
 import {
   createPersonFromWhatsApp,
   findPersonById,
@@ -42,7 +44,8 @@ export type ThreadAction =
   | 'relink'
   | 'markRead'
   | 'snooze'
-  | 'createPerson';
+  | 'createPerson'
+  | 'fileSearch';
 
 export type ThreadActionBody = {
   action?: ThreadAction;
@@ -63,6 +66,8 @@ export type ThreadActionBody = {
   firstName?: string;
   lastName?: string;
   phone?: string;
+  /** `fileSearch`: name fragment; empty answers with the newest files. */
+  query?: string;
 };
 
 /**
@@ -174,6 +179,41 @@ export const handler = async (
 
     if (action === undefined) {
       return new Response({ error: 'action is required' }, { status: 400 });
+    }
+
+    /**
+     * The attachment picker's search over workspace files (the "already in
+     * Twenty" source). Before the threadId guard because the files a workspace
+     * holds are not a property of any conversation — but behind the same agent
+     * gate as everything else here, because the answer names files the app's
+     * token can read. The row carries a storage path, which the send route
+     * already accepts as `filePath` and `resolveFileUrl` confines to the file
+     * store; the suggested kind is only a default the rep can override.
+     */
+    if (action === 'fileSearch') {
+      const term = typeof body.query === 'string' ? body.query.slice(0, 200) : '';
+
+      const files = (await searchAttachments(term)).flatMap((attachment) => {
+        const path = (attachment.fullPath ?? '').trim();
+
+        if (path.length === 0) return [];
+
+        const name = attachment.name ?? path.split('/').pop() ?? path;
+
+        return [
+          {
+            id: attachment.id,
+            name,
+            path,
+            // Judged on the storage path: it always ends in the stored
+            // file's real extension, where `name` is a display label.
+            mediaKind: mediaKindForFilename(path),
+            createdAt: attachment.createdAt,
+          },
+        ];
+      });
+
+      return new Response({ files }, { status: 200 });
     }
 
     if (typeof body.threadId !== 'string' || body.threadId.length === 0) {

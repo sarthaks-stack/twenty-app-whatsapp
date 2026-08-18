@@ -15,6 +15,7 @@ import {
   AttachmentPanel,
   ContactPanel,
   LocationPanel,
+  type AttachmentPanelProps,
   type RecentAttachment,
 } from './builders/SendPanels';
 import { VoicePanel } from './builders/VoicePanel';
@@ -76,6 +77,8 @@ export type ComposerProps = {
   person: PersonProjection | null;
   /** Files already in this conversation, for the attachment panel's reuse list. */
   recentFiles?: RecentAttachment[];
+  /** Workspace-attachment search, for the panel's "already in Twenty" picker. */
+  onFileSearch?: AttachmentPanelProps['onFileSearch'];
   onSendText: (body: string) => void;
   onSendTemplate: (templateId: string, parameters: ResolvedParameters) => void;
   onSendMedia: (input: {
@@ -374,6 +377,7 @@ export const Composer = ({
   replyTarget,
   person,
   recentFiles = [],
+  onFileSearch,
   onSendText,
   onSendTemplate,
   onSendMedia,
@@ -496,6 +500,7 @@ export const Composer = ({
             isSending={isSending}
             initialKind={mode.initial}
             recentFiles={recentFiles}
+            onFileSearch={onFileSearch}
             onCancel={close}
             onSend={(input) => {
               onSendMedia({

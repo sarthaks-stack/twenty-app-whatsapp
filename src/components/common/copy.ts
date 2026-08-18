@@ -463,41 +463,23 @@ const COPY = {
     pt: 'Indisponível nesta conversa',
     en: 'Not available in this conversation',
   },
-  // ─── The attachment panel's three sources ─────────────────────────────────
+  /**
+   * Two sources, not three: "from this device" was tried and retired — the
+   * sandbox bridge hands a picked file's metadata over without its bytes
+   * (D-53 field correction, specs/00), so every device pick failed.
+   */
   'chat.sourceLabel': { pt: 'Origem do ficheiro', en: 'File source' },
-  'chat.source.device': { pt: 'Deste dispositivo', en: 'From this device' },
   'chat.source.recent': { pt: 'Recentes da conversa', en: 'Recent in this chat' },
   'chat.source.link': { pt: 'Já no Twenty', en: 'Already in Twenty' },
-  'chat.chooseFile': { pt: 'Escolher ficheiro', en: 'Choose a file' },
-  'chat.detectedKind': {
-    pt: 'Será enviado como {kind} · {size}',
-    en: 'Will be sent as {kind} · {size}',
+  // ─── The workspace-file picker inside "already in Twenty" ─────────────────
+  'chat.fileSearchLabel': {
+    pt: 'Procurar ficheiros no Twenty',
+    en: 'Search files in Twenty',
   },
-  'chat.uploadReading': { pt: 'A preparar o ficheiro…', en: 'Preparing the file…' },
-  'chat.uploadUploading': {
-    pt: 'A carregar para o Twenty ({size})…',
-    en: 'Uploading to Twenty ({size})…',
-  },
-  'chat.uploadFailed': {
-    pt: 'Não foi possível carregar o ficheiro.',
-    en: 'The file could not be uploaded.',
-  },
-  /**
-   * The two size ceilings are different problems with different exits: the
-   * direct-upload cap has a workaround (store the file in Twenty first),
-   * Meta's per-kind ceiling does not.
-   */
-  'chat.fileTooLargeUpload': {
-    pt: 'O ficheiro tem {size} — o envio directo aceita até {limit}. Guarde-o no Twenty e use o endereço.',
-    en: 'The file is {size} — direct upload takes up to {limit}. Store it in Twenty and use its address.',
-  },
-  'chat.fileTooLargeMeta': {
-    pt: 'O WhatsApp não aceita um ficheiro de {size} neste formato.',
-    en: 'WhatsApp does not accept a {size} file of this kind.',
-  },
-  'chat.fileWrongType': {
-    pt: 'O WhatsApp não aceita este formato de ficheiro.',
-    en: 'WhatsApp does not accept this file format.',
+  'chat.fileSearching': { pt: 'A procurar…', en: 'Searching…' },
+  'chat.fileSearchNone': {
+    pt: 'Nenhum ficheiro corresponde. Cole o endereço abaixo.',
+    en: 'No files match. Paste the address below.',
   },
   'chat.recentNone': {
     pt: 'Ainda não há ficheiros nesta conversa.',

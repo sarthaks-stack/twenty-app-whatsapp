@@ -1088,6 +1088,7 @@ export const ThreadView = ({
         replyTarget={replyTarget}
         person={person}
         recentFiles={recentFiles}
+        onFileSearch={actions.fileSearch}
         onSendText={sendText}
         onSendTemplate={sendTemplate}
         onSendMedia={sendMedia}

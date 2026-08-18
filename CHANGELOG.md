@@ -2,6 +2,22 @@
 
 All notable changes to this application are documented in this file.
 
+## Unreleased — the attachment panel loses a dead tab and gains a picker
+
+- **"From this device" is gone.** The sandbox bridge hands a picked file's metadata over without
+  its bytes — `arrayBuffer()` is absent on the proxy and `FileReader` cannot read it either — so
+  every device pick failed at upload (D-53 field correction, specs/00). The platform docs said so
+  all along; the probe result that seemed to disprove them had only measured a blob the page
+  *created*, which is why voice notes still work. A tab whose every pick fails is worse than no
+  tab.
+- **"Already in Twenty" opens as a picker.** A new `fileSearch` action on the thread route answers
+  the workspace's attachments — newest first, name-searchable, debounced like the campaign
+  builder's contact search — and choosing a row fills the address, filename and kind boxes, so
+  nobody has to hunt down a file URL by hand. The suggested kind is judged conservatively from the
+  stored file's extension (`mediaKindForFilename`): a webp or a .mov is offered as a document,
+  which arrives, rather than as media Meta will refuse. The boxes stay editable — a file the
+  search cannot see can still be pasted, and the send path itself is unchanged.
+
 ## Unreleased — end-to-end QA fixes
 
 Ten defects from the first full end-to-end pass on a live number. Two of them made features

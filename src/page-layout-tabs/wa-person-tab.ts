@@ -30,10 +30,23 @@ export default definePageLayoutTab({
       universalIdentifier: PLT_PERSON_WHATSAPP_WIDGET,
       title: 'WhatsApp',
       type: 'FRONT_COMPONENT',
+      /**
+       * `__typename` is stored on purpose, and the tab is blank without it.
+       *
+       * The record page hands widgets to the renderer in their raw stored
+       * shape — not through the GraphQL layer that would stamp `__typename` —
+       * and `FrontComponentWidget` guards on
+       * `configuration.__typename === 'FrontComponentConfiguration'` before
+       * rendering anything. Without the property the guard fails and the tab
+       * shows the "No Data" incomplete-widget pill instead of the chat.
+       * (Standalone page layouts read through GraphQL, which is why the Inbox
+       * renders without this.)
+       */
       configuration: {
+        __typename: 'FrontComponentConfiguration',
         configurationType: 'FRONT_COMPONENT',
         frontComponentUniversalIdentifier: FC_PERSON_THREAD,
-      },
+      } as never,
     },
   ],
 });

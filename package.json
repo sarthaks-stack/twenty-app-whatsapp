@@ -1,7 +1,18 @@
 {
-  "name": "twenty-whatsapp",
+  "name": "@pixelinfinito/twenty-app-whatsapp",
   "version": "0.1.0",
+  "description": "WhatsApp for Twenty CRM — shared inbox, templates, consent-aware campaigns and delivery health on the Meta WhatsApp Cloud API.",
   "license": "MIT",
+  "author": {
+    "name": "Marcos Lisboa",
+    "email": "lisboa@pixel.ao",
+    "url": "https://pixel.ao"
+  },
+  "homepage": "https://pixel.ao",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pixelinfinito/twenty-app-whatsapp.git"
+  },
   "engines": {
     "node": "^24.5.0",
     "npm": "please-use-yarn",

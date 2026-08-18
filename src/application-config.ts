@@ -45,7 +45,17 @@ export default defineApplication({
     'A production-ready Meta WhatsApp Cloud API app for Twenty. It ships with an inbox, template synchronization, consent-aware messaging, and campaign tooling with strong webhook observability.',
   author: 'Pixel Infinito',
   websiteUrl: 'https://pixel.ao',
-  galleryImages: ['public/logo-whatsapp.svg'],
+  /**
+   * 8:5 ratio (3200×2000), rendered from live product screenshots. Like the
+   * logo, the filenames carry a version suffix as the cache bust — bump the
+   * suffix when the artwork changes.
+   */
+  galleryImages: [
+    'public/cover-whatsapp-v1.png',
+    'public/gallery-inbox-v1.png',
+    'public/gallery-campaigns-v1.png',
+    'public/gallery-templates-v1.png',
+  ],
   category: 'Communication',
   serverVariables: {
     META_APP_ID: {

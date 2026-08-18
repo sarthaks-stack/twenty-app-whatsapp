@@ -1,163 +1,118 @@
-# pixelinfinito/twenty-app-whatsapp
+# WhatsApp for Twenty CRM
 
-A production-ready Meta WhatsApp Cloud API integration for Twenty.
-Developed by Marcos Lisboa from Pixel Infinito (`pixel.ao`).
+Two-way WhatsApp messaging inside [Twenty](https://twenty.com): a shared team inbox, conversations on every Person record, approved templates, consent tracking and marketing campaigns — powered by the official **Meta WhatsApp Cloud API**.
 
-## Marketplace showcase
+Developed by **Marcos Lisboa** at [Pixel Infinito](https://pixel.ao) · published as [`@pixelinfinito/twenty-app-whatsapp`](https://www.npmjs.com/package/@pixelinfinito/twenty-app-whatsapp).
 
-Install this app in your Twenty workspace to add:
+![WhatsApp for Twenty](public/cover-whatsapp-v1.png)
 
-- Conversational inbox on every Person with inbound/outbound message threading.
-- A shared team inbox with ownership, blocking, 24-hour window handling and campaign replies.
-- Template sync, publishing control, and live preview with safe parameter binding.
-- Consent-aware messaging and robust campaign pacing with failure guardrails.
-- Timeline visibility and a health panel for webhook, sendability, and delivery diagnostics.
-- Automatic handling of WhatsApp message/media types and unsupported-message fallback.
+## What you get
 
-The interface follows the user locale and ships with English + Portuguese support.
+**A shared team inbox.** Filter by yours, unassigned, everyone's, unread or closed. Assignment, blocking and closing are one click, keyboard navigation included, and every action lands on the contact's timeline.
 
-## Meta setup (required)
+![Shared inbox](public/gallery-inbox-v1.png)
 
-This is the most common blocker during installation. Follow these steps in order:
+**The 24-hour rule, enforced server-side.** The composer always knows whether you may type: window state, consent, blocking, number quality and template availability are decided by the server and explained in the interface — never silently hidden.
 
-1. Create a Meta Business account
+**Templates you can actually use.** Sync from Meta, see which are approved, publish the ones the CRM may render, and fill their parameters from CRM fields with a live preview before sending.
 
-   - Create or sign in to a Meta Business account at Business Manager.
-   - Set up your business profile and confirm ownership where Meta requires it.
+![Template management](public/gallery-templates-v1.png)
 
-2. Create and configure a Meta App
+**Campaigns with brakes.** Build an audience from a saved view, bind template parameters per recipient, get a cost estimate before launch — while a share of the daily tier is held back for 1:1 traffic and a circuit breaker pauses any campaign whose failure rate climbs.
 
-- In Meta for Developers, create a new app (Business type).
-- Add the WhatsApp product to the app.
-- Open App Dashboard → Settings → Basic and copy:
-  - App ID → set as `META_APP_ID`
-  - App Secret → set as `META_APP_SECRET`
+![Campaigns](public/gallery-campaigns-v1.png)
 
-3. Create Meta credentials
+**Consent that holds up.** Opt-out and opt-in keywords, a single confirmation reply whose wording is a setting rather than a deploy, and an audit event recorded for every change.
 
-- Open Business Manager → System Users.
-- Create a system user and assign API access relevant to your WhatsApp Business Account.
-- Generate a long-lived system user token with these scopes:
+**Operations you can see.** A health panel that names which of six things is wrong and what to do about it, the exact callback URL and webhook fields to paste into Meta, and diagnostics for failed deliveries and stuck sends.
+
+**Everything WhatsApp sends, handled.** Text, images, audio, video, documents, stickers, locations, contact cards, reactions and replies all render; anything Meta invents next is stored and shown as an unsupported message rather than dropped.
+
+The interface ships in **English and Portuguese**, following each user's locale.
+
+## Requirements
+
+- A Twenty workspace (cloud or self-hosted) whose public URL is reachable over HTTPS — Meta must be able to call your webhook.
+- A Meta Business account with an approved **WhatsApp Business phone number**.
+- A Meta app with the WhatsApp product and a system-user access token.
+
+## Installation
+
+Install from **Settings → Apps** in your Twenty workspace, then connect Meta:
+
+### 1. Create and configure a Meta app
+
+- In [Meta for Developers](https://developers.facebook.com), create an app of type **Business** and add the **WhatsApp** product.
+- From **App Dashboard → Settings → Basic**, copy the **App ID** and **App Secret**.
+
+### 2. Create credentials
+
+- In **Business Manager → System Users**, create a system user with access to your WhatsApp Business Account.
+- Generate a long-lived token with exactly these scopes:
   - `whatsapp_business_management`
   - `whatsapp_business_messaging`
-- Save it as `META_ACCESS_TOKEN`.
-- Generate a random verify token (example: `openssl rand -hex 32`) and save as `META_VERIFY_TOKEN`.
-- Add both values later in Twenty settings.
+- Generate a random verify token (for example `openssl rand -hex 32`).
 
-4. Configure a public webhook endpoint in Meta
+### 3. Add the secrets in Twenty
 
-- In the app’s WhatsApp product, open Webhooks and set callback to the public endpoint:
-  - `<TWENTY_BASE_URL>/s/whatsapp/webhook`
-  - this base is your workspace public URL used by the app installation.
-- Use the same value from your `META_VERIFY_TOKEN` in Meta’s verify-token field.
-- Set the following fields subscribed:
-  - `messages`
-  - `message_template_status_update`
-  - `message_template_quality_update`
-  - `message_template_components_update`
-  - `account_update`
-  - `phone_number_quality_update`
-  - `business_capability_update`
-- Save and verify in Meta. The response must complete successfully.
+Open **Settings → Apps → WhatsApp → Settings → Variables** and set:
 
-5. Register and connect a WhatsApp Business number
+| Variable | Value |
+| --- | --- |
+| `META_APP_ID` | App ID from step 1 |
+| `META_APP_SECRET` | App Secret from step 1 |
+| `META_ACCESS_TOKEN` | System-user token from step 2 |
+| `META_VERIFY_TOKEN` | Your random verify token |
 
-- In WhatsApp product API setup, add a verified phone number.
-- Ensure the number belongs to your WABA and is in good status.
-- In Twenty app admin page, connect the same WABA/phone setup under WhatsApp account setup.
-- Run the in-app health check once connected.
+### 4. Configure the webhook in Meta
 
-6. Add the secrets in Twenty
+In the Meta app's WhatsApp product, open **Webhooks** and set the callback to:
 
-- Open Twenty → Settings → Applications → WhatsApp → Variables.
-- Set:
-  - `META_APP_ID`
-  - `META_APP_SECRET`
-  - `META_ACCESS_TOKEN`
-  - `META_VERIFY_TOKEN`
-- Keep an eye on the app health card: it exposes the exact callback URL and required webhook fields.
+```
+<your Twenty base URL>/s/whatsapp/webhook
+```
 
-If you are seeing `unverified webhook`, `signature failed`, or `no webhook events`:
+Use the same verify token, and subscribe these fields: `messages`, `message_template_status_update`, `message_template_quality_update`, `message_template_components_update`, `account_update`, `phone_number_quality_update`, `business_capability_update`.
 
-- Re-copy callback and verify token in Meta from the latest save.
-- Confirm your endpoint is reachable over HTTPS and not behind an IP/VPC block.
-- Confirm the above webhook fields are all subscribed.
-- Confirm the system user token still has both WhatsApp scopes.
+The app's **health panel** shows the exact callback URL and required fields for your workspace, and verifies each piece of the setup once a number is connected.
 
-## Local setup
+### 5. Connect your number
 
-Use the local setup guide in `SETUP.md`.
+In the app settings, connect your WABA and phone number, run the health check, and sync templates. You're live.
 
-In short:
+### Troubleshooting
 
-1. `yarn install`
-2. `yarn twenty docker:start`
-3. `yarn twenty dev`
-4. Open [http://localhost:2020](http://localhost:2020) with the default dev account.
+Seeing `unverified webhook`, `signature failed`, or no events?
 
-## How it is built
+- Re-copy the callback URL and verify token into Meta from the latest save.
+- Confirm the endpoint is reachable over HTTPS and not behind an IP/VPC block.
+- Confirm all webhook fields above are subscribed.
+- Confirm the system-user token still has both WhatsApp scopes.
 
-Design and architecture notes are in `specs/00-architecture-decisions.md`.
+The health panel diagnoses each of these individually.
 
-## Packaging and publishing
+## Configuration
 
-This package publishes with provenance using `.github/workflows/publish.yml`.
+Beyond the Meta secrets, the app exposes ~30 application variables so operational behavior never requires a deploy — send throttles and pacing, campaign batch sizes and failure thresholds, opt-in/opt-out keywords and confirmation wording (English and Portuguese), retention windows, timeline verbosity, per-category pricing for cost estimates, and more. Each variable is documented in place under **Settings → Apps → WhatsApp**.
 
-1. Register the package as a trusted publisher in npm.
-2. Bump `package.json` version and tag a release (for example, `git tag v1.0.0 && git push --tags`).
-3. Run the publish workflow manually or via your release pipeline.
+Per-number settings (throttle, default calling code, auto-assignment, contact auto-creation) live on the WhatsApp account record, so numbers can differ.
 
-Publishing with trusted provenance is the standard way to claim ownership in the Twenty Marketplace.
+## Development
 
-### Marketplace listing metadata
+```bash
+yarn install
+yarn twenty docker:start   # local Twenty server
+yarn twenty dev            # sync the app and watch
+```
 
-Before publishing, complete this checklist so the app appears well in the marketplace:
-
-1. Add the marketplace keyword in `package.json`:
-
-   ```json
-   {
-     "keywords": ["twenty-app"]
-   }
-   ```
-
-2. Confirm these required `defineApplication()` fields in `src/application-config.ts`:
-
-   - `logo` points to a file under `public/` (for example `public/logo-whatsapp.svg`).
-   - `galleryImages` points to one or more images under `public/`.
-   - Optional but recommended marketplace metadata fields:
-     - `author`
-     - `aboutDescription`
-     - `websiteUrl`
-     - `termsUrl`
-
-3. Prepare marketplace visuals to fit constraints:
-
-   - Use an 8:5 ratio for gallery images (for example, `1600x1000`).
-   - Keep each file at or below **10 MB**.
-
-4. Build and publish to npm:
-
-   - `yarn twenty app:publish`
-   - Optionally publish a non-default dist tag:
-     - `yarn twenty app:publish --tag beta`
-
-5. After publish, optionally sync the catalog right away:
-
-   - `yarn twenty dev:catalog-sync`
-   - This is optional because the catalog syncs automatically every hour.
-
-6. Install or test on a workspace:
-
-   - For marketplace apps: use **Settings → Applications** in Twenty.
-   - For private/internal testing: publish with `yarn twenty app:publish --private` and share the Distribution link from app settings.
-
-## Changelog
-
-Notable changes are documented in `CHANGELOG.md`.
+See `SETUP.md` for the full local guide, `specs/` for design and architecture notes, and `CHANGELOG.md` for notable changes. `yarn test:unit` runs the local test suite; `yarn test` runs integration tests against a disposable workspace.
 
 ## Learn more
 
 - [Twenty Apps documentation](https://docs.twenty.com/developers/extend/apps/getting-started/quick-start)
-- [twenty-sdk CLI reference](https://www.npmjs.com/package/twenty-sdk)
-- [Discord](https://discord.gg/cx5n4Jzs57)
+- [Pixel Infinito](https://pixel.ao)
+- [Twenty Discord](https://discord.gg/cx5n4Jzs57)
+
+## License
+
+MIT © [Pixel Infinito](https://pixel.ao)

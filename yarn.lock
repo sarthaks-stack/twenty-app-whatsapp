@@ -903,6 +903,26 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@pixelinfinito/twenty-app-whatsapp@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "@pixelinfinito/twenty-app-whatsapp@workspace:."
+  dependencies:
+    "@types/node": "npm:^24.7.2"
+    "@types/react": "npm:^19.0.0"
+    "@typescript/native-preview": "npm:^7.0.0-dev.20260116.1"
+    libphonenumber-js: "npm:^1.13.11"
+    oxlint: "npm:^0.16.0"
+    react: "npm:^19.0.0"
+    react-dom: "npm:^19.0.0"
+    twenty-client-sdk: "npm:2.31.0"
+    twenty-sdk: "npm:2.31.0"
+    twenty-ui: "npm:1.0.0-alpha.1"
+    typescript: "npm:^5.9.3"
+    vite-tsconfig-paths: "npm:^4.2.1"
+    vitest: "npm:^4.0.0"
+  languageName: unknown
+  linkType: soft
+
 "@radix-ui/colors@npm:^3.0.0":
   version: 3.0.0
   resolution: "@radix-ui/colors@npm:3.0.0"
@@ -3101,26 +3121,6 @@ __metadata:
   checksum: 10c0/213582e582949d6ffe90a7a8ab89a1d4e9dc724d34ed1b80bd7d50e834a8cb8539723556d41b39dc658f76f176bd8490ae0da8a3d6a713e79e6573b732084179
   languageName: node
   linkType: hard
-
-"twenty-whatsapp@workspace:.":
-  version: 0.0.0-use.local
-  resolution: "twenty-whatsapp@workspace:."
-  dependencies:
-    "@types/node": "npm:^24.7.2"
-    "@types/react": "npm:^19.0.0"
-    "@typescript/native-preview": "npm:^7.0.0-dev.20260116.1"
-    libphonenumber-js: "npm:^1.13.11"
-    oxlint: "npm:^0.16.0"
-    react: "npm:^19.0.0"
-    react-dom: "npm:^19.0.0"
-    twenty-client-sdk: "npm:2.31.0"
-    twenty-sdk: "npm:2.31.0"
-    twenty-ui: "npm:1.0.0-alpha.1"
-    typescript: "npm:^5.9.3"
-    vite-tsconfig-paths: "npm:^4.2.1"
-    vitest: "npm:^4.0.0"
-  languageName: unknown
-  linkType: soft
 
 "type-fest@npm:^4.10.1":
   version: 4.41.0

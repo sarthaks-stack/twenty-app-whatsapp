@@ -5,14 +5,16 @@ import { useTheme } from 'twenty-ui/theme-constants';
 import type { Translate } from '../../common/copy';
 import { duration as formatDuration } from '../../common/format';
 import { Glyph } from '../../common/icons';
+import { uploadDeviceFile } from './upload';
 
 /**
  * Recording a voice message (spec §"What can be delivered now", item 3).
  *
- * This is the one attachment path the sandbox genuinely allows. A file input
- * exposes metadata and not bytes and `FileReader` is unavailable, so a device
- * picker cannot feed the media pipeline — but `MediaRecorder` *produces* the
- * bytes inside the page, so there is nothing to read from disk.
+ * `MediaRecorder` produces the bytes inside the page, so there is nothing to
+ * read from disk. (This used to be described as the *only* attachment path the
+ * sandbox allows; the D-53 probe later showed `Blob.arrayBuffer()` works on a
+ * picked `File` too, and the attachment panel now shares this pipeline — see
+ * `builders/upload.ts`.)
  *
  * The rest is deliberately unglamorous:
  *
@@ -90,25 +92,6 @@ const EXTENSION: Record<string, string> = {
   'audio/mp4': 'm4a',
   'audio/aac': 'aac',
   'audio/mpeg': 'mp3',
-};
-
-const toBase64 = async (blob: Blob): Promise<string> => {
-  const buffer = await blob.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-
-  /**
-   * Chunked, because `String.fromCharCode(...bytes)` on a megabyte of audio
-   * spreads a million arguments onto the call stack and throws
-   * `RangeError: Maximum call stack size exceeded` — on exactly the recordings
-   * long enough to matter.
-   */
-  let binary = '';
-
-  for (let index = 0; index < bytes.length; index += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  }
-
-  return btoa(binary);
 };
 
 export const VoicePanel = ({ t, isSending, onSend }: VoicePanelProps) => {
@@ -213,25 +196,15 @@ export const VoicePanel = ({ t, isSending, onSend }: VoicePanelProps) => {
       const contentType = declaredType(blob.type);
       const filename = `voice-${seconds}s.${EXTENSION[contentType] ?? 'ogg'}`;
 
-      const stored = await client.current.post<{ fileUrl?: string; filePath?: string }>(
-        '/s/whatsapp/upload',
-        {
-          filename,
-          contentType,
-          mediaKind: 'audio',
-          data: await toBase64(blob),
-        },
-      );
-
-      if (typeof stored.filePath !== 'string' && typeof stored.fileUrl !== 'string') {
-        throw new Error('upload returned no handle');
-      }
-
-      onSend({
-        fileUrl: stored.fileUrl ?? '',
-        filePath: stored.filePath ?? '',
+      const stored = await uploadDeviceFile({
+        client: client.current,
+        blob,
         filename,
+        contentType,
+        mediaKind: 'audio',
       });
+
+      onSend({ fileUrl: stored.fileUrl, filePath: stored.filePath, filename });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t('chat.recordUploadFailed'));
       setPhase('review');

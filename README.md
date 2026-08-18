@@ -16,13 +16,20 @@ Both interfaces ship in Portuguese and English, following each user's locale.
 
 ## Getting started
 
-Setup instructions live in [SETUP.md](SETUP.md). You will need a Meta app with the WhatsApp product, a System User token scoped to `whatsapp_business_messaging` and `whatsapp_business_management`, and a phone number registered to a WhatsApp Business Account.
+Setup instructions live in `SETUP.md`, shipped at the root of this package and repository. You will need a Meta app with the WhatsApp product, a System User token scoped to `whatsapp_business_messaging` and `whatsapp_business_management`, and a phone number registered to a WhatsApp Business Account.
 
 The four Meta credentials are set under _Settings → Applications → WhatsApp → Variables_; everything else — throttles, windows, retention, rates, confirmation wording — is an application variable with a working default.
 
 ## How it is built
 
-`specs/` holds the specification this app was written from, including [`specs/00-architecture-decisions.md`](specs/00-architecture-decisions.md), which records every decision that could reasonably have gone the other way and why it did not.
+The `specs/` directory in this repository holds the specification this app was written from, including `specs/00-architecture-decisions.md`, which records every decision that could reasonably have gone the other way and why it did not.
+
+<!--
+  Plain code spans, not relative links: Twenty's app About page renders this
+  README from the package, where a relative href resolves to a broken
+  `https://SETUP.md`-style URL. Once the repository has a public home, these can
+  become absolute links to it.
+-->
 
 ## Publishing
 
@@ -35,7 +42,7 @@ Publishing with provenance is also how you prove ownership when claiming your ap
 
 ## Changelog
 
-Notable changes are documented in [CHANGELOG.md](CHANGELOG.md).
+Notable changes are documented in `CHANGELOG.md` at the root of this package.
 
 ## Learn more
 

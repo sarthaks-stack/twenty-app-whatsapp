@@ -64,11 +64,17 @@ describe('describeHealth', () => {
     ).toBe('225 sends available today of 250, with 25 held back for 1:1 conversations');
   });
 
-  it('reads "None" rather than "0" for the two counters', () => {
+  it('reads "None" rather than "0" for the three counters', () => {
     expect(describeHealth('failedWebhookEvents', { count: 0 }, t, 'en', now)).toBe('None');
     expect(
       describeHealth('stuckOutbound', { count: 0, olderThanMinutes: 15 }, t, 'en', now),
     ).toBe('None');
+    expect(describeHealth('failedOutbound', { count: 0 }, t, 'en', now)).toBe('None');
+  });
+
+  /** It printed `{"count":0}` before — the raw-JSON fallback is for unknown keys only. */
+  it('renders the failed-send count as a number, never as raw JSON', () => {
+    expect(describeHealth('failedOutbound', { count: 3 }, t, 'en', now)).toBe('3');
   });
 
   it('names the threshold when messages are stuck, so the count means something', () => {

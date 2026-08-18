@@ -256,6 +256,11 @@ const COPY = {
   },
   'chat.block': { pt: 'Bloquear', en: 'Block' },
   'chat.unblock': { pt: 'Desbloquear', en: 'Unblock' },
+  'chat.blockConfirmTitle': { pt: 'Bloquear esta conversa?', en: 'Block this conversation?' },
+  'chat.blockConfirmSubtitle': {
+    pt: 'Nenhuma mensagem será enviada nem recebida enquanto estiver bloqueada. Pode desbloquear a qualquer momento.',
+    en: 'Nothing will be sent or received while it is blocked. You can unblock at any time.',
+  },
   'chat.close': { pt: 'Fechar', en: 'Close' },
   'chat.reopen': { pt: 'Reabrir', en: 'Reopen' },
   'chat.noTemplates': {
@@ -458,14 +463,49 @@ const COPY = {
     pt: 'Indisponível nesta conversa',
     en: 'Not available in this conversation',
   },
+  // ─── The attachment panel's three sources ─────────────────────────────────
+  'chat.sourceLabel': { pt: 'Origem do ficheiro', en: 'File source' },
+  'chat.source.device': { pt: 'Deste dispositivo', en: 'From this device' },
+  'chat.source.recent': { pt: 'Recentes da conversa', en: 'Recent in this chat' },
+  'chat.source.link': { pt: 'Já no Twenty', en: 'Already in Twenty' },
+  'chat.chooseFile': { pt: 'Escolher ficheiro', en: 'Choose a file' },
+  'chat.detectedKind': {
+    pt: 'Será enviado como {kind} · {size}',
+    en: 'Will be sent as {kind} · {size}',
+  },
+  'chat.uploadReading': { pt: 'A preparar o ficheiro…', en: 'Preparing the file…' },
+  'chat.uploadUploading': {
+    pt: 'A carregar para o Twenty ({size})…',
+    en: 'Uploading to Twenty ({size})…',
+  },
+  'chat.uploadFailed': {
+    pt: 'Não foi possível carregar o ficheiro.',
+    en: 'The file could not be uploaded.',
+  },
   /**
-   * The one entry that describes a *platform* limit rather than a WhatsApp
-   * rule. Written as a sentence a rep can act on, because "unsupported" with no
-   * alternative is the kind of dead end the empty-state work removed elsewhere.
+   * The two size ceilings are different problems with different exits: the
+   * direct-upload cap has a workaround (store the file in Twenty first),
+   * Meta's per-kind ceiling does not.
    */
-  'chat.deviceUploadUnavailable': {
-    pt: 'Ainda não é possível escolher um ficheiro do dispositivo aqui. Carregue-o para o Twenty e anexe-o a partir dos ficheiros.',
-    en: 'Choosing a file from this device is not possible here yet. Upload it to Twenty and attach it from your files.',
+  'chat.fileTooLargeUpload': {
+    pt: 'O ficheiro tem {size} — o envio directo aceita até {limit}. Guarde-o no Twenty e use o endereço.',
+    en: 'The file is {size} — direct upload takes up to {limit}. Store it in Twenty and use its address.',
+  },
+  'chat.fileTooLargeMeta': {
+    pt: 'O WhatsApp não aceita um ficheiro de {size} neste formato.',
+    en: 'WhatsApp does not accept a {size} file of this kind.',
+  },
+  'chat.fileWrongType': {
+    pt: 'O WhatsApp não aceita este formato de ficheiro.',
+    en: 'WhatsApp does not accept this file format.',
+  },
+  'chat.recentNone': {
+    pt: 'Ainda não há ficheiros nesta conversa.',
+    en: 'No files in this conversation yet.',
+  },
+  'chat.recentHint': {
+    pt: 'Reutilize um ficheiro já enviado ou recebido nesta conversa.',
+    en: 'Reuse a file already sent or received in this conversation.',
   },
 
   // ─── Sending media from Twenty's own files ────────────────────────────────
@@ -603,6 +643,7 @@ const COPY = {
   'inbox.mine': { pt: 'Minhas', en: 'Mine' },
   'inbox.unassigned': { pt: 'Sem responsável', en: 'Unassigned' },
   'inbox.all': { pt: 'Todas', en: 'All' },
+  'inbox.unread': { pt: 'Por ler', en: 'Unread' },
   'inbox.campaign_replies': { pt: 'Respostas a campanhas', en: 'Campaign replies' },
   'inbox.window_expiring': { pt: 'A fechar', en: 'Closing soon' },
   'inbox.closed': { pt: 'Fechadas', en: 'Closed' },
@@ -642,6 +683,19 @@ const COPY = {
   'inbox.empty.allBody': {
     pt: 'Uma conversa começa quando um cliente escreve para o seu número, ou quando envia um modelo a partir de um contacto.',
     en: 'A conversation starts when a customer writes to your number, or when you send a template from a contact.',
+  },
+  'inbox.empty.unread': { pt: 'Tudo lido.', en: 'All caught up.' },
+  'inbox.empty.unreadBody': {
+    pt: 'Nenhuma conversa tem mensagens por ler. As novas mensagens aparecem aqui.',
+    en: 'No conversation has unread messages. New messages show up here.',
+  },
+  /**
+   * The list can empty while a conversation stays open beside it — closing or
+   * assigning the open thread is what removes it from the current filter.
+   */
+  'inbox.openNotInFilter': {
+    pt: 'A conversa aberta já não pertence a este filtro.',
+    en: 'The open conversation is no longer in this filter.',
   },
   'inbox.empty.campaign_replies': {
     pt: 'Ainda ninguém respondeu a uma campanha.',
@@ -713,7 +767,26 @@ const COPY = {
   'campaign.filter.attention': { pt: 'A precisar de atenção', en: 'Needs attention' },
   'campaign.filter.archived': { pt: 'Arquivadas', en: 'Archived' },
   'campaign.open': { pt: 'Abrir campanha', en: 'Open campaign' },
+  // The list row's quiet second line: who it targets, from which number.
+  'campaign.audienceView': { pt: 'Vista guardada', en: 'Saved view' },
+  'campaign.audienceManual': {
+    pt: '{count} contactos escolhidos',
+    en: '{count} chosen contacts',
+  },
+  /** A zero-recipient draft the builder saved on the operator's way out. */
+  'campaign.autosavedDraft': {
+    pt: 'Rascunho guardado automaticamente',
+    en: 'Autosaved draft',
+  },
   'campaign.progress': { pt: '{done} de {total} enviadas', en: '{done} of {total} sent' },
+  /**
+   * Shown while every recipient is already attempted but the campaign record
+   * still reads RUNNING — the asynchronous reconciliation that follows a run.
+   */
+  'campaign.finishing': {
+    pt: 'A concluir — todas as mensagens foram enviadas',
+    en: 'Finishing — every message has been sent',
+  },
   'campaign.updated': { pt: 'Actualizado {when}', en: 'Updated {when}' },
   'campaign.funnel': { pt: 'Funil de entrega', en: 'Delivery funnel' },
   'campaign.funnelNote': {
@@ -766,7 +839,10 @@ const COPY = {
     en: 'Every sampled contact has its variables filled.',
   },
   'campaign.reviewAudienceView': { pt: 'Vista “{name}”', en: 'View “{name}”' },
-  'campaign.reviewAudienceManual': { pt: '{count} ids indicados à mão', en: '{count} ids given by hand' },
+  'campaign.reviewAudienceManual': {
+    pt: '{count} contactos escolhidos à mão',
+    en: '{count} hand-picked contacts',
+  },
   'campaign.reviewScheduleNow': { pt: 'Assim que for lançada', en: 'As soon as it is launched' },
   'campaign.reviewCountUnknown': {
     pt: 'O número exacto de destinatários, o custo e as exclusões saem da construção da audiência — aparecem no ecrã seguinte, antes de haver botão de lançamento.',
@@ -803,13 +879,30 @@ const COPY = {
   },
   'campaign.source': { pt: 'Origem', en: 'Source' },
   'campaign.sourceView': { pt: 'Vista guardada de Pessoas', en: 'Saved People view' },
-  'campaign.sourceManual': { pt: 'Lista de ids', en: 'List of ids' },
-  'campaign.view': { pt: 'Vista', en: 'View' },
-  'campaign.personIds': { pt: 'Ids de Pessoa', en: 'Person ids' },
-  'campaign.personIdsHint': {
-    pt: 'Separados por vírgula ou por linha.',
-    en: 'Separated by commas or newlines.',
+  'campaign.sourceManual': {
+    pt: 'Contactos escolhidos à mão',
+    en: 'Hand-picked contacts',
   },
+  'campaign.view': { pt: 'Vista', en: 'View' },
+  // ─── The manual-audience contact picker (replaced the UUID textarea) ──────
+  'campaign.personSearch': { pt: 'Procurar contactos', en: 'Search contacts' },
+  'campaign.personSearchHint': {
+    pt: 'Procure por nome ou por número de telefone e adicione um a um.',
+    en: 'Search by name or phone number and add them one by one.',
+  },
+  'campaign.personSearchPlaceholder': {
+    pt: 'Nome ou telefone…',
+    en: 'Name or phone…',
+  },
+  'campaign.personNoResults': {
+    pt: 'Nenhum contacto corresponde a “{query}”.',
+    en: 'No contact matches “{query}”.',
+  },
+  'campaign.personSelected': {
+    pt: 'Audiência ({count})',
+    en: 'Audience ({count})',
+  },
+  'campaign.personRemove': { pt: 'Remover da audiência', en: 'Remove from audience' },
   'campaign.noVariables': {
     pt: 'Este modelo não tem variáveis.',
     en: 'This template has no variables.',
@@ -858,9 +951,10 @@ const COPY = {
     pt: 'Nenhum destinatário qualificado: {excluded} excluídos. Corrija os motivos abaixo e reconstrua a audiência.',
     en: 'No recipient qualifies: {excluded} excluded. Fix the reasons below and rebuild the audience.',
   },
+  // `{cost}` arrives from `money()` with its own currency sign.
   'campaign.launchSubtitle': {
-    pt: '{count} destinatários, ~${cost}',
-    en: '{count} recipients, ~${cost}',
+    pt: '{count} destinatários, ~{cost}',
+    en: '{count} recipients, ~{cost}',
   },
   'campaign.cancelSubtitle': {
     pt: 'As mensagens ainda não enviadas não serão enviadas.',
@@ -903,9 +997,10 @@ const COPY = {
   'campaign.preflightPreview': { pt: 'Pré-voo — como fica', en: 'Pre-flight — how it reads' },
   'campaign.willReceive': { pt: 'Vão receber', en: 'Will receive' },
   'campaign.excluded': { pt: 'Excluídos', en: 'Excluded' },
+  // Both values arrive from `money()` with their own currency sign.
   'campaign.perMessage': {
-    pt: '~${total} a ${rate} por mensagem',
-    en: '~${total} at ${rate} per message',
+    pt: '~{total} a {rate} por mensagem',
+    en: '~{total} at {rate} per message',
   },
   'campaign.tierLine': {
     pt: 'Escalão {tier}: {used} usados de {limit}, {reserve} reservados para conversas 1:1 — {available} disponíveis hoje.',
@@ -1003,6 +1098,15 @@ const COPY = {
 
   'settings.callback': { pt: 'Callback da Meta', en: 'Meta callback' },
   'settings.callbackUrl': { pt: 'URL do callback', en: 'Callback URL' },
+  /**
+   * Shown only when the server's own address is local. The path is
+   * interpolated rather than written out so the sentence cannot drift from the
+   * URL printed under it.
+   */
+  'settings.callbackLocalNote': {
+    pt: 'Estes endereços são locais desta máquina — a Meta não os consegue alcançar. No Meta, use o URL público do seu túnel (ngrok, cloudflared, …) com o mesmo caminho {path}.',
+    en: 'These addresses are local to this machine — Meta cannot reach them. In Meta, use your public tunnel URL (ngrok, cloudflared, …) with the same {path} path.',
+  },
   'settings.directUrl': { pt: 'Forma directa', en: 'Direct form' },
   'settings.verifyUrl': { pt: 'URL de verificação', en: 'Verification URL' },
   'settings.verifyToken': { pt: 'Token de verificação', en: 'Verify token' },
@@ -1104,6 +1208,11 @@ const COPY = {
   },
   'settings.publish': { pt: 'Publicar', en: 'Publish' },
   'settings.unpublish': { pt: 'Despublicar', en: 'Unpublish' },
+  'settings.published': { pt: 'Publicado', en: 'Published' },
+  'settings.notPublished': { pt: 'Não publicado', en: 'Not published' },
+  'settings.templateFilter.all': { pt: 'Todos', en: 'All' },
+  'settings.templateFilter.published': { pt: 'Publicados', en: 'Published' },
+  'settings.templateFilter.unpublished': { pt: 'Por publicar', en: 'Unpublished' },
 
   'settings.failedEvents': { pt: 'Entregas falhadas (24h)', en: 'Failed deliveries (24h)' },
   'settings.stuckMessages': { pt: 'Mensagens presas', en: 'Stuck messages' },

@@ -11,7 +11,12 @@ import { Glyph, type IconName } from '../common/icons';
 import type { ThreadCapabilities } from '../../domain/feed/capabilities';
 import type { FeedPolicy, FeedTemplate } from '../common/use-feed';
 import { InteractiveBuilder } from './builders/InteractiveBuilder';
-import { AttachmentPanel, ContactPanel, LocationPanel } from './builders/SendPanels';
+import {
+  AttachmentPanel,
+  ContactPanel,
+  LocationPanel,
+  type RecentAttachment,
+} from './builders/SendPanels';
 import { VoicePanel } from './builders/VoicePanel';
 import { QuoteStrip } from './QuoteStrip';
 import { TemplatePicker } from './TemplatePicker';
@@ -69,6 +74,8 @@ export type ComposerProps = {
   /** The message being replied to, shown as a strip above the box. */
   replyTarget: QuoteProjection | null;
   person: PersonProjection | null;
+  /** Files already in this conversation, for the attachment panel's reuse list. */
+  recentFiles?: RecentAttachment[];
   onSendText: (body: string) => void;
   onSendTemplate: (templateId: string, parameters: ResolvedParameters) => void;
   onSendMedia: (input: {
@@ -366,6 +373,7 @@ export const Composer = ({
   fieldErrors,
   replyTarget,
   person,
+  recentFiles = [],
   onSendText,
   onSendTemplate,
   onSendMedia,
@@ -487,11 +495,13 @@ export const Composer = ({
             t={t}
             isSending={isSending}
             initialKind={mode.initial}
+            recentFiles={recentFiles}
             onCancel={close}
             onSend={(input) => {
               onSendMedia({
                 mediaKind: input.mediaKind,
-                fileUrl: input.fileUrl,
+                ...(input.fileUrl === undefined ? {} : { fileUrl: input.fileUrl }),
+                ...(input.filePath === undefined ? {} : { filePath: input.filePath }),
                 filename: input.filename,
                 caption: input.caption,
               });

@@ -1,7 +1,7 @@
 import { STANDARD_OBJECT } from 'twenty-sdk/define';
 import { describe, expect, it } from 'vitest';
 
-import { PERSON_OBJECT_UID } from './universal-identifiers';
+import { PERSON_FIELDS_VIEW_UID, PERSON_OBJECT_UID } from './universal-identifiers';
 
 /**
  * The one duplicated identifier in the app, and why it is duplicated.
@@ -21,5 +21,14 @@ import { PERSON_OBJECT_UID } from './universal-identifiers';
 describe('PERSON_OBJECT_UID', () => {
   it('is exactly what the SDK says, so the runtime copy cannot drift', () => {
     expect(PERSON_OBJECT_UID).toBe(STANDARD_OBJECT.person.universalIdentifier);
+  });
+});
+
+/** Same duplication, same reason: post-install reads this view at runtime. */
+describe('PERSON_FIELDS_VIEW_UID', () => {
+  it('is exactly what the SDK says, so the runtime copy cannot drift', () => {
+    expect(PERSON_FIELDS_VIEW_UID).toBe(
+      STANDARD_OBJECT.person.views.personRecordPageFields.universalIdentifier,
+    );
   });
 });

@@ -4,12 +4,15 @@ import { kv, type InstallPayload } from 'twenty-sdk/logic-function';
 import {
   LF_POST_INSTALL,
   LF_WEBHOOK_RESOLVER,
+  PERSON_FIELDS_VIEW_UID,
+  PERSON_OBJECT_UID,
   ROLE_ADMIN,
   ROLE_AGENT,
 } from '../constants/universal-identifiers';
 import { ACCOUNT_STATUS, REQUIRED_WEBHOOK_FIELDS } from '../domain/constants';
 import { metadataClient } from '../server/clients';
 import { describeError, logger } from '../server/logger';
+import { resolveFieldMetadataId, resolveObjectMetadataId } from '../server/metadata-ids';
 import { listAccounts } from '../server/repositories/accounts';
 import { currentWorkspaceId } from '../server/workspace';
 import {
@@ -55,6 +58,8 @@ export type PostInstallResult = {
   accounts: number;
   claimsRepaired: number;
   claimsConflicting: number;
+  /** Person Fields-panel rows switched to hidden on this run. */
+  personFieldsHidden: number;
   callbackUrl: string | null;
 };
 
@@ -157,6 +162,89 @@ const repairClaims = async (
   return { repaired, conflicting, accounts: accounts.length };
 };
 
+/** The Person relations the app owns that are plumbing, not fields to browse. */
+export const PERSON_PLUMBING_FIELDS = [
+  'whatsappThreads',
+  'whatsappConsentEvents',
+  'whatsappCampaignRecipients',
+] as const;
+
+/**
+ * Hides the app's three relation chips from the Person record's Fields panel
+ * (UX review, Person record). The dedicated WhatsApp tab already presents
+ * conversations, consent and campaign history in a readable form; the raw
+ * relation lists under "Fields" invite editing data the app owns.
+ *
+ * Done here, at runtime, because the manifest cannot: the server provisions a
+ * view-field row for each relation on the standard `personRecordPageFields`
+ * view itself, refuses an app claiming that row's reserved identifier
+ * (`RESERVED_SYSTEM_UNIVERSAL_IDENTIFIER`), and refuses a second row for the
+ * same view+field pair. So the existing rows are patched through the metadata
+ * API instead.
+ *
+ * Idempotent, and deliberately one-shot per row: an already-hidden row is left
+ * alone, which also means an admin who re-shows a field from the panel's own
+ * settings is not overruled on the next upgrade.
+ */
+const hidePersonPlumbingFields = async (): Promise<number> => {
+  const log = logger.child({ fn: 'post-install' });
+
+  try {
+    const personObjectMetadataId = await resolveObjectMetadataId(PERSON_OBJECT_UID);
+
+    if (personObjectMetadataId === null) return 0;
+
+    const result = await metadataClient().query({
+      getViews: {
+        __args: { objectMetadataId: personObjectMetadataId },
+        id: true,
+        universalIdentifier: true,
+        viewFields: { id: true, fieldMetadataId: true, isVisible: true },
+      },
+    });
+
+    const view = (result.getViews ?? []).find(
+      (candidate) => candidate.universalIdentifier === PERSON_FIELDS_VIEW_UID,
+    );
+
+    if (view === undefined) {
+      log.warn('wa.install.person_fields_view_missing');
+
+      return 0;
+    }
+
+    let hidden = 0;
+
+    for (const name of PERSON_PLUMBING_FIELDS) {
+      const fieldMetadataId = await resolveFieldMetadataId(PERSON_OBJECT_UID, name);
+
+      if (fieldMetadataId === null) continue;
+
+      const row = (view.viewFields ?? []).find(
+        (candidate) => candidate.fieldMetadataId === fieldMetadataId,
+      );
+
+      if (row === undefined || row.isVisible !== true) continue;
+
+      await metadataClient().mutation({
+        updateViewField: {
+          __args: { input: { id: row.id, update: { isVisible: false } } },
+          id: true,
+        },
+      });
+
+      hidden += 1;
+    }
+
+    return hidden;
+  } catch (error) {
+    // Cosmetic, so never fatal: an install must not fail over a fields panel.
+    log.warn('wa.install.hide_person_fields_failed', describeError(error));
+
+    return 0;
+  }
+};
+
 export const install = async (payload: InstallPayload): Promise<PostInstallResult> => {
   const log = logger.child({ fn: 'post-install' });
 
@@ -182,6 +270,8 @@ export const install = async (payload: InstallPayload): Promise<PostInstallResul
       log.warn('wa.install.claim_repair_failed', describeError(error));
     }
   }
+
+  const personFieldsHidden = await hidePersonPlumbingFields();
 
   await kv.set(SCHEMA_VERSION_KEY, SCHEMA_VERSION, { scope: 'WORKSPACE' });
 
@@ -210,6 +300,7 @@ export const install = async (payload: InstallPayload): Promise<PostInstallResul
     accounts: claims.accounts,
     claimsRepaired: claims.repaired,
     claimsConflicting: claims.conflicting,
+    personFieldsHidden,
     callbackUrl,
   };
 

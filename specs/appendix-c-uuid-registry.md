@@ -113,6 +113,7 @@ with `position: 1000` so it lands after the stock tabs, and
 
 | Constant | Value |
 |---|---|
+| `NAV_WHATSAPP_FOLDER` | `4d7b8b2b-237b-4abb-8a09-1aa311540654` |
 | `NAV_INBOX` | `40dac02c-cdcb-4d72-8235-b0d2d45ad578` |
 | `NAV_CAMPAIGNS` | `24b7fa8a-1e64-4b55-8fa0-eaddf2aa9514` |
 | `CMI_OPEN_CHAT` | `60230d67-8b27-4fa7-af25-f482f0215615` |

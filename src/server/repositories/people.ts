@@ -131,6 +131,74 @@ export const findPeopleByAdditionalPhone = async (
   return nodesOf<PersonRecord>(result.people);
 };
 
+/**
+ * The people behind a list of ids, for hydrating a saved manual audience back
+ * into names the builder can show. Order is the caller's problem — the ids
+ * arrive as the operator picked them, and this read answers in store order.
+ */
+export const findPeopleByIds = async (ids: string[]): Promise<PersonRecord[]> => {
+  const unique = [...new Set(ids.filter((id) => id.length > 0))];
+
+  if (unique.length === 0) return [];
+
+  const result = await query(
+    (client) =>
+      client.query({
+        people: {
+          __args: { filter: { id: { in: unique } }, first: unique.length },
+          edges: { node: PERSON_FIELDS },
+        },
+      }),
+    'people.findByIds',
+  );
+
+  return nodesOf<PersonRecord>(result.people);
+};
+
+/**
+ * Name-or-phone search for the campaign audience picker (UX review).
+ *
+ * A campaign audience was a textarea of UUIDs; nobody outside a demo has a
+ * Person UUID at hand. `ilike` over the two name parts covers "type a name";
+ * digits also try the primary phone, so a rep holding a number can paste it.
+ */
+export const searchPeople = async (
+  term: string,
+  limit = 20,
+): Promise<PersonRecord[]> => {
+  const needle = term.trim();
+
+  if (needle.length === 0) return [];
+
+  const pattern = `%${needle}%`;
+  const digits = needle.replace(/[^\d]/g, '');
+
+  const result = await query(
+    (client) =>
+      client.query({
+        people: {
+          __args: {
+            filter: {
+              or: [
+                { name: { firstName: { ilike: pattern } } },
+                { name: { lastName: { ilike: pattern } } },
+                ...(digits.length < 4
+                  ? []
+                  : [{ phones: { primaryPhoneNumber: { like: `%${digits}%` } } }]),
+              ],
+            },
+            orderBy: [{ name: { firstName: 'AscNullsLast' } }],
+            first: limit,
+          },
+          edges: { node: PERSON_FIELDS },
+        },
+      }),
+    'people.search',
+  );
+
+  return nodesOf<PersonRecord>(result.people);
+};
+
 export const findPersonById = async (id: string): Promise<PersonRecord | null> => {
   const result = await query(
     (client) =>

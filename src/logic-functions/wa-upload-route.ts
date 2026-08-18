@@ -11,12 +11,11 @@ import { resolveFieldUniversalIdentifier } from '../server/metadata-ids';
 /**
  * `POST /s/whatsapp/upload` — bytes produced *in the page* into Twenty storage.
  *
- * This route exists for exactly one thing the front-component sandbox can do
- * and the composer could not use: a `MediaRecorder` hands the page a `Blob` of
- * real audio. The sandbox has no `FileReader` and a file input exposes only
- * metadata, so a device picker still cannot work (spec §"Attachment and
- * file-picker feasibility") — but a recording the page *made* is bytes the page
- * already holds.
+ * This route exists for bytes the page holds: a `MediaRecorder` recording, or
+ * a `File` picked from the device. (It was built for the recorder alone under
+ * the belief that a file input exposes only metadata; the D-53 probe measured
+ * `FileReader` present and `Blob.arrayBuffer()` working, so the attachment
+ * panel now feeds the same door.)
  *
  * The client could not upload them itself. Twenty's `uploadFile` lives on the
  * core GraphQL client, which a front component does not carry a token for, and
@@ -43,6 +42,9 @@ export type UploadRequestBody = {
  * 8 MB decoded. Comfortably above any voice note a rep will record — a minute
  * of Opus is well under 1 MB — and far below Meta's 16 MB audio ceiling, which
  * leaves room for the base64 inflation and the platform's own body limits.
+ * The attachment panel mirrors this cap client-side
+ * (`builders/upload.MAX_DEVICE_UPLOAD_BYTES`, held equal by a test) and points
+ * larger files at the workspace-URL path instead.
  */
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 

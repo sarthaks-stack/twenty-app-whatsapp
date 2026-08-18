@@ -82,13 +82,13 @@ const ROUTES: Record<
     file: 'wa-campaign-control.ts',
     minimumRole: 'admin',
     /**
-     * Three reads, and nothing else. SEC-12's subject is *who launched a
+     * Four reads, and nothing else. SEC-12's subject is *who launched a
      * campaign*: these change nothing, send nothing and return CRM data an
      * agent can already see in the record list, so requiring an administrator
-     * to preview an audience would only mean campaigns get built by
-     * administrators.
+     * to preview an audience — or search contacts for one — would only mean
+     * campaigns get built by administrators.
      */
-    agentActions: ['audienceOptions', 'preview', 'preflight'],
+    agentActions: ['audienceOptions', 'personSearch', 'preview', 'preflight'],
   },
 };
 
@@ -193,7 +193,7 @@ describe('the route role matrix (SEC-5)', () => {
    * Every `requireRole(caller, 'agent')` on the campaign route must sit under
    * one of the three reviewed actions.
    */
-  it('lets only the three reviewed campaign actions run as an agent', () => {
+  it('lets only the reviewed campaign actions run as an agent', () => {
     const source = sourceOf(join(LOGIC_FUNCTIONS, 'wa-campaign-control.ts'));
     const allowed = new Set(ROUTES['/whatsapp/campaign']!.agentActions);
 

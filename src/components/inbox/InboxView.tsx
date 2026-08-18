@@ -40,11 +40,12 @@ export const TWO_PANE_MIN_WIDTH = 720;
 /** How often the per-filter totals are re-read. See `FeedQuery.counts`. */
 const COUNTS_INTERVAL_MS = 30_000;
 
-/** The six the feed route accepts; the labels come from the catalog. */
+/** The seven the feed route accepts; the labels come from the catalog. */
 const FILTERS = [
   'mine',
   'unassigned',
   'all',
+  'unread',
   'campaign_replies',
   'window_expiring',
   'closed',
@@ -53,19 +54,21 @@ const FILTERS = [
 type Filter = (typeof FILTERS)[number];
 
 /**
- * The three a rep works out of, and the three they go looking for.
+ * The four a rep works out of, and the three they go looking for.
  *
- * Six equal chips in one scrolling strip made the two most-used filters
- * indistinguishable from the two least-used, and on a narrow widget the last
+ * Seven equal chips in one scrolling strip made the most-used filters
+ * indistinguishable from the least-used, and on a narrow widget the last
  * of them was off-screen entirely with nothing to say so. The split is what
- * "More filters" means.
+ * "More filters" means. `unread` is primary: "what have I not seen" is the
+ * question an inbox exists to answer.
  */
-const PRIMARY: Filter[] = ['mine', 'unassigned', 'all'];
+const PRIMARY: Filter[] = ['mine', 'unassigned', 'all', 'unread'];
 
 const FILTER_ICON: Record<Filter, IconName> = {
   mine: 'mine',
   unassigned: 'unassigned',
   all: 'all',
+  unread: 'unread',
   campaign_replies: 'campaign_replies',
   window_expiring: 'window_expiring',
   closed: 'closed',
@@ -616,6 +619,35 @@ export const InboxView = () => {
           </div>
 
           {/*
+            The conversation on the right can leave the list on the left: a
+            closed thread stays open in the detail pane while the current
+            filter no longer contains it — most sharply when acting on the
+            thread (close, assign) is what moved it. Without this line, a
+            list that empties beside a conversation that is plainly there
+            reads as data loss.
+          */}
+          {selectedId !== null &&
+          !feed.isLoading &&
+          !feed.isUnavailable &&
+          !visible.some((thread) => thread.id === selectedId) ? (
+            <div
+              role="status"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: theme.spacing[1],
+                padding: theme.spacing[2],
+                fontSize: theme.font.size.xs,
+                color: theme.font.color.tertiary,
+                borderBottom: `1px solid ${theme.border.color.light}`,
+              }}
+            >
+              <Glyph name="details" />
+              {t('inbox.openNotInFilter')}
+            </div>
+          ) : null}
+
+          {/*
             "No conversations in this filter" is a claim about the data, and
             a surface that could not read anything is not entitled to make
             it. The four states are kept apart: unreadable, still reading,
@@ -825,9 +857,15 @@ const FilterChip = ({
         alignItems: 'center',
         gap: theme.spacing[1],
         minHeight: '28px',
-        border: `1px solid ${active ? theme.border.color.strong : theme.border.color.light}`,
+        /**
+         * The selected chip wears the accent, not merely a darker grey. A
+         * strong-grey border on a light-grey background was the review's
+         * "which filter am I in?" — the same blue-border-plus-tint the
+         * attachment panel's radios already use.
+         */
+        border: `1px solid ${active ? theme.color.blue : theme.border.color.light}`,
         borderRadius: theme.border.radius.pill,
-        background: active ? theme.background.transparent.light : 'transparent',
+        background: active ? theme.background.transparent.blue : 'transparent',
         color: active ? theme.font.color.primary : theme.font.color.secondary,
         cursor: 'pointer',
         fontFamily: theme.font.family,

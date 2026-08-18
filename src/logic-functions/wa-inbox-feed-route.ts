@@ -224,6 +224,8 @@ export const inboxSpecFor = (
         : { kind: 'mine', assigneeId: caller.workspaceMemberId };
     case INBOX_FILTER.UNASSIGNED:
       return { kind: 'unassigned' };
+    case INBOX_FILTER.UNREAD:
+      return { kind: 'unread' };
     case INBOX_FILTER.CAMPAIGN_REPLIES:
       return { kind: 'campaign_replies' };
     case INBOX_FILTER.WINDOW_EXPIRING:

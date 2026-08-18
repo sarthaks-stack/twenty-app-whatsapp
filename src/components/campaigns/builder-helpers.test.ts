@@ -369,7 +369,7 @@ describe('openedFrom', () => {
         { id: 'c-1', audienceDefinition: { kind: 'manual', personIds: ['p1', 'p2'] } },
         templates,
       ),
-    ).toMatchObject({ audienceKind: 'manual', personIds: 'p1\np2' });
+    ).toMatchObject({ audienceKind: 'manual', personIds: ['p1', 'p2'] });
   });
 
   /** The furthest step already answered — a resume that starts over is not one. */

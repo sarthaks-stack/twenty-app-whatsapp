@@ -1,13 +1,18 @@
 import { defineNavigationMenuItem, NavigationMenuItemType } from 'twenty-sdk/define';
 
-import { NAV_CAMPAIGNS, PL_CAMPAIGNS } from '../constants/universal-identifiers';
+import {
+  NAV_CAMPAIGNS,
+  NAV_WHATSAPP_FOLDER,
+  PL_CAMPAIGNS,
+} from '../constants/universal-identifiers';
 
-/** Beside the inbox, one position later. */
+/** Below the inbox, inside the same WhatsApp folder. */
 export default defineNavigationMenuItem({
   universalIdentifier: NAV_CAMPAIGNS,
   type: NavigationMenuItemType.PAGE_LAYOUT,
-  name: 'WhatsApp Campaigns',
+  name: 'Campaigns',
   icon: 'IconSend',
-  position: 501,
+  position: 1,
+  folderUniversalIdentifier: NAV_WHATSAPP_FOLDER,
   pageLayoutUniversalIdentifier: PL_CAMPAIGNS,
 });

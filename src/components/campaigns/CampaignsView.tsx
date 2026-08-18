@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from 'twenty-ui/theme-constants';
 
 import { useCopy, type Translate } from '../common/copy';
-import { relativeTime } from '../common/format';
+import { displayPhone, money, relativeTime } from '../common/format';
 import { Glyph } from '../common/icons';
 import { ActionButton, Banner, Card, EmptyState, StatusPill } from '../common/ui';
 import { useFeed } from '../common/use-feed';
@@ -11,7 +11,10 @@ import { CampaignDetail } from './CampaignDetail';
 import {
   CAMPAIGN_FILTERS,
   RUNNING_STATUSES,
+  audienceSummary,
   isArchiveFilter,
+  isAutosavedDraft,
+  isFinishing,
   visibleCampaigns,
   type CampaignFilter,
 } from './list';
@@ -140,6 +143,22 @@ export const CampaignsView = () => {
   const anyRunning = useMemo(
     () => campaigns.some((campaign) => RUNNING_STATUSES.has(String(campaign.status))),
     [campaigns],
+  );
+
+  /**
+   * The sending number per row. The bootstrap feed already carries the
+   * accounts for the builder; the list borrows them rather than paying a
+   * second read.
+   */
+  const numberByAccount = useMemo(
+    () =>
+      new Map(
+        (bootstrap.data?.accounts ?? []).map((account) => [
+          account.id,
+          account.displayPhoneNumber ?? null,
+        ]),
+      ),
+    [bootstrap.data],
   );
 
   const visible = useMemo(
@@ -532,6 +551,7 @@ export const CampaignsView = () => {
                     lang={lang}
                     t={t}
                     archived={archiveOpen}
+                    phone={numberByAccount.get(String(campaign.accountId ?? '')) ?? null}
                     onOpen={() => setSelectedId(String(campaign.id))}
                   />
                 ))}
@@ -587,6 +607,12 @@ export const CampaignsView = () => {
               <Glyph name="chevron" />
             </span>
 
+            <AudienceLine
+              campaign={campaign}
+              phone={numberByAccount.get(String(campaign.accountId ?? '')) ?? null}
+              t={t}
+            />
+
             <span
               style={{
                 display: 'flex',
@@ -609,9 +635,7 @@ export const CampaignsView = () => {
               <Metric
                 icon="cost"
                 label={t('campaign.counter.actualCost')}
-                value={Number(
-                  campaign.actualCostUsd ?? campaign.estimatedCostUsd ?? 0,
-                ).toFixed(2)}
+                value={money(Number(campaign.actualCostUsd ?? campaign.estimatedCostUsd ?? 0))}
               />
             </span>
 
@@ -620,6 +644,51 @@ export const CampaignsView = () => {
         ))
       )}
     </div>
+  );
+};
+
+/**
+ * Who the campaign targets and which number sends it, as one quiet line.
+ *
+ * The list said nothing about either, so two campaigns sharing a name — one a
+ * leftover autosaved draft — could only be told apart by opening both. The
+ * draft label rides on the same line: work the builder saved automatically is
+ * labelled as exactly that, rather than posing as a finished campaign.
+ */
+const AudienceLine = ({
+  campaign,
+  phone,
+  t,
+}: {
+  campaign: Record<string, any>;
+  phone: string | null;
+  t: Translate;
+}) => {
+  const theme = useTheme();
+  const audience = audienceSummary(campaign);
+
+  const parts = [
+    isAutosavedDraft(campaign) ? t('campaign.autosavedDraft') : null,
+    audience === null
+      ? null
+      : audience.kind === 'view'
+        ? t('campaign.audienceView')
+        : t('campaign.audienceManual', { count: audience.count }),
+    phone === null || phone.length === 0 ? null : displayPhone(phone),
+  ].filter((part): part is string => part !== null);
+
+  if (parts.length === 0) return null;
+
+  return (
+    <span
+      style={{
+        fontSize: theme.font.size.xs,
+        color: theme.font.color.tertiary,
+        fontWeight: theme.font.weight.regular,
+      }}
+    >
+      {parts.join(' · ')}
+    </span>
   );
 };
 
@@ -638,6 +707,7 @@ const CampaignRow = ({
   lang,
   t,
   archived = false,
+  phone = null,
   onOpen,
 }: {
   campaign: Record<string, any>;
@@ -646,6 +716,8 @@ const CampaignRow = ({
   t: Translate;
   /** Rendering the archive: the last column reads `archivedAt`, not `createdAt`. */
   archived?: boolean;
+  /** The sending number's display phone, resolved by the list. */
+  phone?: string | null;
   onOpen: () => void;
 }) => {
   const theme = useTheme();
@@ -694,6 +766,7 @@ const CampaignRow = ({
           <span style={{ textDecoration: hover ? 'underline' : 'none' }}>
             {String(campaign.name ?? '—')}
           </span>
+          <AudienceLine campaign={campaign} phone={phone} t={t} />
           <Freshness campaign={campaign} now={now} lang={lang} t={t} />
         </button>
       </td>
@@ -714,7 +787,7 @@ const CampaignRow = ({
         </td>
       ))}
       <td style={cell}>
-        ${Number(campaign.actualCostUsd ?? campaign.estimatedCostUsd ?? 0).toFixed(2)}
+        {money(Number(campaign.actualCostUsd ?? campaign.estimatedCostUsd ?? 0))}
       </td>
       <td style={{ ...cell, color: theme.font.color.tertiary }}>
         {relativeTime(
@@ -753,6 +826,11 @@ const Freshness = ({
   const total = Number(campaign.recipientCount ?? 0);
   const done = Number(campaign.sentCount ?? 0);
   const updated = (campaign.updatedAt ?? campaign.createdAt ?? null) as string | null;
+  /**
+   * Everything already attempted, status not yet reconciled: say so instead of
+   * a progress line that reads as stuck at 100%.
+   */
+  const finishing = isFinishing(campaign);
 
   return (
     <span
@@ -766,7 +844,11 @@ const Freshness = ({
       }}
     >
       <Glyph name="running" />
-      {total === 0 ? null : `${t('campaign.progress', { done, total })} · `}
+      {finishing
+        ? `${t('campaign.finishing')} · `
+        : total === 0
+          ? null
+          : `${t('campaign.progress', { done, total })} · `}
       {t('campaign.updated', { when: relativeTime(updated, now, lang) })}
     </span>
   );

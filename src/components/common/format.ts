@@ -199,6 +199,30 @@ export const mapLink = (latitude: number | null, longitude: number | null): stri
     ? null
     : `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
 
+/**
+ * `$0.004`, not `$0.00` — money that keeps its sub-cent precision.
+ *
+ * WhatsApp utility messages cost fractions of a cent, so a one-recipient
+ * campaign estimated at $0.004 rendered as `$0.00` — an estimate that reads as
+ * "free", which is the one thing a cost estimate must never say. Two decimals
+ * remain the ceiling for ordinary amounts; a positive amount that would round
+ * to zero keeps enough places to show its first significant digit (capped at
+ * four, which covers every Meta rate).
+ */
+export const money = (value: number | null | undefined): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '$0.00';
+
+  const abs = Math.abs(value);
+
+  if (abs === 0 || abs >= 0.005) return `$${value.toFixed(2)}`;
+
+  // Enough places to reach the first significant digit — $0.0009 must not
+  // round up to $0.001, which is different money.
+  const places = Math.min(4, Math.ceil(-Math.log10(abs)));
+
+  return `$${value.toFixed(Math.max(3, places))}`;
+};
+
 /** `+244 928 863 659` — grouped for reading, never for dialling. */
 export const displayPhone = (value: string | null | undefined): string => {
   if (typeof value !== 'string' || value.length === 0) return '';

@@ -82,6 +82,7 @@ export const PLT_PERSON_WHATSAPP = '137e43b2-9c3b-4545-a423-a869b9132d9a';
 export const PLT_PERSON_WHATSAPP_WIDGET = '2fc5c224-0b0e-4d38-b286-fa49bfbde311';
 
 // ─── Navigation and command menu ────────────────────────────────────────────
+export const NAV_WHATSAPP_FOLDER = '4d7b8b2b-237b-4abb-8a09-1aa311540654';
 export const NAV_INBOX = '40dac02c-cdcb-4d72-8235-b0d2d45ad578';
 export const NAV_CAMPAIGNS = '24b7fa8a-1e64-4b55-8fa0-eaddf2aa9514';
 export const CMI_OPEN_CHAT = '60230d67-8b27-4fa7-af25-f482f0215615';
@@ -98,6 +99,15 @@ export const CMI_OPEN_CHAT = '60230d67-8b27-4fa7-af25-f482f0215615';
  * equal (specs/00 D-11, server/metadata-ids.ts).
  */
 export const PERSON_OBJECT_UID = '20202020-e674-48e5-a542-72570eee7213';
+
+/**
+ * The Person record page's Fields-panel view
+ * (`STANDARD_OBJECT.person.views.personRecordPageFields`), as a literal for the
+ * same bundler-stub reason as `PERSON_OBJECT_UID`. Post-install patches this
+ * view's rows to hide the app's plumbing relations; the identifiers test holds
+ * the copy equal to the SDK's value.
+ */
+export const PERSON_FIELDS_VIEW_UID = '7f34ab76-9b33-595a-bd22-d8d434147c8e';
 
 // ─── Roles ──────────────────────────────────────────────────────────────────
 export const ROLE_AGENT = '8a466b1b-a44e-48fb-9864-63af63b3edc3';

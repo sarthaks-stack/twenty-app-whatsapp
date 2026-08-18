@@ -313,6 +313,7 @@ export type InboxFilterSpec =
   | { kind: 'mine'; assigneeId: string }
   | { kind: 'unassigned' }
   | { kind: 'all' }
+  | { kind: 'unread' }
   | { kind: 'campaign_replies' }
   | { kind: 'window_expiring'; now: Date; horizon: Date }
   | { kind: 'closed' };
@@ -351,6 +352,9 @@ export const inboxFilterFor = (spec: InboxFilterSpec) => {
 
     case 'unassigned':
       return { ...notClosed, assigneeId: { is: 'NULL' } } as const;
+
+    case 'unread':
+      return { ...notClosed, unreadCount: { gt: 0 } } as const;
 
     case 'campaign_replies':
       return {

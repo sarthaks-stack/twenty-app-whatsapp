@@ -151,6 +151,55 @@ export const resolveFieldUniversalIdentifier = async (
     }
   });
 
+/**
+ * A field's *metadata id* — what `viewField.fieldMetadataId` joins on.
+ *
+ * Distinct from the universal identifier above: view-field rows reference the
+ * per-workspace metadata id, not the app-scoped universal one.
+ */
+export const resolveFieldMetadataId = async (
+  objectUniversalIdentifier: string,
+  fieldName: string,
+): Promise<string | null> =>
+  cached(cacheKey('field-id', `${objectUniversalIdentifier}:${fieldName}`), async () => {
+    try {
+      const result = await metadataClient().query({
+        objects: {
+          __args: { paging: { first: 500 }, filter: {} },
+          edges: {
+            node: {
+              universalIdentifier: true,
+              fields: {
+                __args: { paging: { first: 500 }, filter: {} },
+                edges: { node: { id: true, name: true } },
+                pageInfo: { hasNextPage: true },
+              },
+            },
+          },
+          pageInfo: { hasNextPage: true },
+        },
+      });
+
+      const object = (result.objects.edges ?? [])
+        .map((edge) => edge.node)
+        .find((node) => node.universalIdentifier === objectUniversalIdentifier);
+
+      return (
+        (object?.fields?.edges ?? [])
+          .map((edge) => edge.node)
+          .find((node) => node.name === fieldName)?.id ?? null
+      );
+    } catch (error) {
+      logger.warn('metadata.field_id_lookup_failed', {
+        objectUniversalIdentifier,
+        fieldName,
+        ...describeError(error),
+      });
+
+      return null;
+    }
+  });
+
 /** Test seam. */
 export const resetMetadataIdCache = (): void => {
   memo.clear();

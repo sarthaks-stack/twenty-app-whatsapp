@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { openCommandConfirmationModal } from 'twenty-sdk/front-component';
 import { useTheme } from 'twenty-ui/theme-constants';
 
 import type { ContactCardProjection } from '../../domain/feed/content';
 import type { MessageProjection } from '../../domain/feed/projection';
 import { contactKey } from '../../domain/feed/contact-match';
+import { isWorkspaceFileAddress } from '../../domain/workspace-file';
+import type { RecentAttachment } from './builders/SendPanels';
 import { projectQuote } from '../../domain/feed/quote';
 import type { QuoteProjection } from '../../domain/feed/quote';
 import type { FieldError } from '../../domain/interactive/validate';
@@ -213,6 +216,44 @@ export const ThreadView = ({
 
       return remaining;
     });
+  }, [feed.messages]);
+
+  /**
+   * The files already in this conversation, newest first, for the attachment
+   * panel's reuse list. Only addresses in Twenty's own store qualify — a Meta
+   * CDN URL out of a deferred download would be accepted by the picker and
+   * refused by the send route (D-58). Voice notes and stickers are turns in a
+   * conversation, not files anyone re-sends.
+   */
+  const recentFiles = useMemo<RecentAttachment[]>(() => {
+    const rows: RecentAttachment[] = [];
+    const seen = new Set<string>();
+
+    for (const message of [...feed.messages].reverse()) {
+      const media = message.media;
+
+      if (media === null || media.url === null || !isWorkspaceFileAddress(media.url)) continue;
+      if (media.isVoice) continue;
+
+      const kind = media.kind;
+
+      if (kind !== 'image' && kind !== 'video' && kind !== 'audio' && kind !== 'document') {
+        continue;
+      }
+      if (seen.has(media.url)) continue;
+
+      seen.add(media.url);
+      rows.push({
+        url: media.url,
+        filename: media.fileName,
+        mediaKind: kind,
+        sizeBytes: media.sizeBytes,
+      });
+
+      if (rows.length >= 8) break;
+    }
+
+    return rows;
   }, [feed.messages]);
 
   /**
@@ -627,6 +668,38 @@ export const ThreadView = ({
   }, [feed, onThreadChanged]);
 
   /**
+   * Opening the conversation is what reads it, so opening it clears the badge.
+   *
+   * The route zeroes `unreadCount` unconditionally and treats the WhatsApp read
+   * receipt as optional on top (`WA_SEND_READ_RECEIPTS`) — but nothing called
+   * it, so the badge survived the very act that made it wrong. Guarded per
+   * conversation id rather than per count: an inbound message arriving *while
+   * the rep is looking at the thread* bumps the count again, and that second
+   * rise is also read the moment it renders.
+   */
+  const markedRead = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (thread === null || !canSend) return;
+    if ((thread.unreadCount ?? 0) === 0) {
+      // The server confirmed zero, so the guard has done its job; clearing it
+      // lets a message that arrives while the thread is open be marked too.
+      markedRead.current = null;
+
+      return;
+    }
+    if (markedRead.current === thread.id) return;
+
+    markedRead.current = thread.id;
+
+    void actions.threadAction('markRead', { threadId: thread.id }).then((outcome) => {
+      // The list beside this pane shows the badge; it has to hear the zero.
+      if (outcome.ok) refreshAll();
+      else markedRead.current = null;
+    });
+  }, [actions, canSend, refreshAll, thread]);
+
+  /**
    * A Person created from a contact card the customer shared.
    *
    * The name and number sent are the *card's*, which is what the rep has just
@@ -732,14 +805,35 @@ export const ThreadView = ({
     [sendMedia, sendText],
   );
 
+  /**
+   * Blocking asks first; unblocking does not.
+   *
+   * Block is the strongest thing a rep can do to a conversation — every send
+   * is refused and campaigns exclude it from the moment it lands — and the
+   * button sits beside Assign and Close, where a misclick is ordinary. The
+   * host's modal, not `window.confirm`: a browser dialog blocks the worker's
+   * whole message channel. Unblock stays one click, because it *is* the undo.
+   */
   const toggleBlock = useCallback(async () => {
     if (thread === null) return;
+
+    if (!thread.isBlocked) {
+      const answer = await openCommandConfirmationModal({
+        title: t('chat.blockConfirmTitle'),
+        subtitle: t('chat.blockConfirmSubtitle'),
+        confirmButtonText: t('chat.block'),
+        confirmButtonAccent: 'danger',
+      });
+
+      // Anything that is not an explicit confirmation is a refusal.
+      if (answer !== 'confirm') return;
+    }
 
     await actions.threadAction(thread.isBlocked ? 'unblock' : 'block', {
       threadId: thread.id,
     });
     refreshAll();
-  }, [actions, refreshAll, thread]);
+  }, [actions, refreshAll, t, thread]);
 
   const toggleClose = useCallback(async () => {
     if (thread === null) return;
@@ -993,6 +1087,7 @@ export const ThreadView = ({
         fieldErrors={fieldErrors}
         replyTarget={replyTarget}
         person={person}
+        recentFiles={recentFiles}
         onSendText={sendText}
         onSendTemplate={sendTemplate}
         onSendMedia={sendMedia}

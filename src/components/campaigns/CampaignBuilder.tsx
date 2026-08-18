@@ -16,6 +16,7 @@ import type { VariableSpec } from '../../domain/template-spec';
 import { isWorkspaceFileAddress } from '../../domain/workspace-file';
 import type { FeedTemplate } from '../common/use-feed';
 import { useCopy, type Translate } from '../common/copy';
+import { displayPhone } from '../common/format';
 import { Glyph } from '../common/icons';
 import { ActionButton, Banner, Card, Field, useInputStyle } from '../common/ui';
 import { useCampaignActions } from './campaign-actions';
@@ -87,6 +88,7 @@ type Binding = { kind: 'field' | 'static'; path: string; value: string; fallback
 
 type PreviewRow = {
   personId: string | null;
+  name: string | null;
   phone: string | null;
   ok: boolean;
   missing: string[];
@@ -266,7 +268,7 @@ export type OpenedCampaign = {
   templateId: string;
   audienceKind: AudienceKind;
   viewId: string;
-  personIds: string;
+  personIds: string[];
   bindings: Binding[];
   headerBindings: Binding[];
   headerFileUrl: string;
@@ -282,11 +284,23 @@ const EMPTY_OPENED: OpenedCampaign = {
   templateId: '',
   audienceKind: 'view',
   viewId: '',
-  personIds: '',
+  personIds: [],
   bindings: [],
   headerBindings: [],
   headerFileUrl: '',
   buttonBindings: {},
+};
+
+/** One contact in the manual-audience picker: enough to recognise, no more. */
+type PickedPerson = { id: string; name: string | null; phone: string | null };
+
+/** "Maria Silva · +244 923 000 111" — the phone is the disambiguator. */
+const pickedLabel = (person: PickedPerson): string => {
+  const parts = [person.name, displayPhone(person.phone)].filter(
+    (part): part is string => typeof part === 'string' && part.length > 0,
+  );
+
+  return parts.length === 0 ? person.id : parts.join(' · ');
 };
 
 /**
@@ -338,7 +352,9 @@ export const openedFrom = (
     templateId,
     audienceKind: audience?.kind === 'manual' ? 'manual' : 'view',
     viewId: text(audience?.viewId),
-    personIds: (audience?.personIds ?? []).join('\n'),
+    personIds: (audience?.personIds ?? []).filter(
+      (id): id is string => typeof id === 'string' && id.length > 0,
+    ),
     ...bindingsFromMapping(spec, (campaign.variableMapping ?? null) as VariableMapping | null),
   };
 };
@@ -481,7 +497,20 @@ export const CampaignBuilder = ({
   const [templateId, setTemplateId] = useState(opened.templateId);
   const [audienceKind, setAudienceKind] = useState<AudienceKind>(opened.audienceKind);
   const [viewId, setViewId] = useState(opened.viewId);
-  const [personIds, setPersonIds] = useState(opened.personIds);
+  /**
+   * The manual audience, as people rather than a textarea of UUIDs.
+   *
+   * A reopened draft starts with ids only; the hydration effect below fills the
+   * names in. Keeping the id as the row's identity means a contact the search
+   * can no longer find (deleted, renamed) still shows *as its id* instead of
+   * silently disappearing from the audience.
+   */
+  const [selectedPeople, setSelectedPeople] = useState<PickedPerson[]>(
+    opened.personIds.map((id) => ({ id, name: null, phone: null })),
+  );
+  const [personQuery, setPersonQuery] = useState('');
+  const [personResults, setPersonResults] = useState<PickedPerson[]>([]);
+  const [personSearching, setPersonSearching] = useState(false);
   const [bindings, setBindings] = useState<Binding[]>(opened.bindings);
   /**
    * The rest of the template, which this builder used to ignore (D-59).
@@ -551,6 +580,57 @@ export const CampaignBuilder = ({
     });
   }, [call]);
 
+  /**
+   * A reopened draft stored ids; the picker owes the operator names. One read,
+   * merged by id so a contact the server no longer returns keeps its row (and
+   * its id as the label) rather than silently leaving the audience.
+   */
+  useEffect(() => {
+    if (opened.personIds.length === 0) return;
+
+    void call<{ people: PickedPerson[] }>('personSearch', {
+      personIds: opened.personIds,
+    }).then((result) => {
+      if (!result.ok) return;
+
+      setSelectedPeople((current) =>
+        current.map((row) => {
+          const found = result.data.people.find((person) => person.id === row.id);
+
+          return found === undefined ? row : { ...row, name: found.name, phone: found.phone };
+        }),
+      );
+    });
+  }, [call, opened]);
+
+  /**
+   * The search itself, debounced. 300 ms is enough to collapse a typed word
+   * into one request without the picker feeling like it is waiting.
+   */
+  useEffect(() => {
+    const term = personQuery.trim();
+
+    if (term.length < 2) {
+      setPersonResults([]);
+      setPersonSearching(false);
+
+      return;
+    }
+
+    setPersonSearching(true);
+
+    const timer = setTimeout(() => {
+      void call<{ people: PickedPerson[] }>('personSearch', { query: term }).then(
+        (result) => {
+          setPersonSearching(false);
+          if (result.ok) setPersonResults(result.data.people);
+        },
+      );
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [call, personQuery]);
+
   // One binding row per placeholder, kept in step with the chosen template.
   useEffect(() => {
     const blank = (): Binding => ({
@@ -572,13 +652,10 @@ export const CampaignBuilder = ({
   const audienceDefinition = useMemo(() => {
     if (audienceKind === 'view') return viewId === '' ? null : { kind: 'view', viewId };
 
-    const ids = personIds
-      .split(/[\s,]+/)
-      .map((id) => id.trim())
-      .filter((id) => id.length > 0);
-
-    return ids.length === 0 ? null : { kind: 'manual', personIds: ids };
-  }, [audienceKind, personIds, viewId]);
+    return selectedPeople.length === 0
+      ? null
+      : { kind: 'manual', personIds: selectedPeople.map((person) => person.id) };
+  }, [audienceKind, selectedPeople, viewId]);
 
   const variableMapping = useMemo(
     () =>
@@ -970,14 +1047,131 @@ export const CampaignBuilder = ({
                 </select>
               </Field>
             ) : (
-              <Field label={t('campaign.personIds')} hint={t('campaign.personIdsHint')}>
-                <textarea
-                  rows={4}
-                  value={personIds}
-                  onChange={(event) => setPersonIds(event.target.value)}
-                  style={{ ...input, resize: 'vertical' }}
-                />
-              </Field>
+              <>
+                {/*
+                  A contact picker, not a UUID box (UX review, highest
+                  priority). The results render inline under the search field —
+                  portals render nothing here, so there is no dropdown to
+                  anchor — and every row carries the phone, because two "Maria
+                  Silva"s with only names would put this campaign in the wrong
+                  chat.
+                */}
+                <Field label={t('campaign.personSearch')} hint={t('campaign.personSearchHint')}>
+                  <input
+                    type="search"
+                    value={personQuery}
+                    placeholder={t('campaign.personSearchPlaceholder')}
+                    onChange={(event) => setPersonQuery(event.target.value)}
+                    style={input}
+                  />
+                </Field>
+
+                {personSearching ? (
+                  <span
+                    style={{ fontSize: theme.font.size.sm, color: theme.font.color.tertiary }}
+                  >
+                    {t('common.loading')}
+                  </span>
+                ) : personQuery.trim().length >= 2 && personResults.length === 0 ? (
+                  <span
+                    style={{ fontSize: theme.font.size.sm, color: theme.font.color.tertiary }}
+                  >
+                    {t('campaign.personNoResults', { query: personQuery.trim() })}
+                  </span>
+                ) : (
+                  personResults.map((person) => {
+                    const already = selectedPeople.some((row) => row.id === person.id);
+
+                    return (
+                      <button
+                        key={person.id}
+                        type="button"
+                        disabled={already}
+                        onClick={() =>
+                          setSelectedPeople((current) =>
+                            current.some((row) => row.id === person.id)
+                              ? current
+                              : [...current, person],
+                          )
+                        }
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: theme.spacing[1],
+                          minHeight: '32px',
+                          border: 'none',
+                          borderRadius: theme.border.radius.sm,
+                          background: 'transparent',
+                          color: already
+                            ? theme.font.color.light
+                            : theme.font.color.secondary,
+                          cursor: already ? 'default' : 'pointer',
+                          fontFamily: theme.font.family,
+                          fontSize: theme.font.size.sm,
+                          padding: `0 ${theme.spacing[1]}`,
+                          textAlign: 'left',
+                        }}
+                      >
+                        <Glyph name={already ? 'completed' : 'newCampaign'} />
+                        {pickedLabel(person)}
+                      </button>
+                    );
+                  })
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing[1] }}>
+                  <span
+                    style={{
+                      fontSize: theme.font.size.sm,
+                      fontWeight: theme.font.weight.medium,
+                      color: theme.font.color.light,
+                    }}
+                  >
+                    {t('campaign.personSelected', { count: selectedPeople.length })}
+                  </span>
+
+                  {selectedPeople.map((person) => (
+                    <span
+                      key={person.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: theme.spacing[1],
+                        fontSize: theme.font.size.sm,
+                        color: theme.font.color.secondary,
+                      }}
+                    >
+                      <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+                        {pickedLabel(person)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedPeople((current) =>
+                            current.filter((row) => row.id !== person.id),
+                          )
+                        }
+                        aria-label={`${t('campaign.personRemove')}: ${pickedLabel(person)}`}
+                        title={t('campaign.personRemove')}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          minWidth: '24px',
+                          minHeight: '24px',
+                          border: 'none',
+                          borderRadius: theme.border.radius.sm,
+                          background: 'transparent',
+                          color: theme.font.color.tertiary,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Glyph name="dismiss" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </>
             )}
           </>
         ) : null}
@@ -1105,10 +1299,7 @@ export const CampaignBuilder = ({
                   ? t('campaign.reviewAudienceView', {
                       name: views.find((view) => view.id === viewId)?.name ?? viewId,
                     })
-                  : t('campaign.reviewAudienceManual', {
-                      count: personIds.split(/[\s,]+/).filter((id) => id.trim().length > 0)
-                        .length,
-                    })
+                  : t('campaign.reviewAudienceManual', { count: selectedPeople.length })
               }
             />
             <SummaryRow
@@ -1165,7 +1356,19 @@ export const CampaignBuilder = ({
                 <Preview
                   rendered={sample[0].rendered}
                   note={t('campaign.previewSample', {
-                    name: sample[0].phone ?? sample[0].personId ?? '?',
+                    /*
+                      The name first: "with the values of Maria Silva" is what
+                      convinces a reader the bindings are right; a phone or a
+                      UUID convinces them of nothing (UX review, Review step).
+                    */
+                    name:
+                      [sample[0].name, displayPhone(sample[0].phone)]
+                        .filter(
+                          (part): part is string =>
+                            typeof part === 'string' && part.length > 0,
+                        )
+                        .join(' · ') ||
+                      (sample[0].personId ?? '?'),
                   })}
                   t={t}
                 />

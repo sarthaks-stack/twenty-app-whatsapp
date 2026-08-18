@@ -12,6 +12,7 @@ import { RestApiClient } from 'twenty-client-sdk/rest';
 
 export type CampaignAction =
   | 'audienceOptions'
+  | 'personSearch'
   | 'create'
   | 'update'
   | 'build'

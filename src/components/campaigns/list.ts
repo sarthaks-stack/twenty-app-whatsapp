@@ -69,6 +69,70 @@ export const needsAttention = (campaign: Record<string, unknown>): boolean => {
   return number(campaign.failedCount) > 0;
 };
 
+export type AudienceSummary =
+  | { kind: 'view' }
+  | { kind: 'manual'; count: number }
+  | null;
+
+/**
+ * What kind of audience a campaign targets, read off its stored definition.
+ *
+ * The list showed name, status and counters and nothing about *who* — two
+ * campaigns with the same name (one a leftover draft) were indistinguishable
+ * without opening both (UX review, campaign list).
+ */
+export const audienceSummary = (campaign: Record<string, unknown>): AudienceSummary => {
+  const definition = campaign.audienceDefinition as
+    | { kind?: unknown; personIds?: unknown }
+    | null
+    | undefined;
+
+  if (definition === null || typeof definition !== 'object') return null;
+  if (definition.kind === 'view') return { kind: 'view' };
+  if (definition.kind === 'manual') {
+    return {
+      kind: 'manual',
+      count: Array.isArray(definition.personIds) ? definition.personIds.length : 0,
+    };
+  }
+
+  return null;
+};
+
+/**
+ * A draft nobody finished: no audience built, possibly no audience chosen.
+ *
+ * The builder writes the record on every step (D-61), so abandoning it at step
+ * two leaves a real row — which is right, and which also means the list needs
+ * to say that is what the row is. The exploratory review left one of these
+ * with the same name as the completed campaign beside it.
+ */
+export const isAutosavedDraft = (campaign: Record<string, unknown>): boolean =>
+  String(campaign.status ?? '') === 'DRAFT' && number(campaign.recipientCount) === 0;
+
+/**
+ * A running campaign whose every recipient has already been attempted.
+ *
+ * The runner sends first and reconciles the record's status on a later tick,
+ * so a one-recipient campaign reads `RUNNING` for a noticeable while after the
+ * message was delivered. That gap is honest — the reconciliation genuinely has
+ * not happened — but "Running" over finished numbers reads as stuck. The label
+ * this feeds says what is actually going on: the sending is done and the
+ * status is catching up.
+ */
+export const isFinishing = (campaign: Record<string, unknown>): boolean => {
+  if (String(campaign.status ?? '') !== 'RUNNING') return false;
+
+  const total = number(campaign.recipientCount);
+
+  if (total === 0) return false;
+
+  const attempted =
+    number(campaign.sentCount) + number(campaign.failedCount) + number(campaign.skippedCount);
+
+  return attempted >= total;
+};
+
 export const matchesCampaignFilter = (
   campaign: Record<string, unknown>,
   filter: CampaignFilter,

@@ -109,12 +109,11 @@ export type Actions = {
     contextWamid?: string | null;
   }) => Promise<SendOutcome>;
   /**
-   * A file *already in Twenty*. There is no local-device path: the front-component
-   * sandbox exposes a file input's metadata and not its bytes, so a picker that
-   * let a rep choose a file would fail after the choice (spec §"Attachment and
-   * file-picker feasibility"). Voice recording is the exception — a
-   * `MediaRecorder` blob is produced in the page and can be uploaded — and it
-   * arrives here as an ordinary uploaded file.
+   * A file in Twenty storage, addressed by `fileUrl`/`filePath`/`fileId`. A
+   * device-picked file and a voice recording both arrive here *after* the
+   * composer stored them through `wa-upload-route` (the D-53 probe showed the
+   * sandbox can read a picked `File`'s bytes, contrary to the platform docs) —
+   * so by this point every attachment is an ordinary stored file.
    */
   sendMedia: (
     input: SendBase & {

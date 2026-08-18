@@ -68,6 +68,30 @@ const HEALTH_KEYS = [
   'failedOutbound',
 ] as const;
 
+/**
+ * Whether the server's own address is one Meta could never reach.
+ *
+ * On local development `TWENTY_API_URL` is the internal `http://localhost:3000`,
+ * so the callback card printed a URL that pasting into Meta silently breaks —
+ * the tunnel URL the operator actually needs was nowhere on the page. Exported
+ * for the test: the list of names that count as "local" is the whole judgement.
+ */
+export const isLocalCallback = (url: string | null): boolean => {
+  if (url === null) return false;
+
+  const host = url.replace(/^[a-z]+:\/\//i, '').split(/[/:]/)[0]?.toLowerCase() ?? '';
+
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '0.0.0.0' ||
+    host === '::1' ||
+    host === 'host.docker.internal' ||
+    host.endsWith('.local') ||
+    host.endsWith('.localhost')
+  );
+};
+
 const Copyable = ({
   label,
   value,
@@ -113,6 +137,15 @@ export const SettingsView = () => {
   const [tab, setTab] = useState('connection');
   const [data, setData] = useState<Diagnostics | null>(null);
   const [templates, setTemplates] = useState<Record<string, any>[]>([]);
+  /**
+   * Published-state filter for the template list. "Which templates can reps
+   * actually use" is the question this tab answers, and with a few dozen
+   * synced templates the publish state was one button-label per row — scanning
+   * for it was the only way to know.
+   */
+  const [templateFilter, setTemplateFilter] = useState<'all' | 'published' | 'unpublished'>(
+    'all',
+  );
   const [variables, setVariables] = useState<EditableVariable[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -612,6 +645,19 @@ export const SettingsView = () => {
           </Card>
 
           <Card title={t('settings.callback')}>
+            {/*
+              On local development these URLs answer only on this machine.
+              Saying so beside them is the difference between an operator
+              pasting a tunnel URL into Meta and pasting `localhost` — which
+              fails without an error anywhere they can see.
+            */}
+            {isLocalCallback(data?.webhook.callbackUrl ?? null) ? (
+              <Banner>
+                {t('settings.callbackLocalNote', {
+                  path: '/s/whatsapp/webhook',
+                })}
+              </Banner>
+            ) : null}
             <Copyable
               label={t('settings.callbackUrl')}
               value={data?.webhook.callbackUrl ?? null}
@@ -741,9 +787,54 @@ export const SettingsView = () => {
             <span style={{ fontSize: theme.font.size.md, color: theme.font.color.tertiary }}>
               {t('settings.noTemplates')}
             </span>
-          ) : null}
+          ) : (
+            <div style={{ display: 'flex', gap: theme.spacing[1], flexWrap: 'wrap' }}>
+              {(['all', 'published', 'unpublished'] as const).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setTemplateFilter(key)}
+                  aria-pressed={templateFilter === key}
+                  style={{
+                    minHeight: '28px',
+                    border: `1px solid ${
+                      templateFilter === key ? theme.color.blue : theme.border.color.light
+                    }`,
+                    borderRadius: theme.border.radius.pill,
+                    background:
+                      templateFilter === key
+                        ? theme.background.transparent.blue
+                        : 'transparent',
+                    color:
+                      templateFilter === key
+                        ? theme.font.color.primary
+                        : theme.font.color.secondary,
+                    cursor: 'pointer',
+                    fontFamily: theme.font.family,
+                    fontSize: theme.font.size.sm,
+                    fontWeight:
+                      templateFilter === key
+                        ? theme.font.weight.medium
+                        : theme.font.weight.regular,
+                    padding: `0 ${theme.spacing[2]}`,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {t(`settings.templateFilter.${key}`)}
+                </button>
+              ))}
+            </div>
+          )}
 
-          {templates.map((template) => (
+          {templates
+            .filter((template) =>
+              templateFilter === 'all'
+                ? true
+                : templateFilter === 'published'
+                  ? template.publishedToCrm === true
+                  : template.publishedToCrm !== true,
+            )
+            .map((template) => (
             <div
               key={String(template.id)}
               style={{
@@ -761,6 +852,21 @@ export const SettingsView = () => {
                 {String(template.language ?? '')} · {String(template.category ?? '')}
               </span>
               <StatusPill status={(template.status ?? null) as string | null} />
+              {/*
+                The published state as a tag, not only as the button's label.
+                "Publish" on an unpublished row and "Unpublish" on a published
+                one differ by two letters, and the state is the thing an
+                operator scans this list for.
+              */}
+              <Tag
+                color={template.publishedToCrm === true ? 'green' : 'gray'}
+                text={t(
+                  template.publishedToCrm === true
+                    ? 'settings.published'
+                    : 'settings.notPublished',
+                )}
+                weight="medium"
+              />
               {/*
                 Meta reports `UNKNOWN` for any template without enough traffic
                 to score, which is most of them on a new number. Printing the

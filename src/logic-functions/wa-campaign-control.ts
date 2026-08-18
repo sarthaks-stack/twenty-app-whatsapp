@@ -40,7 +40,12 @@ import {
 import { toE164, toWaId } from '../domain/phone/normalise';
 import { renderTemplate, type ResolvedParameters } from '../domain/template-render';
 import type { VariableSpec } from '../domain/template-spec';
-import { AudienceError, readAudiencePage, resolveViewFilter } from '../server/audience';
+import {
+  AudienceError,
+  personPhones,
+  readAudiencePage,
+  resolveViewFilter,
+} from '../server/audience';
 import { AUDIT_ACTION, audit } from '../server/audit';
 import { authErrorResponse, requireCaller, requireRole, type Caller } from '../server/auth';
 import { transitionCampaign } from '../server/campaign-state';
@@ -66,6 +71,11 @@ import {
 } from '../server/repositories/campaigns';
 import { findTemplateById, type WhatsappTemplateRecord } from '../server/repositories/templates';
 import { resolveObjectMetadataId } from '../server/metadata-ids';
+import {
+  findPeopleByIds,
+  searchPeople,
+  type PersonRecord,
+} from '../server/repositories/people';
 import { listPersonViews } from '../server/repositories/views';
 import { budgetForAccount, tierFor } from '../server/tier-ledger';
 import { upsertThread } from '../server/threads';
@@ -87,6 +97,7 @@ import { EMPTY_VARIABLE_SPEC } from './wa-outbound-sender';
 
 export type CampaignAction =
   | 'audienceOptions'
+  | 'personSearch'
   | 'create'
   | 'update'
   | 'build'
@@ -116,6 +127,10 @@ export type CampaignControlBody = {
   acknowledgeQuality?: boolean;
   /** `preview`: how many sample recipients to render. */
   sampleSize?: number;
+  /** `personSearch`: a name or phone fragment to match. */
+  query?: string;
+  /** `personSearch`: hydrate these exact ids instead of searching. */
+  personIds?: string[];
 };
 
 /** Five is what the builder shows (specs/07 §2 step 4); ten is the ceiling. */
@@ -252,10 +267,20 @@ const specOf = (template: WhatsappTemplateRecord | null): VariableSpec =>
 
 export type PreviewRow = {
   personId: string | null;
+  /** The contact's display name — what the Review step shows a human (D-61 review). */
+  name: string | null;
   phone: string | null;
   ok: boolean;
   missing: string[];
   rendered: ReturnType<typeof renderTemplate>;
+};
+
+const displayName = (person: PersonRecord | undefined | null): string | null => {
+  const name = [person?.name?.firstName, person?.name?.lastName]
+    .filter((part): part is string => typeof part === 'string' && part.length > 0)
+    .join(' ');
+
+  return name.length === 0 ? null : name;
 };
 
 /**
@@ -281,6 +306,18 @@ export const previewCampaign = async ({
   });
 
   if (snapshotted.length > 0) {
+    /**
+     * A snapshot row froze the phone and the parameters, not the name — so the
+     * names are read live for the handful of sampled rows. A renamed contact
+     * therefore previews under their current name, which is the right answer
+     * for a label (the *message* still renders from the frozen parameters).
+     */
+    const people = await findPeopleByIds(
+      snapshotted
+        .map((recipient) => recipient.personId)
+        .filter((id): id is string => typeof id === 'string'),
+    );
+
     return snapshotted.map((recipient) => {
       const parameters = asJson<ResolvedParameters>(recipient.resolvedParameters, {
         body: [],
@@ -289,6 +326,7 @@ export const previewCampaign = async ({
 
       return {
         personId: recipient.personId ?? null,
+        name: displayName(people.find((person) => person.id === recipient.personId)),
         phone: recipient.resolvedPhone ?? null,
         ok: true,
         missing: [],
@@ -324,6 +362,7 @@ export const previewCampaign = async ({
 
     return {
       personId: person.id,
+      name: displayName(person),
       phone: toE164(
         `${person.phones?.primaryPhoneCallingCode ?? ''}${person.phones?.primaryPhoneNumber ?? ''}`,
         defaultCallingCode,
@@ -536,6 +575,42 @@ export const handler = async (
         },
         { status: 200 },
       );
+    }
+
+    /**
+     * `personSearch` also names no campaign — it feeds the audience step's
+     * contact picker, before and independently of any record. Two forms: a
+     * `query` searches by name or phone fragment; `personIds` hydrates a saved
+     * manual audience back into names when a draft reopens.
+     *
+     * The phone rides along on every row, and not as decoration: two contacts
+     * called "Maria Silva" are indistinguishable in a picker that shows only
+     * names, and a campaign sent to the wrong one is exactly the mistake the
+     * picker replaced the UUID box to prevent.
+     */
+    if (action === 'personSearch') {
+      requireRole(caller, 'agent');
+
+      const ids = Array.isArray(body.personIds)
+        ? body.personIds.filter((id): id is string => typeof id === 'string')
+        : [];
+
+      const people =
+        ids.length > 0
+          ? await findPeopleByIds(ids.slice(0, 200))
+          : await searchPeople(body.query ?? '');
+
+      const row = (person: PersonRecord) => ({
+        id: person.id,
+        name:
+          [person.name?.firstName, person.name?.lastName]
+            .filter((part): part is string => typeof part === 'string' && part.length > 0)
+            .join(' ') || null,
+        phone: personPhones(person).primary,
+        city: person.city ?? null,
+      });
+
+      return new Response({ people: people.map(row) }, { status: 200 });
     }
 
     const loaded =

@@ -742,6 +742,18 @@ describe('scope=inbox', () => {
     expect(body.threads.map((thread: Envelope) => thread.id)).toEqual(['nobody']);
   });
 
+  /** The explicit unread filter the UX review asked for. */
+  it('unread means conversations with something still to read', async () => {
+    seedAccount();
+    seedThread({ id: 'fresh', unreadCount: 2 });
+    seedThread({ id: 'seen', unreadCount: 0 });
+    seedThread({ id: 'finished', unreadCount: 3, status: 'CLOSED' });
+
+    const { body } = await call({ scope: 'inbox', filter: 'unread' });
+
+    expect(body.threads.map((thread: Envelope) => thread.id)).toEqual(['fresh']);
+  });
+
   it('hides closed conversations from every filter but one', async () => {
     seedFour();
 

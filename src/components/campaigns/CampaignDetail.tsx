@@ -8,11 +8,11 @@ import {
   isArchivedCampaign,
 } from '../../domain/campaign/transitions';
 import type { Lang, Translate } from '../common/copy';
-import { relativeTime } from '../common/format';
+import { money, relativeTime } from '../common/format';
 import { Glyph } from '../common/icons';
 import { ActionButton, Banner, Card, StatusPill } from '../common/ui';
 import { useCampaignActions } from './campaign-actions';
-import { deliveryFunnel, RUNNING_STATUSES } from './list';
+import { deliveryFunnel, isFinishing, RUNNING_STATUSES } from './list';
 
 /**
  * One campaign: what it will cost, who it will miss, and how to stop it
@@ -227,6 +227,11 @@ export const CampaignDetail = ({
             }}
           >
             <Glyph name="running" />
+            {/*
+              Every recipient attempted, status not yet reconciled: `Running`
+              over finished numbers read as stuck, and the reviewer flagged it.
+            */}
+            {isFinishing(campaign) ? `${t('campaign.finishing')} · ` : null}
             {t('campaign.updated', {
               when: relativeTime(
                 (campaign.updatedAt ?? campaign.createdAt ?? null) as string | null,
@@ -270,7 +275,7 @@ export const CampaignDetail = ({
                 t('campaign.launch'),
                 t('campaign.launchSubtitle', {
                   count: preflight.recipients.total,
-                  cost: preflight.cost.estimatedUsd.toFixed(2),
+                  cost: money(preflight.cost.estimatedUsd),
                 }),
                 'launch',
               )
@@ -411,7 +416,7 @@ export const CampaignDetail = ({
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <span style={label}>{t('campaign.counter.actualCost')}</span>
             <span style={{ fontSize: theme.font.size.lg, color: theme.font.color.primary }}>
-              ${Number(campaign.actualCostUsd ?? 0).toFixed(2)}
+              {money(Number(campaign.actualCostUsd ?? 0))}
             </span>
           </div>
         </div>
@@ -526,8 +531,8 @@ export const CampaignDetail = ({
           <Card title={t('campaign.preflightCost')}>
             <div style={{ fontSize: theme.font.size.sm }}>
               {t('campaign.perMessage', {
-                total: preflight.cost.estimatedUsd.toFixed(2),
-                rate: preflight.cost.ratePerMessageUsd,
+                total: money(preflight.cost.estimatedUsd),
+                rate: money(preflight.cost.ratePerMessageUsd),
               })}
             </div>
             <div style={label}>{preflight.cost.note}</div>

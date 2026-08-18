@@ -67,7 +67,8 @@ export const describeHealth = (
         reserve: num(detail.reserve) ?? 0,
       });
 
-    case 'failedWebhookEvents': {
+    case 'failedWebhookEvents':
+    case 'failedOutbound': {
       const count = num(detail.count) ?? 0;
 
       return count === 0

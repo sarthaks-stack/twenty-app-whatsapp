@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { TABLES, translateWith } from './copy';
-import { clockTime, countdown, dayKey, daySeparator, fileSize } from './format';
+import { clockTime, countdown, dayKey, daySeparator, fileSize, money } from './format';
 
 const t = translateWith('pt');
 
@@ -67,6 +67,25 @@ describe('fileSize', () => {
   it('says nothing rather than "NaN" for a size nobody recorded', () => {
     expect(fileSize(null)).toBe('');
     expect(fileSize(undefined)).toBe('');
+  });
+});
+
+describe('money', () => {
+  it('keeps two decimals for ordinary amounts', () => {
+    expect(money(12.5)).toBe('$12.50');
+    expect(money(0.02)).toBe('$0.02');
+    expect(money(0)).toBe('$0.00');
+  });
+
+  /** A $0.004 utility send rendered as `$0.00` read as "free" (UX review). */
+  it('never rounds a real cost down to nothing', () => {
+    expect(money(0.004)).toBe('$0.004');
+    expect(money(0.0009)).toBe('$0.0009');
+  });
+
+  it('answers $0.00 rather than NaN for an amount nobody recorded', () => {
+    expect(money(null)).toBe('$0.00');
+    expect(money(undefined)).toBe('$0.00');
   });
 });
 

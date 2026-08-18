@@ -29,6 +29,8 @@ export const INBOX_FILTER = {
   MINE: 'mine',
   UNASSIGNED: 'unassigned',
   ALL: 'all',
+  /** Conversations with unanswered inbound messages — the review asked for an explicit one. */
+  UNREAD: 'unread',
   CAMPAIGN_REPLIES: 'campaign_replies',
   WINDOW_EXPIRING: 'window_expiring',
   CLOSED: 'closed',

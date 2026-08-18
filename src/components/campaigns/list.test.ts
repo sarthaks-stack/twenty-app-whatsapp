@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   deliveryFunnel,
+  isFinishing,
   matchesCampaignFilter,
   matchesCampaignSearch,
   needsAttention,
@@ -172,6 +173,50 @@ describe('visibleCampaigns', () => {
     ];
 
     expect(visibleCampaigns(rows, 'archived', 'setem').map((row) => row.id)).toEqual(['b']);
+  });
+});
+
+/**
+ * The reviewer watched a one-recipient campaign sit on `Running` after the
+ * message was delivered — the reconciliation is asynchronous, and the screen
+ * had no word for the gap. `isFinishing` is that word's condition.
+ */
+describe('isFinishing', () => {
+  it('is true once every recipient has been attempted and the status lags', () => {
+    expect(
+      isFinishing(campaign({ status: 'RUNNING', recipientCount: 1, sentCount: 1 })),
+    ).toBe(true);
+  });
+
+  it('counts failures and skips as attempts', () => {
+    expect(
+      isFinishing(
+        campaign({
+          status: 'RUNNING',
+          recipientCount: 3,
+          sentCount: 1,
+          failedCount: 1,
+          skippedCount: 1,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('stays false while anything is still to send', () => {
+    expect(
+      isFinishing(campaign({ status: 'RUNNING', recipientCount: 2, sentCount: 1 })),
+    ).toBe(false);
+  });
+
+  /** A campaign with no audience is not "finishing"; it never started. */
+  it('stays false with no recipients, and for every non-running status', () => {
+    expect(isFinishing(campaign({ status: 'RUNNING' }))).toBe(false);
+    expect(
+      isFinishing(campaign({ status: 'COMPLETED', recipientCount: 1, sentCount: 1 })),
+    ).toBe(false);
+    expect(
+      isFinishing(campaign({ status: 'TIER_WAITING', recipientCount: 1, sentCount: 1 })),
+    ).toBe(false);
   });
 });
 

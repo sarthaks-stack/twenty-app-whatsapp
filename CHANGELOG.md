@@ -2,6 +2,49 @@
 
 All notable changes to this application are documented in this file.
 
+## 0.1.1 — the callback URL nobody could use
+
+Four defects reported from a live 2.31.6 install ([#1]), all confirmed against the code.
+
+### Fixed — the Meta callback URL was a 404 (P0)
+
+- **The health panel, the post-install log and the README all published
+  `<base>/s/whatsapp/webhook`, and no route has ever answered there.** `/s/` is the namespace for
+  `httpRouteTriggerSettings` paths; the D-1 fallback is a *reverse-proxy alias* at
+  `/whatsapp/webhook`, at the domain root. An off-by-`/s/` turned the one string an operator cannot
+  work out for themselves into a dead end, and the webhook could not be configured in Meta at all —
+  the app could send, but never receive.
+- **Nothing said the alias had to exist.** Meta takes one URL for both the `GET` handshake and the
+  `POST` deliveries; Twenty answers those on two different paths, and the proxy rule is what makes
+  one URL out of two. The callback card now leads with that sentence, the other two URLs are
+  labelled `(GET)` and `(POST)`, and README step 4 carries the Caddy and Nginx snippets, the
+  don't-rewrite-the-body warning, and a `curl` probe for whether your Twenty routes `GET` to server
+  routes at all — on 2.31.6 it does not, so the alias is required rather than optional.
+
+### Fixed — three smaller ones from the same session
+
+- **`defaultCountryCallingCode` accepted a whole phone number.** The field is free text sitting
+  under `phone_number_id` and `WABA id`, and the value went to the record unvalidated — where it
+  becomes the prefix put in front of every nationally-formatted contact, so the send fails at Meta
+  weeks and several layers away from the typo. Now validated (1–3 digits, normalised to a leading
+  `+`), with the counter-example in the hint and the variable description. A new `updateAccount`
+  admin action and an editable field on the connected-number card make it fixable without reaching
+  for Twenty's GraphQL API, which was previously the only repair.
+- **`UNKNOWN` quality was reported as a downgrade.** A brand-new number that has never sent
+  anything was greeted with *"Meta lowered the rating. Cut marketing sends and review the
+  templates."* `UNKNOWN` means "no data yet"; the row is green for it now, as the `webhook` row
+  already was for a number that has never received an event, and the sentence beside it says so
+  rather than inventing a grade. `YELLOW` and `RED` still fail.
+- **Confirmation texts could drift from the keyword lists silently.** An admin localising
+  `WA_OPT_OUT_KEYWORDS` and dropping `SAIR` left `WA_OPT_IN_CONFIRMATION_PT` still telling customers
+  to reply `SAIR` — a consent path that fails with no error anywhere. A `consentWording` health row
+  now names the dead word, considering only known consent words so a brand or an acronym in the
+  wording cannot redden it. Confirmations may also use `{optOutKeyword}` / `{optInKeyword}`, which
+  resolve from the live lists and cannot drift; they are not the default, because the lists carry
+  no language tag and `{optInKeyword}` would put `START` inside the Portuguese sentence.
+
+[#1]: https://github.com/pixelinfinito/twenty-app-whatsapp/issues/1
+
 ## Unreleased — the attachment panel loses a dead tab and gains a picker
 
 - **"From this device" is gone.** The sandbox bridge hands a picked file's metadata over without

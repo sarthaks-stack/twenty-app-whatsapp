@@ -51,10 +51,18 @@ export const describeHealth = (
           });
     }
 
-    case 'quality':
-      return t('settings.health.detail.quality', {
-        rating: str(detail.qualityRating) ?? '—',
-      });
+    /**
+     * `UNKNOWN` and a missing rating are the same state — Meta has not graded
+     * the number yet — and "Rated UNKNOWN" reads as a grade. The row is green
+     * for both, so the sentence beside it has to agree.
+     */
+    case 'quality': {
+      const rating = str(detail.qualityRating);
+
+      return rating === null || rating === 'UNKNOWN'
+        ? t('settings.health.detail.qualityUngraded')
+        : t('settings.health.detail.quality', { rating });
+    }
 
     /**
      * `available`, not `limit`, leads: it is what decides whether tonight's
@@ -85,6 +93,22 @@ export const describeHealth = (
             count,
             minutes: num(detail.olderThanMinutes) ?? 0,
           });
+    }
+
+    /**
+     * The words themselves, not the count. "2 problems" sends the operator
+     * hunting through four variables; "No longer recognised: SAIR" is the
+     * whole investigation, and the word is the thing they have to paste back
+     * into the list.
+     */
+    case 'consentWording': {
+      const words = Array.isArray(detail.words)
+        ? detail.words.filter((word): word is string => typeof word === 'string')
+        : [];
+
+      return words.length === 0
+        ? t('settings.health.detail.consentWordingOk')
+        : t('settings.health.detail.consentWording', { words: words.join(', ') });
     }
 
     /**

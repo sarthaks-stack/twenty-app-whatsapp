@@ -66,15 +66,59 @@ Open **Settings → Apps → WhatsApp → Settings → Variables** and set:
 
 ### 4. Configure the webhook in Meta
 
-In the Meta app's WhatsApp product, open **Webhooks** and set the callback to:
+Meta takes **one** callback URL and uses it for two things: a `GET` carrying `hub.challenge` to verify the endpoint, and `POST` to deliver events. Twenty answers those on two different paths:
+
+| | Path | Answered by |
+| --- | --- | --- |
+| `GET` verification | `<base>/s/whatsapp/verify` | `wa-webhook-verify` |
+| `POST` events | `<base>/webhooks/server/bb76f114-7843-4a09-af64-9ceca78479cd` | `wa-webhook-resolver` |
+
+So add a one-line alias to the reverse proxy in front of Twenty that method-splits a single public path. **Caddy:**
+
+```caddy
+example.com {
+    @wa_verify { path /whatsapp/webhook
+                 method GET }
+    @wa_events { path /whatsapp/webhook
+                 method POST }
+
+    handle @wa_verify {
+        rewrite * /s/whatsapp/verify?{query}
+        reverse_proxy twenty:3000
+    }
+    handle @wa_events {
+        rewrite * /webhooks/server/bb76f114-7843-4a09-af64-9ceca78479cd
+        reverse_proxy twenty:3000
+    }
+    handle { reverse_proxy twenty:3000 }
+}
+```
+
+**Nginx:**
+
+```nginx
+location = /whatsapp/webhook {
+    if ($request_method = GET)  { rewrite ^ /s/whatsapp/verify?$args last; }
+    if ($request_method = POST) { rewrite ^ /webhooks/server/bb76f114-7843-4a09-af64-9ceca78479cd last; }
+    return 405;
+}
+```
+
+Do **not** let the proxy buffer, re-encode or otherwise rewrite the request body: the HMAC is computed over the exact bytes Meta sent, and any normalisation invalidates every signature.
+
+Then open **Webhooks** in the Meta app's WhatsApp product and set the callback to:
 
 ```
-<your Twenty base URL>/s/whatsapp/webhook
+<your Twenty base URL>/whatsapp/webhook
 ```
+
+> If your Twenty version routes `GET` to server routes, you can skip the proxy and paste `<base>/webhooks/server/bb76f114-7843-4a09-af64-9ceca78479cd` directly — the resolver answers the handshake there too. Check first with
+> `curl "<base>/webhooks/server/bb76f114-7843-4a09-af64-9ceca78479cd?hub.mode=subscribe&hub.challenge=probe&hub.verify_token=<your token>"`.
+> If that returns `probe`, you are fine. If it returns HTML, your version does not, and you need the alias above.
 
 Use the same verify token, and subscribe these fields: `messages`, `message_template_status_update`, `message_template_quality_update`, `message_template_components_update`, `account_update`, `phone_number_quality_update`, `business_capability_update`.
 
-The app's **health panel** shows the exact callback URL and required fields for your workspace, and verifies each piece of the setup once a number is connected.
+The app's **health panel** shows all three URLs and the required fields for your workspace, and verifies each piece of the setup once a number is connected.
 
 ### 5. Connect your number
 
@@ -84,6 +128,7 @@ In the app settings, connect your WABA and phone number, run the health check, a
 
 Seeing `unverified webhook`, `signature failed`, or no events?
 
+- Confirm the proxy alias from step 4 exists. A callback URL that verifies but delivers nothing is the classic symptom of a `GET` rule without its `POST` counterpart — Meta's "Send to my server" test then hits a 404 you will only see in the proxy log.
 - Re-copy the callback URL and verify token into Meta from the latest save.
 - Confirm the endpoint is reachable over HTTPS and not behind an IP/VPC block.
 - Confirm all webhook fields above are subscribed.

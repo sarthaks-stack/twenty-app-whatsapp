@@ -1058,6 +1058,7 @@ const COPY = {
   'settings.tested': { pt: 'Ligação testada.', en: 'Connection tested.' },
   'settings.syncTemplates': { pt: 'Sincronizar modelos', en: 'Sync templates' },
   'settings.syncRequested': { pt: 'Sincronização pedida.', en: 'Sync requested.' },
+  'settings.saved': { pt: 'Guardado.', en: 'Saved.' },
   'settings.disconnect': { pt: 'Desligar', en: 'Disconnect' },
   'settings.dangerZone': { pt: 'Zona de perigo', en: 'Danger zone' },
   'settings.disconnectWarning': {
@@ -1076,10 +1077,40 @@ const COPY = {
     en: 'Meta → WhatsApp → API Setup.',
   },
   'settings.callingCode': { pt: 'Indicativo por omissão', en: 'Default calling code' },
+  /**
+   * The field sits under `phone_number_id` and `WABA id`, both of which take
+   * long numbers, and operators pasted the whole display number into it. The
+   * counter-example is doing the work here — "1-3 digits" alone did not stop
+   * anyone.
+   */
+  'settings.callingCodeHint': {
+    pt: 'Só o indicativo do país (1 a 3 dígitos), p. ex. +244 — não o número completo.',
+    en: 'The country code only (1–3 digits), e.g. +244 — not the full phone number.',
+  },
+  'settings.callingCodeInherited': {
+    pt: 'herda WA_DEFAULT_COUNTRY_CALLING_CODE',
+    en: 'inherits WA_DEFAULT_COUNTRY_CALLING_CODE',
+  },
   'settings.isTestAccount': { pt: 'É um número de teste', en: 'This is a test number' },
 
   'settings.callback': { pt: 'Callback da Meta', en: 'Meta callback' },
-  'settings.callbackUrl': { pt: 'URL do callback', en: 'Callback URL' },
+  'settings.callbackUrl': {
+    pt: 'URL do callback (alias no proxy)',
+    en: 'Callback URL (proxy alias)',
+  },
+  /**
+   * The sentence that was missing, and the whole of issue #1.
+   *
+   * The Meta dashboard takes **one** URL and uses it for both the GET
+   * handshake and the POST deliveries; Twenty answers those on two different
+   * paths. The alias is the only thing that makes one URL out of two, and an
+   * operator who does not know it has to exist will paste it, watch
+   * verification fail, and have nothing to go on.
+   */
+  'settings.callbackProxyNote': {
+    pt: 'A Meta usa um só URL para o GET de verificação e para os POST de eventos; o Twenty responde-lhes em caminhos diferentes. O URL do callback só funciona depois de criar esta regra no seu proxy: GET → URL de verificação, POST → forma directa. Sem essa regra, aponte a Meta directamente à forma directa (se a sua instância encaminhar GET para rotas de servidor) e verifique pelo URL de verificação.',
+    en: 'Meta uses a single URL for both the GET verification and the POST events; Twenty answers those on different paths. The callback URL only works once you add this rule to your proxy: GET → verification URL, POST → direct form. Without that rule, point Meta straight at the direct form (if your instance routes GET to server routes) and verify at the verification URL.',
+  },
   /**
    * Shown only when the server's own address is local. The path is
    * interpolated rather than written out so the sentence cannot drift from the
@@ -1089,8 +1120,8 @@ const COPY = {
     pt: 'Estes endereços são locais desta máquina — a Meta não os consegue alcançar. No Meta, use o URL público do seu túnel (ngrok, cloudflared, …) com o mesmo caminho {path}.',
     en: 'These addresses are local to this machine — Meta cannot reach them. In Meta, use your public tunnel URL (ngrok, cloudflared, …) with the same {path} path.',
   },
-  'settings.directUrl': { pt: 'Forma directa', en: 'Direct form' },
-  'settings.verifyUrl': { pt: 'URL de verificação', en: 'Verification URL' },
+  'settings.directUrl': { pt: 'Forma directa (POST)', en: 'Direct form (POST)' },
+  'settings.verifyUrl': { pt: 'URL de verificação (GET)', en: 'Verification URL (GET)' },
   'settings.verifyToken': { pt: 'Token de verificação', en: 'Verify token' },
   'settings.verifyTokenSet': {
     pt: 'configurado na variável de servidor META_VERIFY_TOKEN',
@@ -1157,6 +1188,11 @@ const COPY = {
     pt: 'Classificação {rating}',
     en: 'Rated {rating}',
   },
+  /** `UNKNOWN` means "no data yet". Saying "Rated UNKNOWN" invents a grade. */
+  'settings.health.detail.qualityUngraded': {
+    pt: 'A Meta ainda não classificou este número.',
+    en: 'Meta has not rated this number yet.',
+  },
   'settings.health.detail.tier': {
     pt: '{available} envios disponíveis hoje de {limit}, com {reserve} reservados para conversas 1:1',
     en: '{available} sends available today of {limit}, with {reserve} held back for 1:1 conversations',
@@ -1176,6 +1212,22 @@ const COPY = {
   'settings.health.failedOutbound.remedy': {
     pt: 'Mensagens que não chegaram ao destinatário. O motivo de cada uma está no separador Diagnóstico.',
     en: 'Messages that never reached the recipient. Each one’s reason is in the Diagnostics tab.',
+  },
+  'settings.health.consentWording': {
+    pt: 'Textos de consentimento',
+    en: 'Consent wording',
+  },
+  'settings.health.consentWording.remedy': {
+    pt: 'A confirmação manda o contacto responder uma palavra que já não está na lista de palavras-chave. Reponha a palavra na lista, ou use {optOutKeyword} / {optInKeyword} no texto para que acompanhe sempre a lista.',
+    en: 'The confirmation tells the contact to reply a word that is no longer in the keyword list. Put the word back, or use {optOutKeyword} / {optInKeyword} in the text so it always follows the list.',
+  },
+  'settings.health.detail.consentWordingOk': {
+    pt: 'As confirmações e as listas de palavras-chave concordam.',
+    en: 'The confirmations and the keyword lists agree.',
+  },
+  'settings.health.detail.consentWording': {
+    pt: 'Já não é reconhecida: {words}',
+    en: 'No longer recognised: {words}',
   },
   'settings.needsAdminRole': {
     pt: 'Precisa da função de administrador do WhatsApp para alterar seja o que for nesta página. Pode ler; as acções estão desactivadas.',

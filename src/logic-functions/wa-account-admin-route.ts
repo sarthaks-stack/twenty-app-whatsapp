@@ -18,11 +18,12 @@ import { MetaApiError } from '../providers/whatsapp/errors';
 import { AUDIT_ACTION, audit } from '../server/audit';
 import { authErrorResponse, requireCaller, requireRole } from '../server/auth';
 import { listVariables, setVariable } from '../server/variables';
-import { config } from '../server/config';
+import { config, parseCountryCallingCode } from '../server/config';
 import { describeError, logger } from '../server/logger';
 import { provisionNotificationWorkflow } from '../server/notification-workflow';
 import { budgetForAccount, tierFor } from '../server/tier-ledger';
 import { currentWorkspaceId } from '../server/workspace';
+import { consentWordingDrift } from './wa-consent-keyword';
 import { syncAccount } from './wa-template-sync';
 import { nodesOf, query } from '../server/repositories/base';
 import {
@@ -55,6 +56,7 @@ import { STUCK_MESSAGE_MS } from './wa-health-check';
 
 export type AccountAction =
   | 'connect'
+  | 'updateAccount'
   | 'test'
   | 'disconnect'
   | 'list'
@@ -79,6 +81,35 @@ export type AccountRouteBody = {
   /** `setVariable` only. */
   key?: string;
   value?: string;
+};
+
+/**
+ * The submitted calling code, normalised — or the refusal, as one value.
+ *
+ * `undefined` means the caller did not send the field at all, which must stay
+ * distinguishable from "sent it empty": the first leaves the stored value
+ * alone, the second clears it back to the `WA_DEFAULT_COUNTRY_CALLING_CODE`
+ * fallback. Collapsing the two would make the field impossible to unset.
+ */
+const readCallingCode = (
+  body: AccountRouteBody,
+): { ok: true; value: string | null | undefined } | { ok: false; error: string } => {
+  const raw = body.defaultCountryCallingCode;
+
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (raw === null || raw.trim() === '') return { ok: true, value: null };
+
+  const parsed = parseCountryCallingCode(raw);
+
+  if (parsed === null) {
+    return {
+      ok: false,
+      error:
+        'defaultCountryCallingCode must be a country calling code of 1-3 digits, such as +244 — not a full phone number',
+    };
+  }
+
+  return { ok: true, value: parsed };
 };
 
 const QUALITY_FROM_META: Record<string, Quality> = {
@@ -290,8 +321,23 @@ const diagnostics = async () => {
         },
       },
       {
+        /**
+         * `UNKNOWN` is "Meta has no data yet", not "Meta lowered the rating" —
+         * and it is what every number reports until it has sent enough traffic
+         * to be graded. Failing the row on it greeted every new connection
+         * with "cut marketing sends and review the templates", which is advice
+         * about a problem that does not exist, on a number that has never sent
+         * anything. Same reasoning as the `webhook` row above: silence from a
+         * new number is not a fault.
+         *
+         * YELLOW and RED still fail. Those are gradings.
+         */
         key: 'quality',
-        ok: account.qualityRating === QUALITY.GREEN,
+        ok:
+          account.qualityRating === QUALITY.GREEN ||
+          account.qualityRating === QUALITY.UNKNOWN ||
+          account.qualityRating === null ||
+          account.qualityRating === undefined,
         detail: { accountId: account.id, qualityRating: account.qualityRating ?? null },
       },
       {
@@ -329,15 +375,56 @@ const diagnostics = async () => {
       ok: failedOutbound.length === 0,
       detail: { count: failedOutbound.length },
     },
+    /**
+     * Workspace-wide, not per-account: the wording and the keyword lists are
+     * application variables, so the drift is the same for every number. It
+     * belongs in the health panel because nothing else can catch it — a
+     * confirmation naming a dead keyword sends perfectly, and the failure is
+     * on the customer's side, in a reply the app then does not act on.
+     */
+    (() => {
+      const drift = consentWordingDrift(
+        {
+          optOutConfirmation:
+            config.confirmationLocale() === 'en'
+              ? config.optOutConfirmationEn()
+              : config.optOutConfirmationPt(),
+          optInConfirmation:
+            config.confirmationLocale() === 'en'
+              ? config.optInConfirmationEn()
+              : config.optInConfirmationPt(),
+        },
+        { optOut: config.optOutKeywords(), optIn: config.optInKeywords() },
+      );
+
+      return {
+        key: 'consentWording',
+        ok: drift.length === 0,
+        detail: {
+          count: drift.length,
+          words: drift.map((entry) => entry.word),
+          expectedIn: drift.map((entry) => entry.expectedIn),
+        },
+      };
+    })(),
   );
 
   return {
     accounts,
     rows,
     webhook: {
-      /** The alias to paste into Meta. */
-      callbackUrl: base === '' ? null : `${base}/s/whatsapp/webhook`,
-      /** The direct form, for when the alias is not configured. */
+      /**
+       * The reverse-proxy alias to paste into Meta — and it only answers once
+       * that alias exists (D-1, specs/11 § Reverse proxy configuration).
+       *
+       * It is deliberately **not** under `/s/`: that prefix is the app's own
+       * HTTP-route namespace, and no logic function declares
+       * `/whatsapp/webhook` there. Publishing `/s/whatsapp/webhook` — as this
+       * did until the alias path was corrected — hands the operator a 404 and
+       * a webhook that can never be configured.
+       */
+      callbackUrl: base === '' ? null : `${base}/whatsapp/webhook`,
+      /** The POST half, which the alias forwards to. Live without any proxy. */
       directUrl: base === '' ? null : `${base}/webhooks/server/${LF_WEBHOOK_RESOLVER}`,
       verifyUrl: base === '' ? null : `${base}/s/whatsapp/verify`,
       verifyTokenConfigured: (process.env.META_VERIFY_TOKEN ?? '').length > 0,
@@ -529,6 +616,18 @@ export const handler = async (
         }
 
         /**
+         * Refuse at the door rather than store and regret. A bad calling code
+         * does nothing visible at connect time — it surfaces weeks later as
+         * sends failing for contacts stored without a country code, which is
+         * about as far from the cause as a symptom gets.
+         */
+        const callingCode = readCallingCode(body);
+
+        if (callingCode.ok === false) {
+          return new Response({ error: callingCode.error }, { status: 400 });
+        }
+
+        /**
          * Deliberately *not* `event.userWorkspaceId`, which is the membership
          * id. The resolver dispatches on the value stored here, so a membership
          * id would route every delivery to nowhere — and both are UUIDs, so
@@ -585,9 +684,9 @@ export const handler = async (
                       phoneNumberId,
                       wabaId,
                       status: ACCOUNT_STATUS.PENDING,
-                      ...(body.defaultCountryCallingCode === undefined
+                      ...(callingCode.value === undefined
                         ? {}
-                        : { defaultCountryCallingCode: body.defaultCountryCallingCode }),
+                        : { defaultCountryCallingCode: callingCode.value }),
                       ...(body.isTestAccount === undefined
                         ? {}
                         : { isTestAccount: body.isTestAccount }),
@@ -698,6 +797,61 @@ export const handler = async (
           },
           { status: probe.ok ? 200 : 502 },
         );
+      }
+
+      /**
+       * The settings-only fields of a number already connected.
+       *
+       * It exists because `defaultCountryCallingCode` was writable exactly
+       * once, in the connect form, and wrong values had to be repaired through
+       * Twenty's GraphQL API — an escape hatch no operator should need for a
+       * field the app itself put in front of them. Deliberately narrow: the
+       * routing identity (`phoneNumberId`, `wabaId`) is *not* editable here,
+       * because changing it has to move the SERVER-scoped claims with it, and
+       * that is what `connect` is for.
+       */
+      case 'updateAccount': {
+        const account =
+          body.accountId === undefined ? null : await findAccountById(body.accountId);
+
+        if (account === null) {
+          return new Response({ error: 'Unknown account' }, { status: 404 });
+        }
+
+        const callingCode = readCallingCode(body);
+
+        if (callingCode.ok === false) {
+          return new Response({ error: callingCode.error }, { status: 400 });
+        }
+
+        const patch = {
+          ...(body.name === undefined ? {} : { name: body.name }),
+          ...(callingCode.value === undefined
+            ? {}
+            : { defaultCountryCallingCode: callingCode.value }),
+          ...(body.isTestAccount === undefined ? {} : { isTestAccount: body.isTestAccount }),
+          ...(body.contactAutoCreationEnabled === undefined
+            ? {}
+            : { contactAutoCreationEnabled: body.contactAutoCreationEnabled }),
+          ...(body.sendThrottlePerSecond === undefined
+            ? {}
+            : { sendThrottlePerSecond: body.sendThrottlePerSecond }),
+        };
+
+        if (Object.keys(patch).length === 0) {
+          return new Response({ error: 'Nothing to update' }, { status: 400 });
+        }
+
+        await patchAccount(account.id, patch);
+
+        audit({
+          action: AUDIT_ACTION.ACCOUNT_SETTINGS,
+          actorId: caller.workspaceMemberId,
+          subject: { accountId: account.id },
+          details: { fields: Object.keys(patch) },
+        });
+
+        return new Response({ accountId: account.id, updated: Object.keys(patch) }, { status: 200 });
       }
 
       case 'test': {

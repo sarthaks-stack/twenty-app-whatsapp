@@ -96,4 +96,30 @@ describe('describeHealth', () => {
       'Classificação GREEN',
     );
   });
+
+  /**
+   * `UNKNOWN` is Meta saying "no data yet", which is what every number reports
+   * until it has sent enough to be graded. "Rated UNKNOWN" reads as a grade,
+   * and beside a row that is now green it reads as a contradiction.
+   */
+  it.each([{ qualityRating: 'UNKNOWN' }, { qualityRating: null }, {}])(
+    'says a number is ungraded rather than inventing a rating for %p',
+    (detail) => {
+      expect(describeHealth('quality', detail, t, 'en', now)).toBe(
+        'Meta has not rated this number yet.',
+      );
+    },
+  );
+
+  it('names the drifted consent keyword, not a count', () => {
+    expect(
+      describeHealth('consentWording', { count: 1, words: ['SAIR'] }, t, 'en', now),
+    ).toBe('No longer recognised: SAIR');
+  });
+
+  it('says so plainly when the consent wording agrees with the lists', () => {
+    expect(describeHealth('consentWording', { count: 0, words: [] }, t, 'en', now)).toBe(
+      'The confirmations and the keyword lists agree.',
+    );
+  });
 });

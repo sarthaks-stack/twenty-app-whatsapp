@@ -66,6 +66,7 @@ const HEALTH_KEYS = [
   'failedWebhookEvents',
   'stuckOutbound',
   'failedOutbound',
+  'consentWording',
 ] as const;
 
 /**
@@ -186,6 +187,17 @@ export const SettingsView = () => {
     isTestAccount: false,
     subscribeApp: true,
   });
+
+  /**
+   * In-flight edits to a connected number's calling code, keyed by account id.
+   *
+   * Kept out of `form`, which belongs to the *connect* card: an operator fixing
+   * a wrong code on a live number is not half-way through connecting a new one,
+   * and sharing the state would let one card's Save read the other's input. A
+   * missing key means "not being edited", so the input falls back to the stored
+   * value and a reload after Save is visible rather than overwritten.
+   */
+  const [callingCodeEdits, setCallingCodeEdits] = useState<Record<string, string>>({});
 
   const account = data?.accounts[0] ?? null;
   const now = new Date();
@@ -480,6 +492,60 @@ export const SettingsView = () => {
                 copyLabel={t('common.copy')}
               />
 
+              {/*
+                Editable here, and not only in the connect form. The value is
+                the prefix put in front of every nationally-formatted contact
+                number, so a wrong one breaks sends to exactly the contacts it
+                was meant to rescue — and until this field existed the only
+                repair was Twenty's GraphQL API.
+              */}
+              <Field label={t('settings.callingCode')} hint={t('settings.callingCodeHint')}>
+                <div style={{ display: 'flex', gap: theme.spacing[2], alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    value={
+                      callingCodeEdits[connected.id] ??
+                      (connected.defaultCountryCallingCode ?? '')
+                    }
+                    placeholder={t('settings.callingCodeInherited')}
+                    onChange={(event) =>
+                      setCallingCodeEdits({
+                        ...callingCodeEdits,
+                        [connected.id]: event.target.value,
+                      })
+                    }
+                    style={input}
+                  />
+                  <AdminAction
+                    label={t('common.save')}
+                    busy={busy}
+                    disabled={callingCodeEdits[connected.id] === undefined}
+                    onClick={async () => {
+                      const saved = await post('/s/whatsapp/account', {
+                        action: 'updateAccount',
+                        accountId: connected.id,
+                        defaultCountryCallingCode: callingCodeEdits[connected.id],
+                      });
+
+                      if (saved === null) return;
+
+                      // Dropping the key hands the input back to the stored
+                      // value, so the operator sees what the server kept —
+                      // `+244` from `244` — rather than what they typed.
+                      setCallingCodeEdits(
+                        Object.fromEntries(
+                          Object.entries(callingCodeEdits).filter(
+                            ([id]) => id !== connected.id,
+                          ),
+                        ),
+                      );
+                      setNotice(t('settings.saved'));
+                      void load();
+                    }}
+                  />
+                </div>
+              </Field>
+
               <div style={{ display: 'flex', gap: theme.spacing[2], flexWrap: 'wrap' }}>
                 <AdminAction
                   label={t('settings.test')}
@@ -602,7 +668,7 @@ export const SettingsView = () => {
                 style={input}
               />
             </Field>
-            <Field label={t('settings.callingCode')}>
+            <Field label={t('settings.callingCode')} hint={t('settings.callingCodeHint')}>
               <input
                 type="text"
                 value={form.defaultCountryCallingCode}
@@ -646,6 +712,13 @@ export const SettingsView = () => {
 
           <Card title={t('settings.callback')}>
             {/*
+              First, because it is the step that decides whether any of the
+              three URLs below is the right one to paste. Presenting them
+              without it is what made the callback URL look self-serving when
+              it is really half of a proxy rule the operator has to write.
+            */}
+            <Banner>{t('settings.callbackProxyNote')}</Banner>
+            {/*
               On local development these URLs answer only on this machine.
               Saying so beside them is the difference between an operator
               pasting a tunnel URL into Meta and pasting `localhost` — which
@@ -654,7 +727,7 @@ export const SettingsView = () => {
             {isLocalCallback(data?.webhook.callbackUrl ?? null) ? (
               <Banner>
                 {t('settings.callbackLocalNote', {
-                  path: '/s/whatsapp/webhook',
+                  path: '/whatsapp/webhook',
                 })}
               </Banner>
             ) : null}

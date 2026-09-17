@@ -42,9 +42,9 @@ export default defineApplication({
    */
   logo: 'public/logo-whatsapp.svg',
   aboutDescription:
-    'A production-ready Meta WhatsApp Cloud API app for Twenty. It ships with an inbox, template synchronization, consent-aware messaging, and campaign tooling with strong webhook observability.',
-  author: 'Pixel Infinito',
-  websiteUrl: 'https://pixel.ao',
+    'Internal WhatsApp integration for OneAssure CRM',
+  author: 'OneAssure',
+  websiteUrl: 'https://oneassure.in',
   /**
    * 8:5 ratio (3200×2000), rendered from live product screenshots. Like the
    * logo, the filenames carry a version suffix as the cache bust — bump the
@@ -68,7 +68,7 @@ export default defineApplication({
     META_APP_SECRET: {
       description:
         'Meta App Secret. Used to verify the X-Hub-Signature-256 on every webhook, over the raw request body. Stored encrypted; never exposed in API responses.',
-      isSecret: true,
+      isSecret: true, 
       isRequired: true,
       type: FieldType.TEXT,
     },

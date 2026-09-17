@@ -1,17 +1,23 @@
 {
-  "name": "@pixelinfinito/twenty-app-whatsapp",
+  "name": "@oneassure/twenty-app-whatsapp",
   "version": "0.1.1",
-  "description": "WhatsApp for Twenty CRM — shared inbox, templates, consent-aware campaigns and delivery health on the Meta WhatsApp Cloud API.",
+  "description": "OneAssure internal WhatsApp app for Twenty CRM — shared inbox, templates, consent-aware campaigns and delivery health on the Meta WhatsApp Cloud API.",
   "license": "MIT",
   "author": {
-    "name": "Marcos Lisboa",
-    "email": "vendas@pixel.ao",
-    "url": "https://pixel.ao"
+    "name": "Sarthak Sharma",
+    "email": "sarthak.s@oneassure.in",
+    "url": "https://oneassure.in"
   },
-  "homepage": "https://pixel.ao",
+  "contributors": [
+    {
+      "name": "Marcos Lisboa (Pixel Infinito, original author)",
+      "url": "https://pixel.ao"
+    }
+  ],
+  "homepage": "https://oneassure.in",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/pixelinfinito/twenty-app-whatsapp.git"
+    "url": "git+https://github.com/sarthaks-stack/twenty-app-whatsapp.git"
   },
   "engines": {
     "node": "^24.5.0",

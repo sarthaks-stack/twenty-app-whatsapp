@@ -21,7 +21,7 @@ never an in-place edit.
 
 | Constant | Value |
 |---|---|
-| `APPLICATION_UNIVERSAL_IDENTIFIER` | `c2c78378-ef25-465b-8aec-811dd72294e2` |
+| `APPLICATION_UNIVERSAL_IDENTIFIER` | `1aa35425-0e5e-4e92-8390-4d30368b58af` |
 | `DEFAULT_ROLE_UNIVERSAL_IDENTIFIER` | `dc3b8f39-06c0-4b60-b53d-0dabc4fe6046` |
 
 The scaffolded `MAIN_PAGE_*` identifiers are removed together with `src/front-components/main-page.tsx`,

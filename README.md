@@ -2,7 +2,7 @@
 
 Two-way WhatsApp messaging inside [Twenty](https://twenty.com): a shared team inbox, conversations on every Person record, approved templates, consent tracking and marketing campaigns — powered by the official **Meta WhatsApp Cloud API**.
 
-Developed by **Marcos Lisboa** at [Pixel Infinito](https://pixel.ao) · published as [`@pixelinfinito/twenty-app-whatsapp`](https://www.npmjs.com/package/@pixelinfinito/twenty-app-whatsapp).
+Maintained by **Sarthak Sharma** at [OneAssure](https://oneassure.in). Forked from [`@pixelinfinito/twenty-app-whatsapp`](https://github.com/pixelinfinito/twenty-app-whatsapp), originally developed by **Marcos Lisboa** at [Pixel Infinito](https://pixel.ao).
 
 ![WhatsApp for Twenty](public/cover-whatsapp-v1.png)
 
@@ -160,4 +160,7 @@ See `SETUP.md` for the full local guide, `specs/` for design and architecture no
 
 ## License
 
-MIT © [Pixel Infinito](https://pixel.ao)
+MIT. See [LICENSE](LICENSE).
+
+- Original work © [Pixel Infinito](https://pixel.ao) — forked from [pixelinfinito/twenty-app-whatsapp](https://github.com/pixelinfinito/twenty-app-whatsapp)
+- Modifications © [OneAssure](https://oneassure.in)

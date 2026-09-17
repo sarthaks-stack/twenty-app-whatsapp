@@ -11,11 +11,11 @@
  * via `getFieldUniversalIdentifier` (specs/00 D-11).
  */
 
-export const APP_DISPLAY_NAME = 'WhatsApp';
+export const APP_DISPLAY_NAME = 'OneAssure WhatsApp';
 export const APP_DESCRIPTION =
-  'Two-way WhatsApp messaging inside your CRM: a shared inbox, conversations on the Person record, approved templates, consent tracking and marketing campaigns — powered by the Meta WhatsApp Cloud API.';
+  'This is internal app for Oneassure crm — powered by the Meta WhatsApp Cloud API.';
 
-export const APPLICATION_UNIVERSAL_IDENTIFIER = 'c2c78378-ef25-465b-8aec-811dd72294e2';
+export const APPLICATION_UNIVERSAL_IDENTIFIER = '1aa35425-0e5e-4e92-8390-4d30368b58af';
 export const DEFAULT_ROLE_UNIVERSAL_IDENTIFIER = 'dc3b8f39-06c0-4b60-b53d-0dabc4fe6046';
 
 // ─── Objects ────────────────────────────────────────────────────────────────

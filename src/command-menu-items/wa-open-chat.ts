@@ -30,7 +30,7 @@ import { CMI_OPEN_CHAT, FC_SIDE_PANEL_CHAT } from '../constants/universal-identi
  */
 export default defineCommandMenuItem({
   universalIdentifier: CMI_OPEN_CHAT,
-  label: 'Abrir conversa de WhatsApp',
+  label: 'Open WhatsApp chat',
   shortLabel: 'WhatsApp',
   availabilityType: 'RECORD_SELECTION',
   availabilityObjectUniversalIdentifier: STANDARD_OBJECT.person.universalIdentifier,
